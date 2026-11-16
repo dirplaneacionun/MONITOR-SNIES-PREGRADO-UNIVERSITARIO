@@ -1,0 +1,81 @@
+2026-11-15 19:06:33 [INFO] Iniciando pipeline (1 archivo(s)): Programas.xlsx
+2026-11-15 19:06:33 [DEBUG] Pesos: Capa 1 0.50 | Capa 2 0.25 | Capa 3 0.25 | UMBRAL_MEDIA 0.35
+2026-11-15 19:06:33 [DEBUG] Catalogo de divisiones: 9 divisiones + OTRO
+2026-11-15 19:06:33 [INFO] Validacion de referencias: OK
+2026-11-15 19:06:34 [INFO] Validacion de diccionarios: OK
+2026-11-15 19:06:34 [INFO] Diccionario: huella ded1479dcaaa (4,958 overrides, 6,526 reglas NBC, 56 NBC, 105 CINE, 241 keywords)
+2026-11-15 19:06:34 [DEBUG] ProgramasUN.xlsx cargado: 357 programas
+2026-11-15 19:06:34 [DEBUG] Diccionario SNIES->Division: 357 entradas
+2026-11-15 19:06:34 [DEBUG] Nombre map inicial: 259 nombres desde ProgramasUN.xlsx + 4914 desde NOMBRE_DIVISION_OVERRIDE
+2026-11-15 19:06:34 [INFO] Retroalimentacion: 32,186 entradas previas
+2026-11-15 19:06:34 [DEBUG] SNIES map total tras retroalimentacion: 32,186 entradas
+
+────────────────────────────────────────────────────────────
+2026-11-15 19:06:34 [INFO] [1/1] Procesando: Programas.xlsx
+2026-11-15 19:06:35 [INFO]   Cargando Excel...
+2026-11-15 19:06:36 [INFO]   Cargado: 5,515 filas
+2026-11-15 19:06:36 [DEBUG]   Capa 2 para programas sin SNIES conocido: +524 nombres verificados
+2026-11-15 19:06:36 [DEBUG]   Pre-normalizando columnas...
+2026-11-15 19:06:36 [DEBUG]   Pre-normalizacion completada en 0.1s
+2026-11-15 19:06:36 [DEBUG]   5,515 registros -> 5,515 combinaciones unicas (100.0%). Clasificando...
+2026-11-15 19:06:37 [DEBUG]   Clasificacion completada: 5,515 registros en 1.2s
+2026-11-15 19:06:37 [DEBUG]   Refinamiento: sin registros BAJA, omitiendo
+2026-11-15 19:06:37 [INFO]   Override por nombre: 2,740 registros coinciden (317 de 4,958 nombres; 35 por nombre con caracteres danados, truncado o con otro orden de palabras equivalente a un override); 0 cambian de division
+2026-11-15 19:06:37 [DEBUG]   Division fija por SNIES (ProgramasUN.xlsx): 29 registros (29 SNIES); 0 cambian de division
+2026-11-15 19:06:37 [INFO]   Resumen: 5,515 registros
+2026-11-15 19:06:37 [INFO]   Origen de la division:
+2026-11-15 19:06:37 [INFO]     Fija por ProgramasUN                                                29  (  0.5%)
+2026-11-15 19:06:37 [INFO]     Fija por Programas.xlsx (mismo SNIES)                                0  (  0.0%)
+2026-11-15 19:06:37 [INFO]     Override por nombre                                              2,732  ( 49.5%)
+2026-11-15 19:06:37 [INFO]     Votacion con SNIES conocido (retroalimentacion)                  2,742  ( 49.7%)  [ALTA 2,742, MEDIA 0, BAJA 0]
+2026-11-15 19:06:37 [INFO]     Votacion sin SNIES conocido (nombre + NBC/CINE)                     12  (  0.2%)  [ALTA 0, MEDIA 12, BAJA 0]
+2026-11-15 19:06:37 [INFO]     Nombre registrado en la retroalimentacion (division fija)            0  (  0.0%)
+2026-11-15 19:06:37 [INFO]     Nombre nuevo de un SNIES registrado (votacion sin Capa 1)            0  (  0.0%)
+2026-11-15 19:06:37 [INFO]   Requieren revision                                                     0  (  0.0%)
+
+2026-11-15 19:06:37 [INFO] Distribucion por division:
+2026-11-15 19:06:37 [INFO]   INGENIERIAS                                                1,421 ( 25.8%)
+2026-11-15 19:06:37 [INFO]   ESCUELA DE NEGOCIOS                                        1,322 ( 24.0%)
+2026-11-15 19:06:37 [INFO]   HUMANIDADES, ARTES Y CIENCIAS SOCIALES                       809 ( 14.7%)
+2026-11-15 19:06:37 [INFO]   CIENCIAS DE LA SALUD                                         487 (  8.8%)
+2026-11-15 19:06:37 [INFO]   DERECHO, CIENCIA POLITICA Y RELACIONES INTERNACIONALES       353 (  6.4%)
+2026-11-15 19:06:37 [INFO]   CIENCIAS BASICAS                                             342 (  6.2%)
+2026-11-15 19:06:37 [INFO]   INSTITUTO DE EDUCACION                                       272 (  4.9%)
+2026-11-15 19:06:37 [INFO]   ESCUELA DE ARQUITECTURA, URBANISMO Y DISEÑO                  266 (  4.8%)
+2026-11-15 19:06:37 [INFO]   INSTITUTO DE IDIOMAS                                         124 (  2.2%)
+2026-11-15 19:06:37 [INFO]   OTRO                                                         119 (  2.2%)
+2026-11-15 19:06:40 [INFO]   La fuente cambio (5,524 filas en la salida anterior, 5,515 ahora): se compara por (SNIES, nombre)
+2026-11-15 19:06:40 [INFO]   Sin cambios de division en los 5,515 pares (SNIES, nombre) comunes con la salida anterior; 0 pares nuevos, 9 que ya no estan
+2026-11-15 19:06:40 [INFO]   Guardando Excel (5,515 filas, puede tardar)...
+2026-11-15 19:06:47 [INFO]   Integridad verificada: valores y tipos originales intactos (2.8s)
+
+2026-11-15 19:06:47 [INFO] Guardado con formato: C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\UNINORTE-MAP-PROGRAMS\Salidas\Programas.xlsx
+2026-11-15 19:06:47 [INFO]   Revision: 0 programas (0 registros) -> C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\UNINORTE-MAP-PROGRAMS\Revision\Revision Programas.xlsx
+2026-11-15 19:06:47 [DEBUG] Procesado en 13.0s
+2026-11-15 19:06:47 [DEBUG]   SNIES map enriquecido con Programas.xlsx: +12 nuevos (12 solo por votacion), 0 actualizados por su clasificacion final (total: 32,198)
+2026-11-15 19:06:48 [DEBUG]   Nombre map enriquecido: +525 nombres (total: 5698 nombres)
+2026-11-15 19:06:48 [INFO] Division por SNIES verificada en 5,515 SNIES: un mismo nombre tiene una sola division en todos los archivos
+2026-11-15 19:06:48 [INFO] Nombres equivalentes por orden de palabras verificados: 39 grupos con una sola division
+2026-11-15 19:06:49 [INFO] Retroalimentacion guardada: 32,186 entradas totales (+0 nuevas)
+2026-11-15 19:06:49 [INFO]   Procedencia: HISTORICO 19,049, OVERRIDE 12,780, PROGRAMAS_UN 357
+2026-11-15 19:06:49 [INFO]   12 programa(s) de Programas.xlsx clasificados solo por votacion (sin SNIES verificado) no se guardan: se reevaluan en cada ejecucion hasta que un override los fije
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Archivo                                           Registros      UN  PROGR.  OVERR.   SNIES   NUEVO  REGIS.  N.NOMB  REVISAR  Tiempo
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Programas.xlsx                                        5,515    0.5%    0.0%   49.5%   49.7%    0.2%    0.0%    0.0%        0   13.0s
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Origen de la division (% de registros; prioridad: UN > PROGR. > OVERR. > votacion, salvo en los parquets los nombres antiguos del programa (con override propio, REGIS. o N.NOMB), que conservan su division):
+    UN      fija por ProgramasUN
+    PROGR.  fija por la clasificacion final de Programas.xlsx para el mismo SNIES (solo parquets)
+    OVERR.  override por nombre (NOMBRE_DIVISION_OVERRIDE; exacto, con caracteres danados o truncado equivalente)
+    SNIES   votacion con SNIES conocido (retroalimentacion.json)
+    NUEVO   votacion sin SNIES conocido: nombre parecido + NBC/CINE (programas nuevos)
+    REGIS.  nombre ya registrado en la retroalimentacion: conserva su division (solo parquets)
+    N.NOMB  nombre nuevo de un SNIES registrado (programa renombrado): votacion sin la Capa 1
+  REVISAR = registros con REQUIERE_REVISION=VERDADERO
+2026-11-15 19:06:49 [INFO] Listas de revision (1 archivo(s), 0 programas por revisar) en: C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\UNINORTE-MAP-PROGRAMS\Revision
+
+2026-11-15 19:06:49 [INFO] Archivos de salida en: C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\UNINORTE-MAP-PROGRAMS\Salidas
+2026-11-15 19:06:49 [INFO] Log de la ejecucion: C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\UNINORTE-MAP-PROGRAMS\Logs\pipeline_20261115_190633.log
+2026-11-15 19:06:49 [INFO] COMPLETADO en 15.9s: 1/1 archivos OK; sin cambios de division respecto a las salidas anteriores

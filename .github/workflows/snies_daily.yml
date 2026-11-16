@@ -1,0 +1,102 @@
+name: SNIES Monitor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-snies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Información de ejecución
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "Runner:"
+          hostname
+
+          echo
+          echo "Sistema:"
+          uname -a
+
+          echo
+          echo "Hora UTC:"
+          date -u
+
+          echo
+          echo "Hora Colombia:"
+          TZ=America/Bogota date
+
+          echo
+          echo "Repositorio:"
+          echo "$GITHUB_REPOSITORY"
+
+          echo "========================================"
+
+      # Instalación oficial de Google Chrome
+      - name: Configurar Google Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Verificar Chrome
+        run: |
+          google-chrome --version
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ejecutar pipeline SNIES
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          DESTINATARIOS: ${{ secrets.DESTINATARIOS }}
+        run: |
+          set -euo pipefail
+
+          python Scripts/run_snies.py
+
+      # El pipeline actualiza los datos del Dashboard (docs/data) antes de enviar el correo.
+      # Se publica aunque el flujo falle, para conservar el log consolidado de la ejecución.
+      - name: Publicar cambios
+        if: always()
+        run: |
+          set -euo pipefail
+
+          git config user.name "snies-bot"
+          git config user.email "snies-bot@uninorte.edu.co"
+
+          git add -A Novedades "Programas Activos" Historico Logs Scripts docs
+
+          if git diff --cached --quiet; then
+            echo "No hay cambios para publicar."
+            exit 0
+          fi
+
+          git commit -m "Actualización SNIES y dashboard: $(date +'%Y-%m-%d')"
+
+          # Cambia "main" si tu rama principal tiene otro nombre.
+          git push origin HEAD:main

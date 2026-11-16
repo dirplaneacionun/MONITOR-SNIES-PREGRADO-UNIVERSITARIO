@@ -1,0 +1,30 @@
+2026-11-13 17:10:47  INFO     Inicio — modo: dry-run · --strict: no · --force: no · --file: todos · --verbose: no · Python 3.14.6 · pandas 3.0.3
+2026-11-13 17:10:47  INFO     Log de esta ejecución: C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\SNIES-ETL-PROGRAMS\Logs\etl_2026-11-13_17-10-47.log
+2026-11-13 17:10:47  INFO     Archivo(s) a procesar: ['Programas.xlsx']
+2026-11-13 17:10:47  INFO     ── Procesando 'Programas.xlsx' ──
+2026-11-13 17:10:48  INFO     Hoja seleccionada: 'Programas'. Hojas descartadas: ['Cobertura convenios', 'Cobertura'].
+2026-11-13 17:10:54  INFO     32,156 fila(s) × 39 columna(s) leídas de la hoja 'Programas'.
+2026-11-13 17:10:54  INFO     1 celda(s) con formato de fecha y serial menor que 1 releída(s) con openpyxl.
+2026-11-13 17:10:54  INFO     Filas no válidas eliminadas del final: 2.
+2026-11-13 17:10:54  INFO     Headers renombrados: 20.
+2026-11-13 17:10:54  WARNING  FECHA_DE_RESOLUCION: 1 valor(es) fuera del rango plausible (01/01/1950 a 13/11/2026), se conservan sin cambios: 29/12/1899 (fila 585, SNIES 91335).
+2026-11-13 17:10:54  WARNING  FECHA_EJECUTORIA: 1 valor(es) fuera del rango plausible (01/01/1950 a 13/11/2026), se conservan sin cambios: 27/06/2029 (fila 12,566, SNIES 1451).
+2026-11-13 17:10:54  WARNING  VIGENCIA_AÑOS: 1 valor(es) fuera del rango plausible (0 a 50), se conservan sin cambios: 1603 (fila 20,643, SNIES 52110).
+2026-11-13 17:10:54  WARNING  FECHA_DE_REGISTRO_EN_SNIES: 3 valor(es) fuera del rango plausible (01/01/1950 a 13/11/2026), se conservan sin cambios: 30/11/2026 (fila 20,286, SNIES 90767), 27/06/2029 (fila 12,566, SNIES 1451), 30/11/2029 (fila 31,215, SNIES 90758).
+2026-11-13 17:10:54  INFO     Tipos validados: 13 de 13 columna(s). Convertidas desde texto: CODIGO_INSTITUCION_PADRE (entero), CODIGO_INSTITUCION (entero), REGISTRO_UNICO (entero), VIGENCIA_AÑOS (número), VIGENCIA_TRANSITORIA (fecha).
+2026-11-13 17:10:54  INFO     Columnas excluidas de normalización de valores: 14.
+2026-11-13 17:10:57  INFO     Valores normalizados: 600,683 celda(s) modificada(s) en 23 de 25 columna(s).
+2026-11-13 17:10:57  INFO     Dry-run: 'Programas.xlsx' y 'Revision Programas.xlsx' no se escribirán.
+2026-11-13 17:10:57  INFO     Resumen de 'Programas.xlsx':
+    Filas exportadas       32,154
+    Columnas exportadas    39
+    Headers renombrados    20
+    Celdas normalizadas    600,683
+    Tipos validados        13 de 13
+    Tipos convertidos      CODIGO_INSTITUCION_PADRE (entero), CODIGO_INSTITUCION (entero), REGISTRO_UNICO (entero), VIGENCIA_AÑOS (número), VIGENCIA_TRANSITORIA (fecha)
+    Alertas de validación  4
+    Archivo de salida      C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\SNIES-ETL-PROGRAMS\Salidas\Programas.xlsx (no escrito — dry-run)
+    Archivo de revisión    C:\Users\David\Desktop\SNIES-MONITOR-UNDERGRAD\Scripts\SNIES-ETL-PROGRAMS\Revision\Revision Programas.xlsx (no escrito — dry-run)
+    Tiempo transcurrido    9.90s
+2026-11-13 17:10:57  WARNING  Resultado: DRY-RUN COMPLETADO — sin archivos escritos · 4 alerta(s).
+2026-11-13 17:10:57  INFO     Fin de la ejecución — código de salida: 0.

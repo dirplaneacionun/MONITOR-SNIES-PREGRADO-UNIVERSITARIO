@@ -1,0 +1,32 @@
+# Dependencias de SNIES-MONITOR-UNDERGRAD
+# Incluye el orquestador (Scripts/run_snies.py), el generador del tablero, el correo y las
+# herramientas internas Scripts/SNIES-ETL-PROGRAMS y Scripts/UNINORTE-MAP-PROGRAMS.
+# Validado con Python 3.14 (pandas 3 exige Python 3.11+).
+# Instalación: pip install -r requirements.txt
+#
+# Versiones fijadas (==): UNINORTE-MAP-PROGRAMS verifica la integridad de sus salidas con
+# estas versiones exactas (parchea funciones internas de openpyxl). Antes de actualizar una
+# librería, ejecute el flujo completo y confirme que no hay errores ni cambios inesperados.
+
+# Datos y archivos
+pandas==3.0.3
+numpy==2.5.1
+pyarrow==25.0.1
+openpyxl==3.1.5
+python-calamine==0.8.2
+xlsxwriter==3.2.9
+
+# Consola y progreso (herramientas ETL y de clasificación)
+rich==15.0.0
+tqdm==4.70.0
+
+# Descarga automatizada del portal SNIES
+selenium==4.52.0
+webdriver-manager==4.1.2
+
+# Dependencias transitivas (fijadas para que la instalación sea reproducible)
+python-dateutil==2.9.0.post0  # pandas
+six==1.17.0                   # python-dateutil
+tzdata==2026.2                # pandas
+et_xmlfile==2.0.0             # openpyxl
+colorama==0.4.6 ; sys_platform == "win32"  # tqdm

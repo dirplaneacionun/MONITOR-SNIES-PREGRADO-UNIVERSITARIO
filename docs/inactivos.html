@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Programas Inactivos · Monitor SNIES</title>
+  <meta name="description" content="Programas académicos inactivos — Monitor SNIES de programas universitarios de pregrado">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
+  <link rel="stylesheet" href="assets/estilos.css">
+</head>
+<body data-tipo="inactivos">
+  <header class="encabezado">
+    <div class="encabezado-int">
+      <div class="enc-fila">
+        <div>
+          <h1 class="enc-titulo">PROGRAMAS ACADÉMICOS INACTIVOS</h1>
+        </div>
+        <div class="enc-total"><div class="et">TOTAL</div><div class="ev" id="total">–</div><div class="es" id="total-s"></div></div>
+      </div>
+      <nav class="nav" aria-label="Apartados">
+        <a href="index.html">INICIO</a>
+        <a href="nuevos.html">NUEVOS</a>
+        <a href="modificados.html">MODIFICADOS</a>
+        <a href="inactivos.html" class="activa">INACTIVOS</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="contenido">
+    <div id="filtros"></div>
+
+    <div class="fila">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS INACTIVOS</h2>
+        <p class="tarjeta-sub">Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES</p>
+        <div class="grafica " id="g-evolucion"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">EVOLUCIÓN DE LA DIVISIÓN DE UNINORTE</h2>
+        <p class="tarjeta-sub">Registros por división UniNorte en cada ejecución</p>
+        <div class="grafica alta" id="g-division"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">EVOLUCIÓN DE LA MODALIDAD</h2>
+        <p class="tarjeta-sub">Registros por modalidad agrupada en cada ejecución</p>
+        <div class="grafica " id="g-modalidad"></div>
+      </section>
+    </div>
+    <div class="fila tercio">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">SECTOR</h2>
+        <p class="tarjeta-sub">Registros del periodo filtrado</p>
+        <div class="grafica " id="g-sector"></div>
+      </section>
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">EVOLUCIÓN DEL SECTOR</h2>
+        <p class="tarjeta-sub">Registros por sector en cada ejecución</p>
+        <div class="grafica " id="g-sector-evol"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">EVOLUCIÓN DEL CAMPO DE CINE DETALLADO</h2>
+        <p class="tarjeta-sub">Por defecto, los campos con mayor presencia en los programas activos</p><div id="cine-ctrl"></div>
+        <div class="grafica " id="g-cine"></div>
+      </section>
+    </div>
+    <div class="fila dos">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">TOP 10 DEPARTAMENTOS</h2>
+        <p class="tarjeta-sub">Registros del periodo filtrado</p>
+        <div class="grafica " id="g-deptos"></div>
+      </section>
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">TOP 10 INSTITUCIONES</h2>
+        <p class="tarjeta-sub">Registros del periodo filtrado</p>
+        <div class="grafica " id="g-instituciones"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">NÚMERO DE PERIODOS DE DURACIÓN</h2>
+        <p class="tarjeta-sub">Registros del periodo filtrado</p>
+        <div class="grafica baja" id="g-periodos"></div>
+      </section>
+    </div>
+    <div class="fila dos">
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">ANTIGÜEDAD AL INACTIVARSE</h2>
+        <p class="tarjeta-sub">Años transcurridos entre el registro en SNIES y la inactivación</p>
+        <div class="grafica " id="g-antiguedad"></div>
+      </section>
+      <section class="tarjeta">
+        <h2 class="tarjeta-tit">BALANCE NETO POR DIVISIÓN</h2>
+        <p class="tarjeta-sub">Programas nuevos menos inactivos en el periodo filtrado, por división UniNorte</p>
+        <div class="grafica " id="g-balance"></div>
+      </section>
+    </div>
+
+    <section class="tarjeta">
+      <h2 class="tarjeta-tit">REGISTROS</h2>
+      <p class="tarjeta-sub">Todas las columnas · Ordenado desde la fecha más reciente · REACTIVADO POSTERIORMENTE indica la fecha en que el programa volvió a estar activo</p>
+      <div id="tabla"></div>
+    </section>
+
+    <p class="pie-pagina">Fuente: SNIES — Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/es.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="data/comun.js"></script>
+  <script src="data/inactivos.js"></script>
+  <script src="data/nuevos.js"></script>
+  <script src="assets/app.js"></script>
+  <script src="assets/detalle.js"></script>
+</body>
+</html>
