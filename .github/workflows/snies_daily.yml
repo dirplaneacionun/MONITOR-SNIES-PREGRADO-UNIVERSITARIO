@@ -2,6 +2,11 @@ name: SNIES Monitor
 
 on:
   workflow_dispatch:
+    inputs:
+      enviar_correo:
+        description: "Enviar el correo a los destinatarios (desactivar solo para pruebas)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -77,7 +82,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          python Scripts/run_snies.py
+          # Disparado por cron-job.org (sin parámetros) el correo se envía siempre.
+          ARGS=""
+          if [ "${{ inputs.enviar_correo }}" = "false" ]; then
+            ARGS="--sin-correo"
+          fi
+          python Scripts/run_snies.py $ARGS
 
       # El pipeline actualiza los datos del Dashboard (docs/data) antes de enviar el correo.
       # Se publica aunque el flujo falle, para conservar el log consolidado de la ejecución.
