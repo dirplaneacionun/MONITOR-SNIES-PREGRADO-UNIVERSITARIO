@@ -1,0 +1,33 @@
+2026-11-16 03:28:17  INFO     Inicio — modo: normal · --strict: no · --force: no · --file: todos · --verbose: no · Python 3.14.10 · pandas 3.0.3
+2026-11-16 03:28:17  INFO     Log de esta ejecución: /home/runner/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/SNIES-ETL-PROGRAMS/Logs/etl_2026-11-16_03-28-17.log
+2026-11-16 03:28:17  INFO     Archivo(s) a procesar: ['Programas.xlsx']
+2026-11-16 03:28:17  INFO     ── Procesando 'Programas.xlsx' ──
+2026-11-16 03:28:17  INFO     Hoja seleccionada: 'Programas'. Hojas descartadas: ['Cobertura convenios', 'Cobertura'].
+2026-11-16 03:28:18  INFO     5,526 fila(s) × 39 columna(s) leídas de la hoja 'Programas'.
+2026-11-16 03:28:18  INFO     Filas no válidas eliminadas del final: 2.
+2026-11-16 03:28:18  INFO     Headers renombrados: 20.
+2026-11-16 03:28:18  WARNING  FECHA_EJECUTORIA: 1 valor(es) fuera del rango plausible (01/01/1950 a 16/11/2026), se conservan sin cambios: 27/06/2029 (fila 2,142, SNIES 1451).
+2026-11-16 03:28:18  WARNING  FECHA_DE_REGISTRO_EN_SNIES: 1 valor(es) fuera del rango plausible (01/01/1950 a 16/11/2026), se conservan sin cambios: 27/06/2029 (fila 2,142, SNIES 1451).
+2026-11-16 03:28:18  INFO     Tipos validados: 13 de 13 columna(s). Convertidas desde texto: CODIGO_INSTITUCION_PADRE (entero), CODIGO_INSTITUCION (entero), REGISTRO_UNICO (entero), VIGENCIA_AÑOS (número), VIGENCIA_TRANSITORIA (fecha).
+2026-11-16 03:28:18  INFO     Columnas excluidas de normalización de valores: 14.
+2026-11-16 03:28:18  INFO     Valores normalizados: 104,075 celda(s) modificada(s) en 23 de 25 columna(s).
+2026-11-16 03:28:18  INFO     Reemplazando 'Programas.xlsx'...
+2026-11-16 03:28:21  INFO     Verificación OK — 39 columna(s) y 5,524 fila(s) confirmadas en 'Programas.xlsx'.
+2026-11-16 03:28:21  INFO     Escrito: /home/runner/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/SNIES-ETL-PROGRAMS/Salidas/Programas.xlsx
+2026-11-16 03:28:21  INFO     Reemplazando 'Revision Programas.xlsx'...
+2026-11-16 03:28:21  INFO     Verificación OK — 42 columna(s) y 0 fila(s) confirmadas en 'Revision Programas.xlsx'.
+2026-11-16 03:28:21  INFO     Escrito: /home/runner/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/SNIES-ETL-PROGRAMS/Revision/Revision Programas.xlsx
+2026-11-16 03:28:21  INFO     Resumen de 'Programas.xlsx':
+    Filas exportadas       5,524
+    Columnas exportadas    39
+    Headers renombrados    20
+    Celdas normalizadas    104,075
+    Tipos validados        13 de 13
+    Tipos convertidos      CODIGO_INSTITUCION_PADRE (entero), CODIGO_INSTITUCION (entero), REGISTRO_UNICO (entero), VIGENCIA_AÑOS (número), VIGENCIA_TRANSITORIA (fecha)
+    Alertas de validación  2
+    Archivo de salida      /home/runner/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/SNIES-ETL-PROGRAMS/Salidas/Programas.xlsx
+    Tamaño                 822.4 KB
+    Archivo de revisión    /home/runner/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/SNIES-ETL-PROGRAMS/Revision/Revision Programas.xlsx (0 fila(s))
+    Tiempo transcurrido    3.90s
+2026-11-16 03:28:21  WARNING  Resultado: PROCESO COMPLETADO CON ALERTAS.
+2026-11-16 03:28:21  INFO     Fin de la ejecución — código de salida: 0.
