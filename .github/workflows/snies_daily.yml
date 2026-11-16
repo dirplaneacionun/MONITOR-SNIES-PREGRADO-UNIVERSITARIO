@@ -106,7 +106,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Actualización SNIES y dashboard: $(date +'%Y-%m-%d')"
+          git commit -m "Actualización SNIES y dashboard: $(TZ=America/Bogota date +'%Y-%m-%d')"
 
           # Cambia "main" si tu rama principal tiene otro nombre.
           git push origin HEAD:main
