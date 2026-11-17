@@ -1,0 +1,22 @@
+# Pipeline de clasificación de divisiones UniNorte
+# Probado con Python 3.14.6 y exactamente las versiones indicadas.
+# Instalación: pip install -r requirements.txt
+#
+# Versiones fijadas (==): la integridad de las salidas está verificada con estas versiones. En particular, el guardado
+# de Excel con precisión float64 parchea funciones internas de openpyxl (openpyxl.compat.strings / openpyxl.cell._writer),
+# así que una versión distinta puede cambiar el resultado. Para actualizar una librería: cambie la versión, ejecute el
+# pipeline completo y confirme que no hay errores ni cambios inesperados de división (línea final del log).
+
+# Dependencias directas
+pandas==3.0.3
+numpy==2.5.1
+pyarrow==25.0.1
+openpyxl==3.1.5
+tqdm==4.70.0
+colorama==0.4.6  # color de la consola (opcional: sin él la consola se muestra sin estilos)
+
+# Dependencias transitivas (fijadas para que la instalación sea reproducible)
+python-dateutil==2.9.0.post0  # pandas
+six==1.17.0                   # python-dateutil
+tzdata==2026.2                # pandas
+et_xmlfile==2.0.0             # openpyxl

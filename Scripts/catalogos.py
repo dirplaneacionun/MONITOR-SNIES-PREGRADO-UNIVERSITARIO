@@ -2,7 +2,7 @@
 catalogos.py
 ------------
 Agrupaciones compartidas por el Dashboard y el correo institucional.
-Los valores de los datos vienen normalizados por SNIES-ETL-PROGRAMS (mayúsculas, sin tildes).
+Los valores de los datos vienen normalizados por ETL-PROGRAMAS-SNIES (mayúsculas, sin tildes).
 """
 
 from __future__ import annotations

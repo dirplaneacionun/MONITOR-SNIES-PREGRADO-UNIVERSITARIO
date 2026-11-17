@@ -5,10 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Programas Nuevos · Monitor SNIES</title>
   <meta name="description" content="Programas académicos nuevos — Monitor SNIES de programas universitarios de pregrado">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
-  <link rel="stylesheet" href="assets/estilos.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" integrity="sha384-RkASv+6KfBMW9eknReJIJ6b3UnjKOKC5bOUaNgIY778NFbQ8MtWq9Lr/khUgqtTt" crossorigin="anonymous">
+  <link rel="stylesheet" href="assets/estilos.css?v=f1312b434d">
+  <script type="importmap">
+    { "imports": {
+      "hyparquet": "./assets/vendor/hyparquet/src/index.js",
+      "hyparquet/": "./assets/vendor/hyparquet/",
+      "hyparquet-writer": "./assets/vendor/hyparquet-writer/src/index.js"
+    } }
+  </script>
 </head>
 <body data-tipo="nuevos">
   <header class="encabezado">
@@ -18,11 +27,11 @@
           <h1 class="enc-titulo">PROGRAMAS ACADÉMICOS NUEVOS</h1>
           <p class="enc-sub">Programas Académicos Universitarios de Pregrado en Colombia</p>
         </div>
-        <div class="enc-total"><div class="et">TOTAL</div><div class="ev" id="total">–</div><div class="es" id="total-s"></div></div>
+        <div class="enc-total" aria-live="polite"><div class="et">TOTAL</div><div class="ev" id="total">–</div><div class="es" id="total-s"></div></div>
       </div>
       <nav class="nav" aria-label="Apartados">
         <a href="index.html">INICIO</a>
-        <a href="nuevos.html" class="activa">NUEVOS</a>
+        <a href="nuevos.html" class="activa" aria-current="page">NUEVOS</a>
         <a href="modificados.html">MODIFICADOS</a>
         <a href="inactivos.html">INACTIVOS</a>
       </nav>
@@ -33,81 +42,79 @@
     <div id="filtros"></div>
 
     <div class="fila">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS NUEVOS</h2>
-        <p class="tarjeta-sub">Programas que aparecen en el SNIES y no estaban en la ejecución anterior</p>
-        <div class="grafica " id="g-evolucion"></div>
+      <section class="tarjeta" aria-labelledby="t-g-evolucion">
+        <h2 class="tarjeta-tit" id="t-g-evolucion">EVOLUCIÓN ACUMULADA DE PROGRAMAS ACADÉMICOS NUEVOS</h2>
+        <p class="tarjeta-sub">Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados), acumulados desde el inicio del periodo seleccionado.</p>
+        <div class="grafica " id="g-evolucion" role="img" aria-label="Evolución acumulada de programas académicos nuevos"></div>
       </section>
     </div>
     <div class="fila">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">EVOLUCIÓN DE LA DIVISIÓN DE UNINORTE</h2>
-        <p class="tarjeta-sub">Registros por división UniNorte en cada ejecución</p>
-        <div class="grafica alta" id="g-division"></div>
+      <section class="tarjeta" aria-labelledby="t-g-division">
+        <h2 class="tarjeta-tit" id="t-g-division">EVOLUCIÓN ACUMULADA POR DIVISIÓN DE UNINORTE</h2>
+        <p class="tarjeta-sub">Programas nuevos acumulados según la división académica de la Universidad del Norte con la que se relacionan.</p>
+        <div class="grafica alta" id="g-division" role="img" aria-label="Evolución acumulada por división de uninorte"></div>
       </section>
     </div>
     <div class="fila">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">EVOLUCIÓN DE LA MODALIDAD</h2>
-        <p class="tarjeta-sub">Registros por modalidad agrupada en cada ejecución</p>
-        <div class="grafica " id="g-modalidad"></div>
+      <section class="tarjeta" aria-labelledby="t-g-modalidad">
+        <h2 class="tarjeta-tit" id="t-g-modalidad">EVOLUCIÓN ACUMULADA POR MODALIDAD</h2>
+        <p class="tarjeta-sub">Programas nuevos acumulados según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual.</p>
+        <div class="grafica " id="g-modalidad" role="img" aria-label="Evolución acumulada por modalidad"></div>
       </section>
     </div>
     <div class="fila tercio">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">SECTOR</h2>
-        <p class="tarjeta-sub">Registros del periodo filtrado</p>
-        <div class="grafica " id="g-sector"></div>
+      <section class="tarjeta" aria-labelledby="t-g-sector">
+        <h2 class="tarjeta-tit" id="t-g-sector">PROGRAMAS NUEVOS POR SECTOR</h2>
+        <p class="tarjeta-sub">Distribución de los registros del periodo filtrado entre instituciones oficiales y privadas.</p>
+        <div class="grafica " id="g-sector" role="img" aria-label="Programas nuevos por sector"></div>
       </section>
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">EVOLUCIÓN DEL SECTOR</h2>
-        <p class="tarjeta-sub">Registros por sector en cada ejecución</p>
-        <div class="grafica " id="g-sector-evol"></div>
+      <section class="tarjeta" aria-labelledby="t-g-sector-evol">
+        <h2 class="tarjeta-tit" id="t-g-sector-evol">EVOLUCIÓN ACUMULADA POR SECTOR</h2>
+        <p class="tarjeta-sub">Programas nuevos acumulados de instituciones oficiales y privadas.</p>
+        <div class="grafica " id="g-sector-evol" role="img" aria-label="Evolución acumulada por sector"></div>
       </section>
     </div>
     <div class="fila">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">EVOLUCIÓN DEL CAMPO DE CINE DETALLADO</h2>
-        <p class="tarjeta-sub">Por defecto, los campos con mayor presencia en los programas activos</p><div id="cine-ctrl"></div>
-        <div class="grafica " id="g-cine"></div>
+      <section class="tarjeta" aria-labelledby="t-g-cine">
+        <h2 class="tarjeta-tit" id="t-g-cine">EVOLUCIÓN ACUMULADA POR CAMPO DE CINE DETALLADO</h2>
+        <p class="tarjeta-sub">Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 8).</p>
+        <div id="cine-ctrl"></div>
+        <div class="grafica " id="g-cine" role="img" aria-label="Evolución acumulada por campo de cine detallado"></div>
       </section>
     </div>
     <div class="fila dos">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">TOP 10 DEPARTAMENTOS</h2>
-        <p class="tarjeta-sub">Registros del periodo filtrado</p>
-        <div class="grafica " id="g-deptos"></div>
+      <section class="tarjeta" aria-labelledby="t-g-deptos">
+        <h2 class="tarjeta-tit" id="t-g-deptos">TOP 10 DEPARTAMENTOS</h2>
+        <p class="tarjeta-sub">Departamentos de oferta con más registros en el periodo filtrado.</p>
+        <div class="grafica " id="g-deptos" role="img" aria-label="Top 10 departamentos"></div>
       </section>
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">TOP 10 INSTITUCIONES</h2>
-        <p class="tarjeta-sub">Registros del periodo filtrado</p>
-        <div class="grafica " id="g-instituciones"></div>
+      <section class="tarjeta" aria-labelledby="t-g-instituciones">
+        <h2 class="tarjeta-tit" id="t-g-instituciones">TOP 10 INSTITUCIONES</h2>
+        <p class="tarjeta-sub">Instituciones con más registros en el periodo filtrado.</p>
+        <div class="grafica " id="g-instituciones" role="img" aria-label="Top 10 instituciones"></div>
       </section>
     </div>
     <div class="fila">
-      <section class="tarjeta">
-        <h2 class="tarjeta-tit">NÚMERO DE PERIODOS DE DURACIÓN</h2>
-        <p class="tarjeta-sub">Registros del periodo filtrado</p>
-        <div class="grafica baja" id="g-periodos"></div>
+      <section class="tarjeta" aria-labelledby="t-g-periodos">
+        <h2 class="tarjeta-tit" id="t-g-periodos">REGISTROS SEGÚN NÚMERO DE PERIODOS DE DURACIÓN</h2>
+        <p class="tarjeta-sub">Cantidad de registros del periodo filtrado según la duración del programa en periodos académicos.</p>
+        <div class="grafica baja" id="g-periodos" role="img" aria-label="Registros según número de periodos de duración"></div>
       </section>
     </div>
-
-    <section class="tarjeta">
-      <h2 class="tarjeta-tit">REGISTROS</h2>
-      <p class="tarjeta-sub">Todas las columnas · Ordenado desde la fecha más reciente</p>
+    <section class="tarjeta" aria-labelledby="t-tabla">
+      <h2 class="tarjeta-tit" id="t-tabla">REGISTROS DE PROGRAMAS NUEVOS</h2>
+      <p class="tarjeta-sub">Todos los registros de programas nuevos que cumplen los filtros, con todas las columnas, ordenados desde la fecha más reciente. Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR PARQUET exporta los registros filtrados.</p>
       <div id="tabla"></div>
     </section>
-
-    <p class="pie-pagina">Fuente: SNIES — Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
+    <p class="pie-pagina">Fuente: SNIES — Sistema Nacional de Información de la Educación Superior, Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/es.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="data/comun.js"></script>
-  <script src="data/nuevos.js"></script>
-  <script src="assets/app.js"></script>
-  <script src="assets/detalle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js" integrity="sha384-5JqMv4L/Xa0hfvtF06qboNdhvuYXUku9ZrhZh3bSk8VXF0A/RuSLHpLsSV9Zqhl6" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/es.min.js" integrity="sha384-Kw6LvVIC7DwgsJQKl9iQVoSEKfjX0hE8/JbVEVnkQNHLI0x2njGmBcqt2VxcPEKC" crossorigin="anonymous"></script>
+  <script src="data/comun.js?v=ac8d5f7fd7"></script>
+  <script src="data/nuevos.js?v=6f543865d6"></script>
+  <script src="assets/app.js?v=3bc8a57fe8"></script>
+  <script src="assets/detalle.js?v=fe44968f86"></script>
 </body>
 </html>

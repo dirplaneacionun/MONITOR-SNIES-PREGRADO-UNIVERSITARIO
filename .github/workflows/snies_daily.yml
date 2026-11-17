@@ -8,8 +8,14 @@ on:
         type: boolean
         default: true
 
+# Permisos mínimos: el token solo puede escribir contenido del repositorio (commit de resultados).
 permissions:
   contents: write
+
+# Nunca dos ejecuciones a la vez: la siguiente espera a que termine la anterior (evita commits cruzados).
+concurrency:
+  group: snies-monitor
+  cancel-in-progress: false
 
 jobs:
   run-snies:
@@ -21,48 +27,30 @@ jobs:
         shell: bash
 
     steps:
+      # Acciones fijadas a un commit exacto (no a una etiqueta movible) para evitar cambios no revisados.
       - name: Checkout del repositorio
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
-          persist-credentials: true
+          # El token de escritura no queda guardado en .git/config durante el pipeline:
+          # solo se usa en el paso "Publicar cambios".
+          persist-credentials: false
 
       - name: Información de ejecución
         run: |
           set -euo pipefail
+          echo "Hora UTC:      $(date -u)"
+          echo "Hora Colombia: $(TZ=America/Bogota date)"
+          echo "Repositorio:   $GITHUB_REPOSITORY"
 
-          echo "========================================"
-          echo "Runner:"
-          hostname
-
-          echo
-          echo "Sistema:"
-          uname -a
-
-          echo
-          echo "Hora UTC:"
-          date -u
-
-          echo
-          echo "Hora Colombia:"
-          TZ=America/Bogota date
-
-          echo
-          echo "Repositorio:"
-          echo "$GITHUB_REPOSITORY"
-
-          echo "========================================"
-
-      # Instalación oficial de Google Chrome
       - name: Configurar Google Chrome
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce  # v1
 
       - name: Verificar Chrome
-        run: |
-          google-chrome --version
+        run: google-chrome --version
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.14"
           cache: pip
@@ -70,7 +58,6 @@ jobs:
       - name: Instalar dependencias
         run: |
           set -euo pipefail
-
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -79,25 +66,28 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           DESTINATARIOS: ${{ secrets.DESTINATARIOS }}
+          # Se pasa como variable de entorno (no se inserta en el script) para evitar inyección de comandos.
+          ENVIAR_CORREO: ${{ inputs.enviar_correo }}
         run: |
           set -euo pipefail
-
-          # Disparado por cron-job.org (sin parámetros) el correo se envía siempre.
-          ARGS=""
-          if [ "${{ inputs.enviar_correo }}" = "false" ]; then
-            ARGS="--sin-correo"
+          # Disparado por cron-job.org (sin parámetros) ENVIAR_CORREO viene vacío y el correo se envía.
+          if [ "${ENVIAR_CORREO:-true}" = "false" ]; then
+            python Scripts/run_snies.py --sin-correo
+          else
+            python Scripts/run_snies.py
           fi
-          python Scripts/run_snies.py $ARGS
 
       # El pipeline actualiza los datos del Dashboard (docs/data) antes de enviar el correo.
-      # Se publica aunque el flujo falle, para conservar el log consolidado de la ejecución.
+      # Se publica si el flujo termina (con éxito o con error, para conservar el log), pero no si se cancela.
       - name: Publicar cambios
-        if: always()
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           git config user.name "snies-bot"
-          git config user.email "snies-bot@uninorte.edu.co"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A Novedades "Programas Activos" Historico Logs Scripts docs
 
@@ -107,6 +97,4 @@ jobs:
           fi
 
           git commit -m "Actualización SNIES y dashboard: $(TZ=America/Bogota date +'%Y-%m-%d')"
-
-          # Cambia "main" si tu rama principal tiene otro nombre.
-          git push origin HEAD:main
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main

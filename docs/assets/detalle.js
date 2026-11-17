@@ -57,14 +57,14 @@
     const prom = difs.reduce((a, b) => a + b, 0) / difs.length;
     $(div.id + "-nota").textContent = `Variación promedio: ${prom > 0 ? "+" : ""}${prom.toLocaleString("es-CO", { maximumFractionDigits: 1 })} ${unidad} por cambio`;
     A.plotly(div, [
-      { type: "bar", x: fechas, y: sube, name: `AUMENTOS · ${A.fmt(tot(sube))}`, marker: { color: "#2a78d6" }, hovertemplate: "Aumentos: <b>%{y:,}</b><extra></extra>" },
-      { type: "bar", x: fechas, y: baja, name: `REDUCCIONES · ${A.fmt(tot(baja))}`, marker: { color: "#eb6834" }, customdata: baja.map(Math.abs), hovertemplate: "Reducciones: <b>%{customdata:,}</b><extra></extra>" },
+      { type: "bar", x: fechas, y: sube, name: `AUMENTOS · ${A.fmt(tot(sube))}`, marker: { color: A.NEGRO }, hovertemplate: "Aumentos: <b>%{y:,}</b><extra></extra>" },
+      { type: "bar", x: fechas, y: baja, name: `REDUCCIONES · ${A.fmt(tot(baja))}`, marker: { color: A.ROJO }, customdata: baja.map(Math.abs), hovertemplate: "Reducciones: <b>%{customdata:,}</b><extra></extra>" },
     ], {
       barmode: "relative", bargap: 0.15, hovermode: "x unified",
       xaxis: A.ejeMeses(fechas),
-      yaxis: Object.assign({ gridcolor: "#ECE8E3", zeroline: true, zerolinecolor: "#57504A", tickformat: ",d", title: { text: "PROGRAMAS", font: { size: 10 } } }, A.ejeEntero([...sube, ...baja])),
+      yaxis: Object.assign({ gridcolor: "#E5E5E5", zeroline: true, zerolinecolor: "#4D4D4D", tickformat: ",d", title: { text: "PROGRAMAS", font: { size: 10 } } }, A.ejeEntero([...sube, ...baja])),
       showlegend: true, margin: { l: 56, r: 12, t: 36, b: 48 },
-      legend: { title: { text: "<b>TOTAL</b>" }, orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 10, color: "#1A140C" } },
+      legend: { title: { text: "<b>TOTAL</b>" }, orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 10, color: "#000000" } },
     });
   }
 
@@ -83,13 +83,13 @@
     const zz = filasUsadas.map((i) => filasUsadas.map((j) => z[i][j]));
     A.plotly(div, [{
       type: "heatmap", x: etq, y: etq, z: zz, xgap: 2, ygap: 2,
-      colorscale: [[0, "#F7F4F1"], [0.0001, "#FBE3D6"], [1, "#BE0000"]], showscale: false,
+      colorscale: [[0, "#F5F5F5"], [0.0001, "#FDECEC"], [1, "#BE0000"]], showscale: false,
       text: zz.map((f) => f.map((v) => (v ? A.fmt(v) : ""))), texttemplate: "%{text}", textfont: { size: 12 },
       hovertemplate: "DE %{y} A %{x}: <b>%{z:,}</b> cambios<extra></extra>",
     }], {
       margin: { l: 110, r: 12, t: 12, b: 70 },
-      xaxis: { title: { text: "MODALIDAD NUEVA", font: { size: 10 } }, tickfont: { color: "#1A140C" }, side: "bottom" },
-      yaxis: { title: { text: "MODALIDAD ANTERIOR", font: { size: 10 } }, tickfont: { color: "#1A140C" }, autorange: "reversed" },
+      xaxis: { title: { text: "MODALIDAD NUEVA", font: { size: 10 } }, tickfont: { color: "#000000" }, side: "bottom" },
+      yaxis: { title: { text: "MODALIDAD ANTERIOR", font: { size: 10 } }, tickfont: { color: "#000000" }, autorange: "reversed" },
     });
   }
 
@@ -119,12 +119,12 @@
       customdata: orden.map((o) => o[0]).reverse(),
       marker: { color: orden.map((o) => (o[1] >= 0 ? A.ESTADO.nuevos : A.ESTADO.inactivos)).reverse() },
       text: orden.map((o) => (o[1] > 0 ? "+" : "") + A.fmt(o[1])).reverse(), textposition: "outside", cliponaxis: false,
-      textfont: { color: "#1A140C", size: 10 },
+      textfont: { color: "#000000", size: 10 },
       hovertemplate: "%{customdata}: <b>%{x:+,}</b> (nuevos − inactivos)<extra></extra>",
     }], {
       margin: { l: 10, r: 40, t: 8, b: 30 }, bargap: 0.35,
-      xaxis: Object.assign({ gridcolor: "#ECE8E3", zeroline: true, zerolinecolor: "#57504A", tickformat: "+,d" }, A.ejeEntero(orden.map((o) => o[1]))),
-      yaxis: { automargin: true, tickfont: { size: 10, color: "#1A140C" } },
+      xaxis: Object.assign({ gridcolor: "#E5E5E5", zeroline: true, zerolinecolor: "#4D4D4D", tickformat: "+,d" }, A.ejeEntero(orden.map((o) => o[1]))),
+      yaxis: { automargin: true, tickfont: { size: 10, color: "#000000" } },
     });
   }
 
@@ -138,30 +138,30 @@
     $("total-s").textContent = tipo === "modificados" ? `${A.fmt(programas)} programas` : "registros";
     filtros.conteo.textContent = tipo === "modificados" ? `${A.fmt(filas.length)} cambios en ${A.fmt(programas)} programas` : `${A.fmt(filas.length)} programas`;
 
-    A.lineas($("g-evolucion"), fechas, [{ nombre: NOMBRE, valores: A.contarPorFecha(filas, fechas), color }], { modo: "flujo" });
+    A.lineas($("g-evolucion"), fechas, [{ nombre: NOMBRE, valores: A.contarPorFecha(filas, fechas), color }], { modo: "acumulado" });
     if (tipo === "modificados") {
       const porTipo = A.contarPorFecha(filas, fechas, "TIPO_CAMBIO_DETECTADO");
-      A.lineas($("g-tipos"), fechas, tiposCambio.filter((t) => porTipo[t]).map((t) => ({ nombre: etqCambio[t], valores: porTipo[t], color: colCambio[t].color })), { modo: "flujo" });
+      A.lineas($("g-tipos"), fechas, tiposCambio.filter((t) => porTipo[t]).map((t) => ({ nombre: etqCambio[t], valores: porTipo[t], color: colCambio[t].color })), { modo: "acumulado" });
     }
     const porDiv = A.contarPorFecha(filas, fechas, "DIVISION_UNINORTE");
-    A.lineas($("g-division"), fechas, A.seriesPorCategoria(porDiv, divisiones, colDiv), { modo: "flujo" });
+    A.lineas($("g-division"), fechas, A.seriesPorCategoria(porDiv, divisiones, colDiv), { modo: "acumulado" });
     const porMod = A.contarPorFecha(filas, fechas, "_MG");
-    A.lineas($("g-modalidad"), fechas, A.seriesPorCategoria(porMod, modalidades, colMod), { modo: "flujo" });
+    A.lineas($("g-modalidad"), fechas, A.seriesPorCategoria(porMod, modalidades, colMod), { modo: "acumulado" });
 
     const sec = A.contar(filas, "SECTOR");
     A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => A.SECTOR_COLOR[s[0]] || A.GRIS));
     const porSec = A.contarPorFecha(filas, fechas, "SECTOR");
-    A.lineas($("g-sector-evol"), fechas, Object.keys(A.SECTOR_COLOR).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: porSec[s], color: A.SECTOR_COLOR[s] })), { modo: "flujo" });
+    A.lineas($("g-sector-evol"), fechas, Object.keys(A.SECTOR_COLOR).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: porSec[s], color: A.SECTOR_COLOR[s] })), { modo: "acumulado" });
 
     const porCine = A.contarPorFecha(filas, fechas, "CINE_F_2013_AC_CAMPO_DETALLADO");
-    A.lineas($("g-cine"), fechas, selectorCine.sel.map((c) => ({ nombre: c, valores: porCine[c] || new Array(fechas.length).fill(0), color: selectorCine.colores[c] })), { modo: "flujo" });
+    A.lineas($("g-cine"), fechas, selectorCine.sel.map((c) => ({ nombre: c, valores: porCine[c] || new Array(fechas.length).fill(0), color: selectorCine.colores[c] })), { modo: "acumulado" });
 
     const dep = A.contar(filas, "DEPARTAMENTO_OFERTA_PROGRAMA").slice(0, 10);
     A.barrasH($("g-deptos"), dep.map((d) => d[0]), dep.map((d) => d[1]), color, { unidad: "registros" });
     const ins = A.contar(filas, "NOMBRE_INSTITUCION").slice(0, 10);
-    A.barrasH($("g-instituciones"), ins.map((d) => d[0]), ins.map((d) => d[1]), "#1A140C", { unidad: "registros" });
+    A.barrasH($("g-instituciones"), ins.map((d) => d[0]), ins.map((d) => d[1]), "#000000", { unidad: "registros" });
     const per = A.contar(filas, "NUMERO_PERIODOS_DE_DURACION").sort((a, b) => a[0] - b[0]);
-    A.barrasV($("g-periodos"), per.map((p) => p[0]), per.map((p) => p[1]), color, { tituloX: "PERIODOS", sufijo: " periodos" });
+    A.barrasV($("g-periodos"), per.map((p) => p[0]), per.map((p) => p[1]), color, { tituloX: "NÚMERO DE PERIODOS", sufijo: " periodos" });
 
     if (tipo === "modificados") {
       direccion($("g-creditos"), filas, "NUMERO DE CREDITOS", fechas, "créditos");

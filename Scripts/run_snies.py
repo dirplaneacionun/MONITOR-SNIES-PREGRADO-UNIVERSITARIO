@@ -6,8 +6,8 @@ Orquestador semanal del monitor SNIES de programas universitarios de pregrado.
 Flujo:
     1. Descarga el reporte de programas del portal SNIES con los filtros:
        institución activa, programa activo, pregrado, universitario.
-    2. Normaliza el archivo con SNIES-ETL-PROGRAMS (Scripts/SNIES-ETL-PROGRAMS).
-    3. Clasifica las divisiones con UNINORTE-MAP-PROGRAMS (Scripts/UNINORTE-MAP-PROGRAMS),
+    2. Normaliza el archivo con ETL-PROGRAMAS-SNIES (Scripts/ETL-PROGRAMAS-SNIES).
+    3. Clasifica las divisiones con CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES),
        procesando únicamente Programas.xlsx.
     4. Guarda el resultado en "Programas Activos/Programas Activos AAAA-MM-DD.xlsx".
     5. Compara con la ejecución anterior y detecta programas nuevos (o reactivados),
@@ -46,8 +46,8 @@ import pandas as pd
 # ── Rutas ─────────────────────────────────────────────────────────────────────
 SCRIPTS_DIR    = Path(__file__).resolve().parent
 ROOT           = SCRIPTS_DIR.parent
-ETL_DIR        = SCRIPTS_DIR / "SNIES-ETL-PROGRAMS"
-MAP_DIR        = SCRIPTS_DIR / "UNINORTE-MAP-PROGRAMS"
+ETL_DIR        = SCRIPTS_DIR / "ETL-PROGRAMAS-SNIES"
+MAP_DIR        = SCRIPTS_DIR / "CLASIFICAR-DIVISIONES-UNINORTE-SNIES"
 ETL_SCRIPT     = ETL_DIR / "Scripts" / "etl_programas.py"
 MAP_SCRIPT     = MAP_DIR / "Scripts" / "pipeline_divisiones.py"
 PROGRAMAS_DIR  = ROOT / "Programas Activos"
@@ -74,7 +74,11 @@ SUBPROCESO_TIMEOUT = 1_800     # segundos máximos por herramienta (ETL o clasif
 
 COL_SNIES = "CODIGO_SNIES_DEL_PROGRAMA"
 COL_FECHA = "FECHA_DE_OBTENCION"
-COLS_CLASIFICACION = ["DIVISION_UNINORTE", "PUNTAJE_TOTAL", "REQUIERE_REVISION"]
+COLS_CLASIFICACION = ["DIVISION_UNINORTE", "PUNTAJE_TOTAL"]
+# Columnas que ya no se guardan (el clasificador dejó de exportar REQUIERE_REVISION: los programas por revisar
+# están en su lista de revisión). Se retiran también de los archivos acumulados.
+COLS_OBSOLETAS = ["REQUIERE_REVISION"]
+REVISION_FILE = SCRIPTS_DIR / "CLASIFICAR-DIVISIONES-UNINORTE-SNIES" / "Revision" / "Revision Programas.xlsx"
 
 # Columnas vigiladas para detectar modificados → valor de TIPO_CAMBIO_DETECTADO
 COLS_VIGILAR = {
@@ -104,6 +108,29 @@ class EtapaError(Exception):
 
 # ── Logging consolidado ───────────────────────────────────────────────────────
 
+def _rutas_privadas() -> list[tuple[str, str]]:
+    """Rutas locales que no deben quedar en logs publicados (carpeta del usuario y temporal) → marcador."""
+    import tempfile
+    pares = []
+    for ruta, marca in ((tempfile.gettempdir(), "<TEMP>"), (str(Path.home()), "~")):
+        for variante in {ruta, ruta.replace("\\", "/")}:
+            if len(variante) > 3:
+                pares.append((variante, marca))
+    return pares
+
+
+class _FormatoSeguro(logging.Formatter):
+    """Formato de log que oculta rutas personales (carpeta del usuario y temporal) antes de escribir en consola o archivo."""
+
+    _pares = _rutas_privadas()
+
+    def format(self, record):
+        texto = super().format(record)
+        for ruta, marca in self._pares:
+            texto = texto.replace(ruta, marca)
+        return texto
+
+
 def configurar_logging(ahora: dt.datetime, prefijo: str = "monitor") -> Path:
     """Log en consola y en Logs/<prefijo>_AAAA-MM-DD_HH-MM-SS.log; conserva los últimos MAX_LOGS por prefijo."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -116,7 +143,7 @@ def configurar_logging(ahora: dt.datetime, prefijo: str = "monitor") -> Path:
         log_path = LOGS_DIR / f"{prefijo}_{sello}_{n}.log"
         n += 1
 
-    formato = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+    formato = _FormatoSeguro("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
     consola = logging.StreamHandler(sys.stdout)
     consola.setFormatter(formato)
     archivo = logging.FileHandler(log_path, encoding="utf-8")
@@ -343,11 +370,11 @@ def normalizar_etl(archivo_crudo: Path) -> Path:
     shutil.copy2(archivo_crudo, fuente)
     inicio = time.time()
     _ejecutar_herramienta(
-        "NORMALIZACION (SNIES-ETL-PROGRAMS)", ETL_DIR,
+        "NORMALIZACION (ETL-PROGRAMAS-SNIES)", ETL_DIR,
         [sys.executable, str(ETL_SCRIPT)], ETL_DIR / "Logs", "etl_*.log",
     )
     if not salida.exists() or salida.stat().st_mtime < inicio - 1:
-        raise EtapaError("NORMALIZACION (SNIES-ETL-PROGRAMS)", "El ETL no actualizó Salidas/Programas.xlsx.")
+        raise EtapaError("NORMALIZACION (ETL-PROGRAMAS-SNIES)", "El ETL no actualizó Salidas/Programas.xlsx.")
     return salida
 
 
@@ -358,11 +385,11 @@ def clasificar_divisiones(archivo_normalizado: Path) -> Path:
     shutil.copy2(archivo_normalizado, fuente)
     inicio = time.time()
     _ejecutar_herramienta(
-        "CLASIFICACION (UNINORTE-MAP-PROGRAMS)", MAP_DIR,
+        "CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)", MAP_DIR,
         [sys.executable, str(MAP_SCRIPT), "-a", "1"], MAP_DIR / "Logs", "pipeline_*.log",
     )
     if not salida.exists() or salida.stat().st_mtime < inicio - 1:
-        raise EtapaError("CLASIFICACION (UNINORTE-MAP-PROGRAMS)",
+        raise EtapaError("CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)",
                          "El clasificador no actualizó Salidas/Programas.xlsx.")
     return salida
 
@@ -415,6 +442,7 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
     if not partes:
         return 0
     combinado = pd.concat(partes, ignore_index=True) if len(partes) > 1 else partes[0]
+    combinado = combinado.drop(columns=[c for c in COLS_OBSOLETAS if c in combinado.columns])
     columnas = [c for c in orden if c in combinado.columns] + [c for c in combinado.columns if c not in orden]
     combinado = combinado[columnas].sort_values([COL_FECHA, COL_SNIES], kind="stable", ignore_index=True)
     _escribir_parquet(combinado, path)
@@ -549,11 +577,11 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
             raise EtapaError("DESCARGA", f"{type(exc).__name__}: {exc}") from exc
 
     # 2. Normalización
-    _seccion("2. NORMALIZACION (SNIES-ETL-PROGRAMS)")
+    _seccion("2. NORMALIZACION (ETL-PROGRAMAS-SNIES)")
     normalizado = normalizar_etl(crudo)
 
     # 3. Clasificación
-    _seccion("3. CLASIFICACION (UNINORTE-MAP-PROGRAMS)")
+    _seccion("3. CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)")
     clasificado = clasificar_divisiones(normalizado)
 
     # 4. Validación del resultado
@@ -572,8 +600,12 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
         raise EtapaError("VALIDACION", f"{len(hoy):,} programas: probable descarga sin filtros.")
     if hoy[COL_SNIES].duplicated().any():
         raise EtapaError("VALIDACION", "Hay códigos SNIES repetidos en el archivo procesado.")
-    revision = int(hoy["REQUIERE_REVISION"].astype(str).str.upper().isin(["TRUE", "VERDADERO", "1"]).sum())
-    log.info(f"  Programas activos: {len(hoy):,} · columnas: {hoy.shape[1]} · requieren revisión: {revision}")
+    try:
+        revision = len(pd.read_excel(REVISION_FILE, engine="calamine")) if REVISION_FILE.exists() else 0
+    except Exception:
+        revision = "desconocido"
+    hoy = hoy.drop(columns=[c for c in COLS_OBSOLETAS if c in hoy.columns])
+    log.info(f"  Programas activos: {len(hoy):,} · columnas: {hoy.shape[1]} · requieren revisión: {revision} (lista: {_ruta(REVISION_FILE)})")
 
     # 5. Detección
     _seccion("5. DETECCION DE NOVEDADES")

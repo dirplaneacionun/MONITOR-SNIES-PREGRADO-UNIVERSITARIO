@@ -118,6 +118,42 @@ def _rangos(indices: list[int]) -> list[list[int]]:
     return rangos
 
 
+def escribir_historico(hist: pd.DataFrame) -> list[str]:
+    """
+    Copia del histórico de programas activos para el Dashboard: un archivo por ejecución en
+    docs/data/historico/AAAA-MM-DD.parquet, para que el navegador descargue solo las fechas consultadas.
+    Un archivo solo se reescribe si su contenido cambió (ej. tras una reclasificación): así cada semana
+    se agrega un archivo nuevo sin alterar los anteriores ni inflar el historial del repositorio.
+    Retorna las fechas disponibles (ISO).
+    """
+    import hashlib
+    import io
+
+    destino = DATA_DIR / "historico"
+    destino.mkdir(parents=True, exist_ok=True)
+    df = _ordenar_columnas(hist.copy(), "activos")
+    for col in df.columns:  # fechas a milisegundos: el lector del navegador las entrega como fechas
+        if str(df[col].dtype).startswith("datetime64"):
+            df[col] = df[col].astype("datetime64[ms]")
+    fechas, escritos = [], 0
+    for fecha, parte in df.groupby(COL_FECHA, sort=True):
+        iso_f = pd.Timestamp(fecha).strftime("%Y-%m-%d")
+        buffer = io.BytesIO()
+        parte.sort_values(COL_SNIES, kind="stable").to_parquet(buffer, index=False, compression="snappy")
+        contenido = buffer.getvalue()
+        path = destino / f"{iso_f}.parquet"
+        if not path.exists() or hashlib.sha256(path.read_bytes()).digest() != hashlib.sha256(contenido).digest():
+            path.write_bytes(contenido)
+            escritos += 1
+        fechas.append(iso_f)
+    for viejo in destino.glob("*.parquet"):  # fechas que ya no están en el histórico
+        if viejo.stem not in fechas:
+            viejo.unlink()
+    total = sum(f.stat().st_size for f in destino.glob("*.parquet")) / 1e6
+    print(f"  docs/data/historico/: {len(fechas)} ejecuciones · {total:.2f} MB · {escritos} archivo(s) nuevos o actualizados")
+    return fechas
+
+
 # ── Generación ────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -218,11 +254,17 @@ def main() -> int:
         "rangos": versiones["_RANGOS"].tolist(),
     })
 
-    # Tabla de programas activos de la última ejecución (todas las columnas)
-    escribir_js("activos_tabla.js", "activos_tabla", codificar(_ordenar_columnas(ult_activos.copy(), "activos")))
+    # Histórico completo para la tabla de Inicio: se lee en el navegador solo el bloque de las fechas consultadas
+    comun["historico_fechas"] = escribir_historico(hist)
+    escribir_js("comun.js", "comun", comun)
+    for obsoleto in ("activos_tabla.js", "historico.parquet"):  # reemplazados por data/historico/*.parquet
+        (DATA_DIR / obsoleto).unlink(missing_ok=True)
 
     for tipo, df in novedades.items():
         escribir_js(f"{tipo}.js", tipo, codificar(_ordenar_columnas(df, tipo)))
+
+    from generar_paginas import main as generar_paginas
+    generar_paginas()
 
     print(f"  Última ejecución: {iso(ultima)} · KPIs: {kpis}")
     print("Dashboard generado OK")

@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+import ssl
 import sys
 from datetime import date
 from email.mime.multipart import MIMEMultipart
@@ -43,8 +44,9 @@ DASHBOARD_URL = "https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVER
 MAX_FILAS = 10
 
 # Identidad visual
-NEGRO, ROJO, GRIS, BORDE, TEXTO2 = "#1A140C", "#BE0000", "#F1F1F1", "#E2DED8", "#57504A"
-ESTADO = {"nuevos": "#1E8E5A", "modificados": "#E69F00", "inactivos": "#BE0000"}  # validados para daltonismo
+# Paleta institucional Universidad del Norte
+NEGRO, ROJO, AMARILLO, GRIS, BORDE, TEXTO2 = "#000000", "#BE0000", "#FFB700", "#F5F5F5", "#E5E5E5", "#4D4D4D"
+ESTADO = {"nuevos": "#1E8E5A", "modificados": "#F28C00", "inactivos": "#BE0000"}  # validados para daltonismo
 FUENTE = "Montserrat, 'Segoe UI', Arial, sans-serif"
 
 SECCIONES = {
@@ -110,7 +112,7 @@ def _tabla(df: pd.DataFrame, columnas, color: str) -> str:
     cab = "".join(f'<th style="{th}">{escape(t)}</th>' for _, t in columnas)
     filas = []
     for i, (_, r) in enumerate(df.iterrows()):
-        fondo = "#FFFFFF" if i % 2 == 0 else "#FAF8F6"
+        fondo = "#FFFFFF" if i % 2 == 0 else "#FAFAFA"
         td = (f"background:{fondo};font-family:{FUENTE};font-size:12px;color:{NEGRO};padding:7px 10px;"
               f"border-bottom:1px solid {BORDE};vertical-align:top;")
         filas.append("<tr>" + "".join(f'<td style="{td}">{escape(_texto(c, r.get(c)))}</td>' for c, _ in columnas) + "</tr>")
@@ -170,8 +172,8 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
 <table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;background:#FFFFFF;border-radius:10px;overflow:hidden;">
   <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};padding:22px 24px;">
     <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
-    <div style="font-family:{FUENTE};font-size:13px;color:#D9D3CC;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
-    <div style="font-family:{FUENTE};font-size:12px;color:#D9D3CC;margin-top:10px;">Reporte de la ejecución del {fecha.strftime('%d/%m/%Y')}</div>
+    <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
+    <div style="font-family:{FUENTE};font-size:12px;color:#D9D9D9;margin-top:10px;"><span style="display:inline-block;width:28px;height:3px;background:{AMARILLO};vertical-align:middle;margin-right:8px;"></span>Reporte de la ejecución del {fecha.strftime('%d/%m/%Y')}</div>
   </td></tr>
   <tr><td style="padding:16px 20px 4px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{kpis}</tr></table>
@@ -197,9 +199,10 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
 # ── Envío ─────────────────────────────────────────────────────────────────────
 
 def _enviar(msg: MIMEMultipart, remitente: str, clave: str, destinatarios: list[str]) -> None:
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as server:
         server.ehlo()
-        server.starttls()
+        # Contexto TLS que verifica el certificado y el nombre del servidor (el de smtplib por defecto no lo hace)
+        server.starttls(context=ssl.create_default_context())
         server.login(remitente, clave)
         server.sendmail(remitente, destinatarios, msg.as_bytes())
 

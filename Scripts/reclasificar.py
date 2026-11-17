@@ -2,9 +2,9 @@
 reclasificar.py
 ---------------
 Reclasificación de divisiones UniNorte tras ajustar reglas u overrides de
-UNINORTE-MAP-PROGRAMS (Scripts/UNINORTE-MAP-PROGRAMS/Scripts/diccionarios.py).
+CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Scripts/diccionarios.py).
 
-Actualiza DIVISION_UNINORTE, PUNTAJE_TOTAL y REQUIERE_REVISION en los archivos que
+Actualiza DIVISION_UNINORTE y PUNTAJE_TOTAL en los archivos que
 alimentan el Dashboard:
     Historico/Historico Programas Activos.parquet
     Novedades/Nuevos.parquet, Novedades/Modificados.parquet, Novedades/Inactivos.parquet
@@ -31,13 +31,13 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_snies import (  # noqa: E402
-    COL_FECHA, COL_SNIES, COLS_CLASIFICACION, HISTORICO_FILE, INACTIVOS_FILE, MAP_DIR,
+    COL_FECHA, COL_SNIES, COLS_CLASIFICACION, COLS_OBSOLETAS, HISTORICO_FILE, INACTIVOS_FILE, MAP_DIR,
     MODIFICADOS_FILE, NUEVOS_FILE, ZONA_HORARIA, EtapaError, _ejecutar_herramienta,
     _escribir_parquet, _ruta, _seccion, _valor, configurar_logging, log,
 )
 
 CLAVE = [COL_SNIES, "NOMBRE_DEL_PROGRAMA", "NUCLEO_BASICO_DEL_CONOCIMIENTO", "CINE_F_2013_AC_CAMPO_DETALLADO"]
-COLS_NO_BASE = set(COLS_CLASIFICACION) | {COL_FECHA, "TIPO_NOVEDAD", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"}
+COLS_NO_BASE = set(COLS_CLASIFICACION) | set(COLS_OBSOLETAS) | {COL_FECHA, "TIPO_NOVEDAD", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"}
 _SEP = "\x1f"
 
 
@@ -52,9 +52,9 @@ def claves(df: pd.DataFrame) -> pd.Series:
 
 def clasificar_catalogo(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Clasifica las combinaciones únicas de CLAVE de `df` con UNINORTE-MAP-PROGRAMS en una copia
-    temporal. Retorna un DataFrame indexado por la clave con DIVISION_UNINORTE, PUNTAJE_TOTAL y
-    REQUIERE_REVISION. De cada combinación se usa su registro más reciente (último en `df`).
+    Clasifica las combinaciones únicas de CLAVE de `df` con CLASIFICAR-DIVISIONES-UNINORTE-SNIES en una copia
+    temporal. Retorna un DataFrame indexado por la clave con DIVISION_UNINORTE y PUNTAJE_TOTAL.
+    De cada combinación se usa su registro más reciente (último en `df`).
     """
     base = [c for c in df.columns if c not in COLS_NO_BASE]
     catalogo = df[base].assign(_K=claves(df)).drop_duplicates("_K", keep="last")
@@ -72,12 +72,12 @@ def clasificar_catalogo(df: pd.DataFrame) -> pd.DataFrame:
         catalogo.drop(columns="_K").to_excel(sandbox / "Fuentes" / "Programas.xlsx", index=False)
 
         _ejecutar_herramienta(
-            "CLASIFICACION (UNINORTE-MAP-PROGRAMS, copia temporal)", sandbox,
+            "CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES, copia temporal)", sandbox,
             [sys.executable, str(sandbox / "Scripts" / "pipeline_divisiones.py"), "-a", "1"],
             sandbox / "Logs", "pipeline_*.log",
         )
         salida = pd.read_excel(sandbox / "Salidas" / "Programas.xlsx", engine="calamine")
-        # Lista de programas con REQUIERE_REVISION del catálogo, junto a la del flujo semanal
+        # Lista de programas por revisar del catálogo, junto a la del flujo semanal
         revision = sandbox / "Revision" / "Revision Programas.xlsx"
         if revision.exists():
             destino = MAP_DIR / "Revision" / "Revision Catalogo Historico.xlsx"
@@ -103,10 +103,10 @@ def aplicar_clasificacion(df: pd.DataFrame, mapa: pd.DataFrame) -> pd.DataFrame:
         pos = orden.index(COL_FECHA) if COL_FECHA in orden else len(orden)
         orden = orden[:pos] + [c for c in COLS_CLASIFICACION if c not in orden] + orden[pos:]
     k = claves(df)
-    resultado = df.drop(columns=[c for c in COLS_CLASIFICACION if c in df.columns])
+    resultado = df.drop(columns=[c for c in COLS_CLASIFICACION + COLS_OBSOLETAS if c in df.columns])
     for c in COLS_CLASIFICACION:
         resultado[c] = k.map(mapa[c]).values
-    return resultado[orden]
+    return resultado[[c for c in orden if c not in COLS_OBSOLETAS]]
 
 
 def reclasificar() -> None:
