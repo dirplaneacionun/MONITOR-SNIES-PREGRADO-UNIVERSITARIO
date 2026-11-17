@@ -144,7 +144,10 @@ class Pagina:
     def esperar_listo(self, limite=60):
         fin = time.time() + limite
         while time.time() < fin:
-            if self.js("return !!document.querySelector('.filtros') && !(document.getElementById('tabla-estado')||{}).textContent "
+            # Inicio carga su tabla al acercarse a la vista: se desplaza hasta ella para validar también sus registros
+            self.js("const t = document.getElementById('tabla'); if (t && t.dataset.diferida) t.scrollIntoView({block: 'center'});")
+            if self.js("return !!document.querySelector('.filtros') && !(document.getElementById('tabla') || {dataset: {}}).dataset.diferida "
+                       "&& !(document.getElementById('tabla-estado')||{}).textContent "
                        "&& !!document.querySelector('#tabla [data-n]') && document.querySelector('#tabla [data-n]').textContent !== ''"):
                 time.sleep(0.15)
                 return
@@ -176,8 +179,6 @@ class Pagina:
               conteo: document.querySelector('.conteo-filtro').textContent };
             const ev = g('g-evolucion'); if (ev) out.evolucion = ultimo(ev[0]);
             const act = g('g-activos'); if (act) out.g_activos = ultimo(act[0]);
-            const mi = g('g-mayor-interes');
-            if (mi) out.g_mayor = mi.map(tr => ({ nombre: tr.name.replace(/ · [0-9.]+$/, ''), valor: ultimo(tr), color: tr.line.color }));
             const nov = g('g-novedades'); if (nov) out.g_novedades = nov.map(ultimo);
             const div = g('g-division'); if (div && div[0].y) out.suma_division = div.reduce((a, tr) => a + ultimo(tr), 0);
             const sec = g('g-sector'); if (sec) out.suma_sector = sec[0].values.reduce((a, b) => a + b, 0);
@@ -211,13 +212,8 @@ def esperado_inicio(filtro, busqueda=None, desde=None, hasta=None):
     campos = ["NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "MODALIDAD", "CODIGO_SNIES_DEL_PROGRAMA"]
     fa = [f for f in C["fechas_activos"] if not desde or desde <= f <= hasta]
     fe = [f for f in C["fechas_ejecucion"] if not desde or desde <= f <= hasta]
-    activos_df = filtrar(historico(fa[-1]), filtro, busqueda, campos) if fa else None
-    activos = len(activos_df) if fa else 0
+    activos = len(filtrar(historico(fa[-1]), filtro, busqueda, campos)) if fa else 0
     out = {"activos": activos}
-    # Gráfica Uninorte frente a mayor interés: programas activos por institución al final del periodo
-    codigos = [catalogos.UNINORTE, *catalogos.MAYOR_INTERES]
-    por_inst = activos_df["CODIGO_INSTITUCION"].astype(int).value_counts() if fa else pd.Series(dtype=int)
-    out["mayor"] = {c: int(por_inst.get(c, 0)) for c in codigos}
     for t in NOV:
         df = NOV[t]
         if desde:
@@ -225,7 +221,8 @@ def esperado_inicio(filtro, busqueda=None, desde=None, hasta=None):
         df = filtrar(df, filtro, busqueda, campos)
         out[f"{t}_periodo"] = len(df)
         out[t] = int((df.FECHA_DE_OBTENCION == (fe[-1] if fe else "")).sum())
-    fh = [f for f in C["historico_fechas"] if not desde or desde <= f <= hasta] if desde else C["historico_fechas"][-1:]
+    # Tabla: sin filtro de fecha, todas las ejecuciones del histórico; con filtro, las del periodo
+    fh = [f for f in C["historico_fechas"] if not desde or desde <= f <= hasta]
     out["tabla"] = sum(len(filtrar(historico(f), filtro, busqueda, campos)) for f in fh)
     return out
 
@@ -247,15 +244,6 @@ def comparar_inicio(p, nombre, filtro, busqueda=None, desde=None, hasta=None):
         ok &= verificar(f"inicio · {nombre} · gráfica novedades acumuladas",
                         s["g_novedades"] == [e["nuevos_periodo"], e["modificados_periodo"], e["inactivos_periodo"]],
                         f"{s['g_novedades']} vs {[e['nuevos_periodo'], e['modificados_periodo'], e['inactivos_periodo']]}")
-    total_mayor = sum(e["mayor"].values())
-    g_mayor = s.get("g_mayor") or []
-    ok &= verificar(f"inicio · {nombre} · gráfica Uninorte vs mayor interés (total)",
-                    sum(t["valor"] for t in g_mayor) == total_mayor, f"{sum(t['valor'] for t in g_mayor)} vs {total_mayor}")
-    uni = [t for t in g_mayor if t["nombre"] == catalogos.GRUPO_UNINORTE]
-    if e["mayor"][catalogos.UNINORTE]:
-        ok &= verificar(f"inicio · {nombre} · gráfica Uninorte vs mayor interés (Uninorte en rojo)",
-                        len(uni) == 1 and uni[0]["valor"] == e["mayor"][catalogos.UNINORTE] and uni[0]["color"] == "#BE0000",
-                        f"{uni} vs {e['mayor'][catalogos.UNINORTE]}")
     if e["activos"]:
         ok &= verificar(f"inicio · {nombre} · coherencia activos (línea, torta, división)",
                         s.get("g_activos") == s.get("suma_sector") == s.get("suma_division") == e["activos"],
@@ -437,6 +425,26 @@ def probar_rendimiento(p):
     verificar(f"{p.nombre} · rendimiento", p.carga < 15 and dt_ < 5, f"carga inicial {p.carga:.1f}s · filtro {dt_:.2f}s")
 
 
+def probar_carga_diferida(d, base):
+    """La tabla de Inicio no descarga el histórico hasta que el visitante se acerca a ella."""
+    d.get(f"{base}/index.html?diferida=1")
+    fin = time.time() + 30
+    while time.time() < fin and not d.execute_script("return !!(document.getElementById('g-activos') || {}).data"):
+        time.sleep(0.1)
+    time.sleep(1.5)
+    js_hist = "return performance.getEntriesByType('resource').filter(e => e.name.includes('data/historico/')).length"
+    antes = d.execute_script(js_hist)
+    estado = d.execute_script("return [document.getElementById('tabla').dataset.diferida || '', document.querySelector('#tabla [data-n]').textContent]")
+    verificar("inicio · carga diferida: sin descargar el histórico al abrir", antes == 0 and estado[0] == "pendiente", f"{antes} archivos · {estado}")
+    d.execute_script("document.getElementById('tabla').scrollIntoView({block: 'center'})")
+    fin = time.time() + 60
+    while time.time() < fin and not d.execute_script("return !document.getElementById('tabla').dataset.diferida && /registros/.test(document.querySelector('#tabla [data-n]').textContent) && !document.getElementById('tabla-estado').textContent"):
+        time.sleep(0.1)
+    despues = d.execute_script(js_hist)
+    n = d.execute_script("return document.querySelector('#tabla [data-n]').textContent")
+    verificar("inicio · carga diferida: descarga al llegar a la tabla", despues == len(C["historico_fechas"]), f"{despues} archivos · {n}")
+
+
 def consistencia_datos():
     h = historico_fuente.leer(["FECHA_DE_OBTENCION"])
     por_fecha = h["FECHA_DE_OBTENCION"].dt.strftime("%Y-%m-%d").value_counts().to_dict()
@@ -551,6 +559,7 @@ def main():
     d = navegador()
     try:
         # Inicio
+        probar_carga_diferida(d, base)
         p = Pagina(d, base, "index.html")
         p.claves = ["universidades", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"]
         comparar = lambda n, f, busqueda=None, desde=None, hasta=None: comparar_inicio(p, n, f, busqueda, desde, hasta)  # noqa: E731
@@ -559,7 +568,7 @@ def main():
         probar_filtros(p, comparar, [c for c in p.claves], args.rapida)
         probar_fechas(p, comparar)
         probar_combinaciones(p, comparar, True)
-        probar_tabla(p, historico(C["historico_fechas"][-1]))
+        probar_tabla(p, pd.concat([historico(f) for f in C["historico_fechas"]], ignore_index=True))
         seleccionar_fecha(p, "mes", "2026-10"); probar_exportacion(p); p.d.find_element(By.CSS_SELECTOR, ".fs-quitar").click(); p.esperar_listo()
         probar_cine(p)
         probar_rendimiento(p)

@@ -1,4 +1,4 @@
-/* Monitor SNIES Pregrado · Universitario — componentes compartidos del Dashboard */
+/* Monitor SNIES Pregrado · Universitario: componentes compartidos del Dashboard */
 (function () {
   "use strict";
   const S = window.SNIES || {};
@@ -58,6 +58,10 @@
   // ── Histórico de programas activos (docs/data/historico/AAAA-MM-DD.parquet) ─
   const cacheHistorico = new Map();
   let hyparquet = null;
+  // Cada ejecución repite casi los mismos textos (instituciones, programas, municipios, fechas). Compartir una sola
+  // copia de cada texto entre todos los registros reduce la memoria del histórico completo a una fracción.
+  const textosUnicos = new Map();
+  const unico = (s) => { const x = textosUnicos.get(s); if (x !== undefined) return x; textosUnicos.set(s, s); return s; };
   /** Registros de programas activos de una ejecución, leídos del histórico (una sola descarga por fecha). */
   function leerHistorico(fecha) {
     if (!cacheHistorico.has(fecha)) {
@@ -65,16 +69,23 @@
         hyparquet = hyparquet || (await import("hyparquet"));
         const resp = await fetch(`data/historico/${fecha}.parquet`);
         if (!resp.ok) throw new Error(`No se pudo leer el histórico del ${fecha} (${resp.status})`);
-        const filas = await hyparquet.parquetReadObjects({ file: await resp.arrayBuffer() });
-        filas.forEach((o) => {
+        const leidas = await hyparquet.parquetReadObjects({ file: await resp.arrayBuffer() });
+        if (!leidas.length) return leidas;
+        // Los registros se copian sobre una plantilla con todas las columnas: los objetos comparten una misma
+        // estructura interna en el navegador y ocupan cerca de una octava parte de la memoria que los objetos
+        // armados columna por columna (decisivo al consultar las 60 y más ejecuciones del histórico a la vez).
+        const plantilla = JSON.parse(JSON.stringify(Object.fromEntries([...Object.keys(leidas[0]), "_GU", "_MG"].map((c) => [c, null]))));
+        return leidas.map((o) => {
+          const r = { ...plantilla };
           for (const k in o) {
             const v = o[k];
-            if (typeof v === "bigint") o[k] = Number(v);
-            else if (v instanceof Date) o[k] = isNaN(v) ? null : v.toISOString().slice(0, 10);
+            r[k] = typeof v === "string" ? unico(v)
+              : typeof v === "bigint" ? Number(v)
+              : v instanceof Date ? (isNaN(v) ? null : unico(v.toISOString().slice(0, 10)))
+              : v;
           }
-          derivar(o);
+          return derivar(r);
         });
-        return filas;
       })());
       cacheHistorico.get(fecha).catch(() => cacheHistorico.delete(fecha));
     }
@@ -566,9 +577,6 @@
    * series: [{nombre, valores, color, dash}]
    * modo "acumulado": valores por ejecución que se acumulan (TOTAL = acumulado al final del periodo).
    * modo "stock": valores que ya son un nivel en cada ejecución (TOTAL = valor de la última fecha).
-   * Opcional por serie: ancho (grosor de la línea) y rango (posición en la leyenda).
-   * opciones.cercano: la información emergente muestra solo la línea más cercana al cursor (gráficas con
-   * muchas series, donde la vista unificada por fecha sería ilegible).
    */
   function lineas(div, fechas, series, opciones = {}) {
     if (!fechas.length || !series.length) return vacio(div);
@@ -582,15 +590,14 @@
     const trazas = ser.map((s) => ({
       type: "scatter", mode: "lines", x: fechas, y: s.valores,
       name: varias ? `${angosta && s.nombre.length > 36 ? s.nombre.slice(0, 35) + "…" : s.nombre} · ${fmt(total(s))}` : s.nombre,
-      line: { color: s.color, width: s.ancho || 2, dash: s.dash || "solid", shape: "linear" },
-      legendrank: s.rango || 1000,
-      hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}${opciones.cercano ? " · %{x|%d/%m/%Y}" : ""}<extra></extra>`,
+      line: { color: s.color, width: 2, dash: s.dash || "solid", shape: "linear" },
+      hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}<extra></extra>`,
     }));
     const layout = baseLayout({
       xaxis: ejeMeses(fechas, div.clientWidth - 80),
       yaxis: Object.assign({ rangemode: opciones.modo === "stock" && !varias ? "normal" : "tozero", gridcolor: REJILLA, zeroline: false, tickformat: ",d", automargin: true },
         ejeEntero(ser.flatMap((s) => s.valores), !(opciones.modo === "stock" && !varias))),
-      hovermode: opciones.cercano ? "closest" : "x unified",
+      hovermode: "x unified",
       margin: { l: 56, r: varias ? 12 : 16, t: varias ? 12 : 40, b: 48 },
     });
     if (varias) {

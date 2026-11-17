@@ -60,7 +60,7 @@ HEAD = '''<!doctype html>
     <div id="filtros"></div>
 '''
 FOOT = '''
-    <p class="pie-pagina">Fuente: SNIES — Sistema Nacional de Información de la Educación Superior, Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
+    <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7" crossorigin="anonymous"></script>
@@ -115,7 +115,7 @@ def main() -> None:
     '''
     TABLA_INICIO = '''    <section class="tarjeta" aria-labelledby="t-tabla">
           <h2 class="tarjeta-tit" id="t-tabla">PROGRAMAS ACADÉMICOS ACTIVOS (HISTÓRICO)</h2>
-          <p class="tarjeta-sub">Consulta del histórico de programas activos: <b data-tabla-periodo></b>. Sin filtro de fecha se muestra la última ejecución; con una fecha, rango, mes o año se incluyen todas las ejecuciones del periodo (un registro por programa y ejecución). Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR PARQUET exporta los registros filtrados.</p>
+          <p class="tarjeta-sub">Consulta del histórico de programas activos: <b data-tabla-periodo></b>. Incluye un registro por programa y ejecución: sin filtro de fecha, todas las ejecuciones; con una fecha, rango, mes o año, las ejecuciones del periodo. Los registros se descargan al llegar a esta sección y se ordenan desde la fecha más reciente; haga clic en un encabezado para ordenar según el tipo de dato. DESCARGAR PARQUET exporta los registros filtrados.</p>
           <div id="tabla-estado" aria-live="polite"></div>
           <div id="tabla"></div>
         </section>'''
@@ -125,10 +125,6 @@ def main() -> None:
                     "Número de programas universitarios de pregrado activos en el SNIES en cada ejecución de la herramienta. Cada punto corresponde a una descarga."),
             tarjeta("EVOLUCIÓN ACUMULADA DE NUEVOS, MODIFICADOS E INACTIVOS", "g-novedades",
                     "Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.")),
-        ancha("EVOLUCIÓN DE PROGRAMAS ACTIVOS: UNINORTE FRENTE A LAS UNIVERSIDADES DE MAYOR INTERÉS", "g-mayor-interes",
-              "Programas activos en cada ejecución de la Universidad del Norte (rojo) y de cada universidad de mayor interés (gris), "
-              "como líneas independientes: no se suman. Pase el cursor sobre una línea para resaltarla; haga clic en la leyenda para "
-              "ocultar o aislar universidades. Responde a todos los filtros; el filtro de universidades limita las instituciones mostradas.", "alta"),
         ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR MODALIDAD", "g-modalidad",
               "Programas activos en cada ejecución según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual."),
         ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR DIVISIÓN DE UNINORTE", "g-division",
@@ -201,7 +197,7 @@ def main() -> None:
                  f'      <p class="tarjeta-sub">{nota}</p>\n'
                  '      <div id="tabla"></div>\n'
                  '    </section>')
-        html = HEAD.format(css=v("assets/estilos.css"), title=p["ht"], desc=f'{p["t"].capitalize()} — Monitor SNIES de programas universitarios de pregrado',
+        html = HEAD.format(css=v("assets/estilos.css"), title=p["ht"], desc=f'{p["t"].capitalize()} · Monitor SNIES de programas universitarios de pregrado',
                            body=f' data-tipo="{tipo}"', h1=p["t"], sub=f'\n          <p class="enc-sub">{p["sub"]}</p>' if p["sub"] else "",
                            total='<div class="enc-total" aria-live="polite"><div class="et">TOTAL</div><div class="ev" id="total">–</div><div class="es" id="total-s"></div></div>',
                            nav=nav(f"{tipo}.html"))

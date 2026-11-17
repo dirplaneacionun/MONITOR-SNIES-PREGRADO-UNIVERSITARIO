@@ -46,6 +46,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import historico
+from catalogos import GRUPOS_UNIVERSIDAD, grupo_universidad
 
 # ── Rutas ─────────────────────────────────────────────────────────────────────
 SCRIPTS_DIR    = Path(__file__).resolve().parent
@@ -146,6 +147,8 @@ def configurar_logging(ahora: dt.datetime, prefijo: str = "monitor") -> Path:
         n += 1
 
     formato = _FormatoSeguro("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+    # Hora de Colombia en cada línea, igual que en el nombre del archivo (el servidor de GitHub Actions usa UTC)
+    formato.converter = lambda t: dt.datetime.fromtimestamp(t, ZONA_HORARIA).timetuple()
     consola = logging.StreamHandler(sys.stdout)
     consola.setFormatter(formato)
     archivo = logging.FileHandler(log_path, encoding="utf-8")
@@ -618,6 +621,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     # 5. Detección
     _seccion("5. DETECCION DE NOVEDADES")
     previo = archivo_anterior(fecha)
+    anterior = None
     orden_base = list(hoy.columns) + [COL_FECHA]
     if previo is None:
         log.warning("  No hay una ejecución anterior en Programas Activos: esta queda como línea base.")
@@ -675,7 +679,18 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     log.info(f"  Programas Activos: {restantes} archivo(s) (máximo {MAX_PROGRAMAS_ACTIVOS})")
 
     return {"nuevos": nuevos, "modificados": modificados, "inactivos": inactivos,
-            "total_activos": len(hoy), "linea_base": previo is None}
+            "total_activos": len(hoy), "linea_base": previo is None,
+            # Contexto del resumen del correo: ejecución anterior y programas activos por grupo de universidades
+            "fecha_anterior": previo[0] if previo else None,
+            "total_anterior": len(anterior) if anterior is not None else None,
+            "activos_grupo": activos_por_grupo(hoy),
+            "activos_grupo_anterior": activos_por_grupo(anterior) if anterior is not None else None}
+
+
+def activos_por_grupo(df: pd.DataFrame) -> dict[str, int]:
+    """Programas activos por grupo de universidades (Uninorte, mayor interés, otras)."""
+    conteo = df["CODIGO_INSTITUCION"].map(grupo_universidad).value_counts()
+    return {g: int(conteo.get(g, 0)) for g in GRUPOS_UNIVERSIDAD}
 
 
 def main(argv=None) -> int:
@@ -683,7 +698,7 @@ def main(argv=None) -> int:
     ahora = dt.datetime.now(ZONA_HORARIA)
     fecha = args.fecha or ahora.date()
     log_path = configurar_logging(ahora)
-    log.info(f"MONITOR SNIES PREGRADO · UNIVERSITARIO — ejecución del {fecha.isoformat()}")
+    log.info(f"MONITOR SNIES PREGRADO · UNIVERSITARIO · Ejecución del {fecha.isoformat()}")
     log.info(f"Log consolidado: {_ruta(log_path)}")
 
     try:

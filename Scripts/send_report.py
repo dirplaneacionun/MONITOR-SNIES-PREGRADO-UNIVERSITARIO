@@ -4,7 +4,10 @@ send_report.py
 Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail).
 
 - Sin emojis ni archivos adjuntos: el detalle completo está en el Dashboard.
-- Orden: NUEVOS, MODIFICADOS, INACTIVOS; máximo 10 registros por tabla.
+- Dos versiones del mismo contenido (multipart/alternative): texto plano y HTML.
+- Mismo lenguaje visual del Dashboard. Orden: indicadores, resumen descriptivo de la ejecución (variación
+  frente a la ejecución anterior y programas activos por grupo de universidades) y las secciones NUEVOS,
+  MODIFICADOS e INACTIVOS, con un máximo de 10 registros por tabla.
 - Prioridad: si hay registros de la Universidad del Norte o de las Universidades de Mayor
   Interés, la tabla muestra exclusivamente esos (hasta 10, primero Uninorte); si no hay,
   muestra los demás registros detectados hasta completar 10.
@@ -12,9 +15,9 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
 Variables de entorno:
-    SMTP_USER      — cuenta remitente (dirplaneacionun@gmail.com)
-    SMTP_PASS      — contraseña de aplicación de la cuenta
-    DESTINATARIOS  — lista separada por comas
+    SMTP_USER      cuenta remitente (dirplaneacionun@gmail.com)
+    SMTP_PASS      contraseña de aplicación de la cuenta
+    DESTINATARIOS  lista separada por comas
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import os
 import smtplib
 import ssl
 import sys
+import textwrap
 from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -47,14 +51,16 @@ MAX_FILAS = 10
 
 # Identidad visual
 # Paleta institucional Universidad del Norte
-NEGRO, ROJO, AMARILLO, GRIS, BORDE, TEXTO2 = "#000000", "#BE0000", "#FFB700", "#F5F5F5", "#E5E5E5", "#4D4D4D"
+NEGRO, ROJO, AMARILLO, GRIS, BORDE = "#000000", "#BE0000", "#FFB700", "#F5F5F5", "#E5E5E5"
+TEXTO2, TEXTO3 = "#4D4D4D", "#6B6B6B"   # textos secundarios del Dashboard (--texto-2 y --texto-3)
 ESTADO = {"nuevos": "#1E8E5A", "modificados": "#F28C00", "inactivos": "#BE0000"}  # validados para daltonismo
 FUENTE = "Montserrat, 'Segoe UI', Arial, sans-serif"
 
 SECCIONES = {
     "nuevos": {
         "titulo": "PROGRAMAS ACADÉMICOS NUEVOS",
-        "descripcion": "Programas que aparecen en el SNIES y no estaban en la ejecución anterior.",
+        "descripcion": "Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados).",
+        "vacio": "No se detectaron programas nuevos en esta ejecución.",
         "pagina": "nuevos.html",
         "columnas": [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
                      ("MODALIDAD", "MODALIDAD"), ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"),
@@ -63,6 +69,7 @@ SECCIONES = {
     "modificados": {
         "titulo": "PROGRAMAS ACADÉMICOS MODIFICADOS",
         "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad.",
+        "vacio": "No se detectaron cambios en los programas activos en esta ejecución.",
         "pagina": "modificados.html",
         "columnas": [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
                      ("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")],
@@ -70,6 +77,7 @@ SECCIONES = {
     "inactivos": {
         "titulo": "PROGRAMAS ACADÉMICOS INACTIVOS",
         "descripcion": "Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES.",
+        "vacio": "No se detectaron programas inactivos en esta ejecución.",
         "pagina": "inactivos.html",
         "columnas": [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
                      ("MODALIDAD", "MODALIDAD"), ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"),
@@ -97,6 +105,22 @@ def seleccionar(df: pd.DataFrame | None) -> tuple[pd.DataFrame, bool]:
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
+# Mismo lenguaje visual del Dashboard: encabezado negro con línea roja, fondo gris claro, tarjetas blancas con
+# borde gris de separación, títulos en mayúsculas y tablas con encabezado negro. Los estilos van en línea
+# porque la mayoría de los clientes de correo ignoran las hojas de estilo.
+
+def _num(v) -> str:
+    """Número con separador de miles institucional (punto)."""
+    return f"{v:,}".replace(",", ".")
+
+
+def _fecha(d) -> str:
+    return d.strftime("%d/%m/%Y")
+
+
+def _plural(n: int, singular: str, plural: str) -> str:
+    return f"{_num(n)} {singular if n == 1 else plural}"
+
 
 def _texto(col: str, v) -> str:
     if v is None or (not isinstance(v, str) and pd.isna(v)):
@@ -108,92 +132,251 @@ def _texto(col: str, v) -> str:
     return str(v)
 
 
-def _tabla(df: pd.DataFrame, columnas, color: str) -> str:
+def _tarjeta(contenido: str, color: str | None = None) -> str:
+    """Tarjeta blanca del Dashboard; con `color`, borde izquierdo de estado (como las tarjetas de indicadores)."""
+    borde = f"border-left:5px solid {color};" if color else ""
+    return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;table-layout:fixed;">'
+            f'<tr><td style="background:#FFFFFF;border:1px solid {BORDE};{borde}border-radius:10px;padding:16px 18px;">'
+            f"{contenido}</td></tr></table>")
+
+
+def _titulo(texto: str, margen: int = 0) -> str:
+    return (f'<div style="margin-top:{margen}px;font-family:{FUENTE};font-size:13px;font-weight:800;'
+            f'letter-spacing:.05em;color:{NEGRO};">{texto}</div>')
+
+
+def _subtitulo(texto: str) -> str:
+    return f'<p style="margin:4px 0 10px;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};">{texto}</p>'
+
+
+def _tabla(df: pd.DataFrame, columnas, numericas=()) -> str:
     th = (f"background:{NEGRO};color:#FFFFFF;font-family:{FUENTE};font-size:11px;font-weight:700;"
-          "letter-spacing:.04em;text-align:left;padding:8px 10px;border-bottom:3px solid " + color + ";")
-    cab = "".join(f'<th style="{th}">{escape(t)}</th>' for _, t in columnas)
+          "letter-spacing:.04em;padding:9px 10px;")
+    alinear = lambda c: "right" if c in numericas else "left"  # noqa: E731
+    cab = "".join(f'<th style="{th}text-align:{alinear(c)};">{escape(t)}</th>' for c, t in columnas)
     filas = []
     for i, (_, r) in enumerate(df.iterrows()):
         fondo = "#FFFFFF" if i % 2 == 0 else "#FAFAFA"
         td = (f"background:{fondo};font-family:{FUENTE};font-size:12px;color:{NEGRO};padding:7px 10px;"
               f"border-bottom:1px solid {BORDE};vertical-align:top;")
-        filas.append("<tr>" + "".join(f'<td style="{td}">{escape(_texto(c, r.get(c)))}</td>' for c, _ in columnas) + "</tr>")
-    return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-            f'style="border-collapse:collapse;margin:8px 0 4px;">'
-            f"<thead><tr>{cab}</tr></thead><tbody>{''.join(filas)}</tbody></table>")
+        filas.append("<tr>" + "".join(
+            f'<td style="{td}text-align:{alinear(c)};{"white-space:nowrap;" if c in numericas else ""}">'
+            f'{escape(_texto(c, r.get(c)))}</td>' for c, _ in columnas) + "</tr>")
+    # En pantallas angostas la tabla se desplaza dentro de su tarjeta, sin ensanchar el resto del correo
+    return (f'<div style="overflow-x:auto;"><table class="tabla" role="presentation" width="100%" cellpadding="0" '
+            f'cellspacing="0" style="border-collapse:collapse;border:1px solid {BORDE};margin:4px 0;">'
+            f"<thead><tr>{cab}</tr></thead><tbody>{''.join(filas)}</tbody></table></div>")
+
+
+def _variacion(hoy: int, antes: int | None) -> str:
+    if antes is None:
+        return "–"
+    d = hoy - antes
+    return "Sin variación" if d == 0 else f"{'+' if d > 0 else '−'}{_num(abs(d))}"
+
+
+def _frases_resumen(res: dict, fecha: date, negrita=lambda t: t) -> list[str]:
+    """Frases del resumen de la ejecución (activos, variación y novedades), comunes al HTML y al texto plano."""
+    activos, antes, f_ant = res.get("total_activos"), res.get("total_anterior"), res.get("fecha_anterior")
+    n = {t: 0 if res.get(t) is None else len(res[t]) for t in ("nuevos", "modificados", "inactivos")}
+    mod = res.get("modificados")
+    prog_mod = 0 if mod is None or mod.empty else mod["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
+
+    frases = [f"El {_fecha(fecha)} se descargó del SNIES el reporte de programas académicos universitarios de "
+              "pregrado con estado activo en Colombia."]
+    if activos is not None:
+        frase = f"Se identificaron {negrita(_plural(activos, 'programa activo', 'programas activos'))}"
+        if antes is not None and f_ant is not None:
+            d = activos - antes
+            frase += (f", la misma cifra de la ejecución anterior ({_fecha(f_ant)})" if d == 0 else
+                      f", {_num(abs(d))} {'más' if d > 0 else 'menos'} que en la ejecución anterior "
+                      f"({_fecha(f_ant)}: {_num(antes)})")
+        frases.append(frase + ".")
+    if not any(n.values()):
+        frases.append("No se detectaron programas nuevos, modificados ni inactivos.")
+    else:
+        frases.append(
+            f"Novedades detectadas: {_plural(n['nuevos'], 'programa nuevo', 'programas nuevos')}, "
+            f"{_plural(n['modificados'], 'cambio', 'cambios')} en "
+            f"{_plural(prog_mod, 'programa modificado', 'programas modificados')} y "
+            f"{_plural(n['inactivos'], 'programa inactivo', 'programas inactivos')}.")
+        grupos = pd.concat([res[t]["CODIGO_INSTITUCION"] for t in n if n[t]]).map(grupo_universidad)
+        uni, mi = int((grupos == GRUPO_UNINORTE).sum()), int((grupos == GRUPO_MAYOR_INTERES).sum())
+        frases.append(f"De estas novedades, {_num(uni)} corresponde{'' if uni == 1 else 'n'} a la Universidad del Norte "
+                      f"y {_num(mi)} a las Universidades de Mayor Interés.")
+    return frases
+
+
+def _grupos(res: dict, fecha: date):
+    """Programas activos por grupo de universidades: (columnas, filas) o None si no hay datos."""
+    hoy_g, antes_g, f_ant = res.get("activos_grupo"), res.get("activos_grupo_anterior"), res.get("fecha_anterior")
+    if not hoy_g:
+        return None
+    con_anterior = bool(antes_g) and f_ant is not None
+    cols = [("GRUPO", "GRUPO DE UNIVERSIDADES")]
+    if con_anterior:
+        cols.append(("ANTES", f"EJECUCIÓN ANTERIOR ({_fecha(f_ant)})"))
+    cols += [("HOY", f"ESTA EJECUCIÓN ({_fecha(fecha)})"), ("VAR", "VARIACIÓN")]
+    filas = pd.DataFrame([{"GRUPO": g, "ANTES": _num(antes_g.get(g, 0)) if con_anterior else None, "HOY": _num(v),
+                           "VAR": _variacion(v, antes_g.get(g, 0) if con_anterior else None)}
+                          for g, v in hoy_g.items()])
+    return cols, filas
+
+
+def _resumen(res: dict, fecha: date) -> str:
+    """Resumen descriptivo de la ejecución: activos, variación, novedades y programas activos por grupo."""
+    contenido = _titulo("RESUMEN DE LA EJECUCIÓN") + _subtitulo(" ".join(_frases_resumen(res, fecha, lambda t: f"<b>{t}</b>")))
+    grupos = _grupos(res, fecha)
+    if grupos:
+        contenido += (_titulo("PROGRAMAS ACTIVOS POR GRUPO DE UNIVERSIDADES", 14)
+                      + _tabla(grupos[1], grupos[0], numericas=("ANTES", "HOY", "VAR")))
+    return _tarjeta(contenido)
+
+
+def _descripcion(tipo: str, df: pd.DataFrame | None) -> str:
+    descripcion = SECCIONES[tipo]["descripcion"]
+    if tipo == "modificados" and df is not None and len(df):
+        descripcion += (f" En esta ejecución: {_plural(len(df), 'cambio', 'cambios')} en "
+                        f"{_plural(df['CODIGO_SNIES_DEL_PROGRAMA'].nunique(), 'programa', 'programas')}.")
+    return descripcion
+
+
+def _nota(total: int, mostrar: pd.DataFrame, prioritarios: bool) -> str:
+    """Explica qué registros muestra la tabla de la sección (prioridad Uninorte y Universidades de Mayor Interés)."""
+    if prioritarios:
+        return (f"Se muestran {_plural(len(mostrar), 'registro', 'registros')} de la Universidad del Norte y de las "
+                f"Universidades de Mayor Interés, de {_num(total)} detectados.")
+    if total > len(mostrar):
+        return (f"Se muestran {_num(len(mostrar))} de {_num(total)} registros. No hubo novedades de la Universidad "
+                "del Norte ni de las Universidades de Mayor Interés.")
+    return "No hubo novedades de la Universidad del Norte ni de las Universidades de Mayor Interés."
 
 
 def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
-    titulo = (f'<h2 style="margin:28px 0 2px;font-family:{FUENTE};font-size:15px;font-weight:800;letter-spacing:.04em;'
-              f'color:{NEGRO};border-left:5px solid {color};padding-left:10px;">{cfg["titulo"]} · '
-              f'{f"{total:,}".replace(",", ".")}</h2>')
-    desc = f'<p style="margin:2px 0 6px;font-family:{FUENTE};font-size:12px;color:{TEXTO2};">{cfg["descripcion"]}</p>'
+    contenido = _titulo(f"{cfg['titulo']} · {_num(total)}") + _subtitulo(_descripcion(tipo, df))
     if not total:
-        return titulo + desc + (f'<p style="font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
-                                f'padding:10px 12px;border-radius:6px;">Sin novedades en esta ejecución.</p>')
+        contenido += (f'<p style="margin:0;font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
+                      f'padding:10px 12px;border-radius:6px;">{cfg["vacio"]}</p>')
+        return _tarjeta(contenido, color)
     mostrar, prioritarios = seleccionar(df)
-    if tipo == "modificados":
-        programas = df["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
-        desc = desc.replace("</p>", f" {total} cambio(s) en {programas} programa(s).</p>")
-    if prioritarios:
-        nota = (f"Se muestran {len(mostrar)} registro(s) de la Universidad del Norte y de las Universidades de "
-                f"Mayor Interés, de {total} detectado(s).")
-    elif total > len(mostrar):
-        nota = (f"Se muestran {len(mostrar)} de {total} registros; no hubo novedades de la Universidad del Norte "
-                "ni de las Universidades de Mayor Interés.")
-    else:
-        nota = "No hubo novedades de la Universidad del Norte ni de las Universidades de Mayor Interés."
-    enlace = (f'<p style="margin:4px 0 0;font-family:{FUENTE};font-size:11px;color:{TEXTO2};">{nota} '
+    enlace = (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:11px;color:{TEXTO2};">{_nota(total, mostrar, prioritarios)} '
               f'<a href="{DASHBOARD_URL}{cfg["pagina"]}#fecha={fecha.isoformat()}" style="color:{ROJO};font-weight:700;">'
               f'Ver todos en el Dashboard</a></p>')  # enlace con el filtro de fecha de esta ejecución
-    return titulo + desc + _tabla(mostrar, cfg["columnas"], color) + enlace
+    return _tarjeta(contenido + _tabla(mostrar, cfg["columnas"]) + enlace, color)
 
 
-def _kpi(etiqueta: str, valor, color: str) -> str:
-    return (f'<td width="25%" style="padding:4px;"><div style="background:#FFFFFF;border:1px solid {BORDE};'
-            f'border-left:5px solid {color};border-radius:8px;padding:10px 12px;">'
-            f'<div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.05em;color:{TEXTO2};">{etiqueta}</div>'
-            f'<div style="font-family:{FUENTE};font-size:24px;font-weight:800;color:{NEGRO};">{valor}</div></div></td>')
+def _kpi(etiqueta: str, valor: str, detalle: str, color: str) -> str:
+    return (f'<td class="kpi" width="25%" valign="top" style="padding:0 4px;"><div style="background:#FFFFFF;border:1px solid {BORDE};'
+            f'border-left:5px solid {color};border-radius:10px;padding:12px 14px;">'
+            f'<div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.06em;color:{TEXTO2};">{etiqueta}</div>'
+            f'<div style="font-family:{FUENTE};font-size:26px;font-weight:800;color:{NEGRO};margin-top:2px;">{valor}</div>'
+            f'<div style="font-family:{FUENTE};font-size:11px;color:{TEXTO3};">{detalle}</div></div></td>')
+
+
+def _indicadores(res: dict, fecha: date) -> list[tuple[str, str, str, str]]:
+    """Indicadores de la ejecución (etiqueta, valor, detalle, color), comunes al HTML y al texto plano."""
+    nue, mod, ina = (res.get(k) for k in ("nuevos", "modificados", "inactivos"))
+    n = lambda d: 0 if d is None else len(d)  # noqa: E731
+    activos, antes, f_ant = res.get("total_activos"), res.get("total_anterior"), res.get("fecha_anterior")
+    detalle_activos = (f"{_variacion(activos, antes)} frente al {_fecha(f_ant)}"
+                       if activos is not None and antes is not None and f_ant is not None
+                       else f"Programas activos al {_fecha(fecha)}")
+    prog_mod = 0 if mod is None or mod.empty else mod["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
+    return [("PROGRAMAS ACTIVOS", _num(activos) if activos is not None else "–", detalle_activos, NEGRO),
+            ("NUEVOS", _num(n(nue)), f"Ejecución del {_fecha(fecha)}", ESTADO["nuevos"]),
+            ("MODIFICADOS", _num(n(mod)), f"Cambios en {_plural(prog_mod, 'programa', 'programas')}", ESTADO["modificados"]),
+            ("INACTIVOS", _num(n(ina)), f"Ejecución del {_fecha(fecha)}", ESTADO["inactivos"])]
+
+
+def construir_texto(resultados: dict, fecha: date) -> str:
+    """
+    Versión en texto plano del reporte, con el mismo contenido del HTML. Se incluye como alternativa en el
+    mensaje: la muestran los clientes configurados para texto, los lectores de pantalla y las vistas previas,
+    y su presencia reduce la probabilidad de que el correo se clasifique como no deseado.
+    """
+    res = resultados.get("pregrado") or {}
+    ajustar = lambda t, ini="", sig="": textwrap.fill(t, 78, initial_indent=ini, subsequent_indent=sig)  # noqa: E731
+    lineas = ["MONITOR SNIES PREGRADO · UNIVERSITARIO",
+              "Programas Académicos Universitarios de Pregrado en Colombia",
+              f"Reporte de la ejecución del {_fecha(fecha)}", "",
+              "INDICADORES"]
+    lineas += [f"  {e.capitalize()}: {v} ({d})" for e, v, d, _ in _indicadores(res, fecha)]
+    lineas += ["", "RESUMEN DE LA EJECUCIÓN", ajustar(" ".join(_frases_resumen(res, fecha)))]
+    grupos = _grupos(res, fecha)
+    if grupos:
+        cols, filas = grupos
+        lineas += ["", "PROGRAMAS ACTIVOS POR GRUPO DE UNIVERSIDADES"]
+        for _, r in filas.iterrows():
+            antes = f"; ejecución anterior: {r['ANTES']}" if r["ANTES"] is not None else ""
+            lineas.append(ajustar(f"{r['GRUPO']}: {r['HOY']}{antes}; variación: {r['VAR']}", "  ", "    "))
+    for tipo in ("nuevos", "modificados", "inactivos"):
+        cfg, df = SECCIONES[tipo], res.get(tipo)
+        total = 0 if df is None else len(df)
+        lineas += ["", f"{cfg['titulo']} · {_num(total)}", ajustar(_descripcion(tipo, df))]
+        if not total:
+            lineas.append(cfg["vacio"])
+            continue
+        mostrar, prioritarios = seleccionar(df)
+        for i, (_, r) in enumerate(mostrar.iterrows(), 1):
+            campos = " | ".join(f"{t}: {_texto(c, r.get(c))}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
+            lineas.append(ajustar(f"{i}. {campos}", "  ", "     "))
+        lineas += [ajustar(_nota(total, mostrar, prioritarios)),
+                   f"Ver todos en el Dashboard: {DASHBOARD_URL}{cfg['pagina']}#fecha={fecha.isoformat()}"]
+    lineas += ["", f"Dashboard completo: {DASHBOARD_URL}", "",
+               ajustar("Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de "
+                       "Educación Nacional · Dirección de Planeación, Universidad del Norte."),
+               "Reporte generado automáticamente en cada ejecución del monitor."]
+    return "\n".join(lineas) + "\n"
 
 
 def construir_cuerpo(resultados: dict, fecha: date) -> str:
     res = resultados.get("pregrado") or {}
     nue, mod, ina = (res.get(k) for k in ("nuevos", "modificados", "inactivos"))
-    n = lambda d: 0 if d is None else len(d)  # noqa: E731
-    fmt = lambda v: f"{v:,}".replace(",", ".")  # noqa: E731
-    activos = res.get("total_activos")
-    kpis = (_kpi("PROGRAMAS ACTIVOS", fmt(activos) if activos is not None else "–", NEGRO)
-            + _kpi("NUEVOS", fmt(n(nue)), ESTADO["nuevos"])
-            + _kpi("MODIFICADOS", fmt(n(mod)), ESTADO["modificados"])
-            + _kpi("INACTIVOS", fmt(n(ina)), ESTADO["inactivos"]))
+    kpis = "".join(_kpi(*k) for k in _indicadores(res, fecha))
     return f"""<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Pantallas angostas (clientes que admiten estilos incrustados): indicadores en dos columnas, fecha bajo el título
+     y tablas más compactas. Los demás clientes muestran el diseño de escritorio. */
+  @media (max-width: 600px) {{
+    .kpi {{ display: inline-block !important; width: 50% !important; box-sizing: border-box; padding: 0 4px 8px !important; }}
+    .enc-fecha {{ display: block !important; width: auto !important; text-align: left !important; padding-top: 12px !important; }}
+    .tabla th, .tabla td {{ padding: 6px !important; font-size: 10.5px !important; }}
+  }}
+</style>
+</head>
 <body style="margin:0;padding:0;background:{GRIS};">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{GRIS};"><tr><td align="center" style="padding:20px 10px;">
-<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;background:#FFFFFF;border-radius:10px;overflow:hidden;">
-  <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};padding:22px 24px;">
-    <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
-    <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
-    <div style="font-family:{FUENTE};font-size:12px;color:#D9D9D9;margin-top:10px;"><span style="display:inline-block;width:28px;height:3px;background:{AMARILLO};vertical-align:middle;margin-right:8px;"></span>Reporte de la ejecución del {fecha.strftime('%d/%m/%Y')}</div>
+<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;table-layout:fixed;">
+  <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td valign="top">
+        <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
+        <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
+      </td>
+      <td class="enc-fecha" valign="top" align="right" width="150">
+        <div style="border:1px solid #3A3A3A;border-top:3px solid {AMARILLO};border-radius:10px;padding:8px 14px;text-align:right;">
+          <div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.08em;color:#D9D9D9;">EJECUCIÓN</div>
+          <div style="font-family:{FUENTE};font-size:18px;font-weight:800;color:#FFFFFF;">{_fecha(fecha)}</div>
+        </div>
+      </td>
+    </tr></table>
   </td></tr>
-  <tr><td style="padding:16px 20px 4px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{kpis}</tr></table>
-  </td></tr>
-  <tr><td align="center" style="padding:12px 24px 0;">
-    <a href="{DASHBOARD_URL}" style="display:inline-block;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:13px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:12px 32px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
-  </td></tr>
-  <tr><td style="padding:0 24px 8px;">
+  <tr><td style="padding:16px 0 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;"><tr>{kpis}</tr></table>
+    {_resumen(res, fecha)}
     {_seccion("nuevos", nue, fecha)}
     {_seccion("modificados", mod, fecha)}
     {_seccion("inactivos", ina, fecha)}
   </td></tr>
-  <tr><td style="padding:18px 24px 22px;">
-    <div style="background:{GRIS};border-left:4px solid {NEGRO};padding:10px 12px;font-family:{FUENTE};font-size:11px;color:{TEXTO2};">
-      <b style="color:{NEGRO};">FUENTE:</b> SNIES — Sistema Nacional de Información de la Educación Superior, Ministerio de Educación Nacional.<br>
-      Reporte generado automáticamente por la Dirección de Planeación, Universidad del Norte.
-    </div>
+  <tr><td align="center" style="padding:4px 0 8px;">
+    <a href="{DASHBOARD_URL}" style="display:inline-block;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:13px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:12px 32px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
+  </td></tr>
+  <tr><td align="center" style="padding:16px 12px 4px;font-family:{FUENTE};font-size:11px;line-height:1.5;color:{TEXTO3};">
+    Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte.<br>
+    Reporte generado automáticamente en cada ejecución del monitor.
   </td></tr>
 </table></td></tr></table>
 </body></html>"""
@@ -217,9 +400,15 @@ def enviar_reporte(resultados: dict, fecha: date) -> None:
     destinatarios = [d.strip() for d in os.environ["DESTINATARIOS"].split(",") if d.strip()]
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"MONITOR SNIES PREGRADO · UNIVERSITARIO · Reporte del {fecha.strftime('%d/%m/%Y')}"
+    res = resultados.get("pregrado") or {}
+    n = {t: 0 if res.get(t) is None else len(res[t]) for t in ("nuevos", "modificados", "inactivos")}
+    # Asunto descriptivo: las cifras de novedades se leen desde la bandeja de entrada
+    msg["Subject"] = (f"MONITOR SNIES PREGRADO · UNIVERSITARIO · Reporte del {fecha.strftime('%d/%m/%Y')}: "
+                      f"{n['nuevos']} nuevos, {n['modificados']} modificados, {n['inactivos']} inactivos")
     msg["From"] = remitente
     msg["To"] = ", ".join(destinatarios)
+    # Alternativas en orden de preferencia creciente: texto plano y luego HTML (el cliente muestra la última que admite)
+    msg.attach(MIMEText(construir_texto(resultados, fecha), "plain", "utf-8"))
     msg.attach(MIMEText(construir_cuerpo(resultados, fecha), "html", "utf-8"))
 
     log.info(f"Conectando a {SMTP_HOST}:{SMTP_PORT}...")

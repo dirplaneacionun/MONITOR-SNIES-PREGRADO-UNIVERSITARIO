@@ -299,6 +299,51 @@ class TestCorreo(unittest.TestCase):
                           "total_activos": 1}}, dt.date(2026, 11, 17))
         self.assertIn(f'{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17"', html)
 
+    def test_resumen_descriptivo_con_variacion_y_grupos(self):
+        hoy = self._df([1713, 1701, 9999, 9999])
+        res = {"nuevos": self._df([1713, 9999]).assign(TIPO_NOVEDAD="NUEVO"), "modificados": None, "inactivos": None,
+               "total_activos": 4, "total_anterior": 3, "fecha_anterior": dt.date(2026, 11, 10),
+               "activos_grupo": run_snies.activos_por_grupo(hoy),
+               "activos_grupo_anterior": run_snies.activos_por_grupo(self._df([1713, 1701, 9999]))}
+        html = send_report.construir_cuerpo({"pregrado": res}, dt.date(2026, 11, 17))
+        self.assertIn("1 más que en la ejecución anterior (10/11/2026: 3)", html)
+        self.assertIn("Novedades detectadas: 2 programas nuevos, 0 cambios en 0 programas modificados y 0 programas inactivos.", html)
+        self.assertIn("1 corresponde a la Universidad del Norte y 0 a las Universidades de Mayor Interés", html)
+        self.assertIn("EJECUCIÓN ANTERIOR (10/11/2026)", html)
+        self.assertIn("+1 frente al 10/11/2026", html)
+        self.assertNotIn("—", html)   # estilo institucional: sin raya
+
+    def test_resumen_sin_novedades_ni_ejecucion_anterior(self):
+        html = send_report.construir_cuerpo({"pregrado": {"total_activos": 5}}, dt.date(2026, 11, 17))
+        self.assertIn("No se detectaron programas nuevos, modificados ni inactivos.", html)
+        self.assertIn("Programas activos al 17/11/2026", html)
+        self.assertNotIn("EJECUCIÓN ANTERIOR", html)
+
+    def test_version_texto_plano(self):
+        res = {"nuevos": self._df([1713, 9999]).assign(TIPO_NOVEDAD="NUEVO"), "total_activos": 4, "total_anterior": 3,
+               "fecha_anterior": dt.date(2026, 11, 10), "activos_grupo": {"UNIVERSIDAD DEL NORTE": 2},
+               "activos_grupo_anterior": {"UNIVERSIDAD DEL NORTE": 1}}
+        with mock.patch.dict(os.environ, {"SMTP_USER": "r@example.com", "SMTP_PASS": "x", "DESTINATARIOS": "a@example.com"}), \
+                mock.patch.object(send_report, "_enviar") as enviar:
+            send_report.enviar_reporte({"pregrado": res}, dt.date(2026, 11, 17))
+        partes = enviar.call_args.args[0].get_payload()
+        self.assertEqual([p.get_content_type() for p in partes], ["text/plain", "text/html"])   # HTML preferido
+        texto = partes[0].get_payload(decode=True).decode("utf-8")
+        self.assertIn("1 más que en la ejecución anterior (10/11/2026: 3)", texto)
+        self.assertIn("UNIVERSIDAD DEL NORTE: 2; ejecución anterior: 1; variación: +1", texto)
+        self.assertIn("1. INSTITUCIÓN: INST 1713", texto)    # Uninorte primero
+        self.assertIn(f"{send_report.DASHBOARD_URL}nuevos.html#fecha=2026-11-17", texto)
+        self.assertNotIn("<", texto)
+        self.assertNotIn("—", texto)
+
+    def test_asunto_con_cifras(self):
+        with mock.patch.dict(os.environ, {"SMTP_USER": "r@example.com", "SMTP_PASS": "x", "DESTINATARIOS": "a@example.com"}), \
+                mock.patch.object(send_report, "_enviar") as enviar:
+            send_report.enviar_reporte({"pregrado": {"nuevos": self._df([1713]).assign(TIPO_NOVEDAD="NUEVO"),
+                                                     "total_activos": 1}}, dt.date(2026, 11, 17))
+        asunto = str(enviar.call_args.args[0]["Subject"])
+        self.assertTrue(asunto.endswith("Reporte del 17/11/2026: 1 nuevos, 0 modificados, 0 inactivos"), asunto)
+
     def test_alerta_tecnica_solo_al_remitente(self):
         # Alerta del paso "Pruebas unitarias" del workflow: el log está fuera de Logs/ y no debe presentarse como tal
         with tempfile.TemporaryDirectory() as tmp, \

@@ -9,7 +9,7 @@
   <link rel="icon" href="data:,">
   <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" integrity="sha384-RkASv+6KfBMW9eknReJIJ6b3UnjKOKC5bOUaNgIY778NFbQ8MtWq9Lr/khUgqtTt" crossorigin="anonymous">
-  <link rel="stylesheet" href="assets/estilos.css?v=d5cf220014">
+  <link rel="stylesheet" href="assets/estilos.css?v=8b480d35c1">
   <script type="importmap">
     { "imports": {
       "hyparquet": "./assets/vendor/hyparquet/src/index.js",
@@ -57,13 +57,6 @@
         <h2 class="tarjeta-tit" id="t-g-novedades">EVOLUCIÓN ACUMULADA DE NUEVOS, MODIFICADOS E INACTIVOS</h2>
         <p class="tarjeta-sub">Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.</p>
         <div class="grafica " id="g-novedades" role="img" aria-label="Evolución acumulada de nuevos, modificados e inactivos"></div>
-      </section>
-    </div>
-    <div class="fila">
-      <section class="tarjeta" aria-labelledby="t-g-mayor-interes">
-        <h2 class="tarjeta-tit" id="t-g-mayor-interes">EVOLUCIÓN DE PROGRAMAS ACTIVOS: UNINORTE FRENTE A LAS UNIVERSIDADES DE MAYOR INTERÉS</h2>
-        <p class="tarjeta-sub">Programas activos en cada ejecución de la Universidad del Norte (rojo) y de cada universidad de mayor interés (gris), como líneas independientes: no se suman. Pase el cursor sobre una línea para resaltarla; haga clic en la leyenda para ocultar o aislar universidades. Responde a todos los filtros; el filtro de universidades limita las instituciones mostradas.</p>
-        <div class="grafica alta" id="g-mayor-interes" role="img" aria-label="Evolución de programas activos: uninorte frente a las universidades de mayor interés"></div>
       </section>
     </div>
     <div class="fila">
@@ -121,22 +114,22 @@
     </div>
     <section class="tarjeta" aria-labelledby="t-tabla">
           <h2 class="tarjeta-tit" id="t-tabla">PROGRAMAS ACADÉMICOS ACTIVOS (HISTÓRICO)</h2>
-          <p class="tarjeta-sub">Consulta del histórico de programas activos: <b data-tabla-periodo></b>. Sin filtro de fecha se muestra la última ejecución; con una fecha, rango, mes o año se incluyen todas las ejecuciones del periodo (un registro por programa y ejecución). Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR PARQUET exporta los registros filtrados.</p>
+          <p class="tarjeta-sub">Consulta del histórico de programas activos: <b data-tabla-periodo></b>. Incluye un registro por programa y ejecución: sin filtro de fecha, todas las ejecuciones; con una fecha, rango, mes o año, las ejecuciones del periodo. Los registros se descargan al llegar a esta sección y se ordenan desde la fecha más reciente; haga clic en un encabezado para ordenar según el tipo de dato. DESCARGAR PARQUET exporta los registros filtrados.</p>
           <div id="tabla-estado" aria-live="polite"></div>
           <div id="tabla"></div>
         </section>
-    <p class="pie-pagina">Fuente: SNIES — Sistema Nacional de Información de la Educación Superior, Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
+    <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js" integrity="sha384-5JqMv4L/Xa0hfvtF06qboNdhvuYXUku9ZrhZh3bSk8VXF0A/RuSLHpLsSV9Zqhl6" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/es.min.js" integrity="sha384-Kw6LvVIC7DwgsJQKl9iQVoSEKfjX0hE8/JbVEVnkQNHLI0x2njGmBcqt2VxcPEKC" crossorigin="anonymous"></script>
-  <script src="data/comun.js?v=d222290ca5"></script>
-  <script src="data/activos.js?v=853d43e30c"></script>
-  <script src="data/nuevos.js?v=970c3f011f"></script>
-  <script src="data/modificados.js?v=7d04d3ab42"></script>
-  <script src="data/inactivos.js?v=14767c351d"></script>
-  <script src="assets/app.js?v=f8f7f7f555"></script>
-  <script src="assets/inicio.js?v=0b1a183cdc"></script>
+  <script src="data/comun.js?v=c8ca9ae705"></script>
+  <script src="data/activos.js?v=829a814157"></script>
+  <script src="data/nuevos.js?v=e855c70ee8"></script>
+  <script src="data/modificados.js?v=fcf894e6a3"></script>
+  <script src="data/inactivos.js?v=64a31081a0"></script>
+  <script src="assets/app.js?v=94259f6416"></script>
+  <script src="assets/inicio.js?v=3a6ac9469a"></script>
 </body>
 </html>
