@@ -18,7 +18,9 @@ Flujo:
     8. Actualiza los datos del Dashboard (docs/data) y envía el correo institucional.
 
 Si una etapa falla no se envía correo a DESTINATARIOS: se envía una alerta técnica
-solo a la cuenta remitente (SMTP_USER) y el proceso termina con código 1.
+solo a la cuenta remitente (SMTP_USER) y el proceso termina con código 1. Si lo que falla
+es el envío del reporte, los datos y el Dashboard ya quedan actualizados, pero el proceso
+también termina con código 1 y se intenta la alerta técnica.
 
 Ejecución:
     python Scripts/run_snies.py                      # ejecución semanal normal
@@ -397,7 +399,12 @@ def clasificar_divisiones(archivo_normalizado: Path) -> Path:
 # ── Lectura y escritura ───────────────────────────────────────────────────────
 
 def leer_programas(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path, engine="calamine")
+    """
+    Lee un archivo de programas conservando el tipo de cada celda (dtype=object): sin esto pandas convierte a
+    número los textos numéricos y trunca los códigos largos (ej. CODIGO_ANTERIOR_ICFES de 21 dígitos) o deja
+    sufijos ".0" en códigos y conteos guardados como texto.
+    """
+    df = pd.read_excel(path, engine="calamine", dtype=object)
     df[COL_SNIES] = pd.to_numeric(df[COL_SNIES], errors="raise").astype("int64")
     return df
 
@@ -673,7 +680,7 @@ def main(argv=None) -> int:
     fecha = args.fecha or ahora.date()
     log_path = configurar_logging(ahora)
     log.info(f"MONITOR SNIES PREGRADO · UNIVERSITARIO — ejecución del {fecha.isoformat()}")
-    log.info(f"Log consolidado: {log_path.relative_to(ROOT)}")
+    log.info(f"Log consolidado: {_ruta(log_path)}")
 
     try:
         resultados = ejecutar(args, fecha)
@@ -722,8 +729,17 @@ def main(argv=None) -> int:
         try:
             from send_report import enviar_reporte
             enviar_reporte({"pregrado": resultados}, fecha)
-        except Exception:
-            log.exception("No se pudo enviar el correo.")
+        except Exception as exc:
+            # Los datos y el Dashboard ya quedaron actualizados; la ejecución se marca como fallida para que
+            # el workflow lo indique y se avisa a la cuenta remitente.
+            log.exception(f"FALLA EN CORREO: {exc}")
+            try:
+                from send_report import enviar_alerta_falla
+                enviar_alerta_falla(fecha, "CORREO", f"{type(exc).__name__}: {exc}", log_path)
+            except Exception:
+                log.exception("No se pudo enviar la alerta técnica.")
+            log.info("EJECUCION TERMINADA CON ERRORES (datos y Dashboard actualizados; correo no enviado)")
+            return 1
 
     shutil.rmtree(TMP_DIR, ignore_errors=True)
     log.info("EJECUCION COMPLETADA")

@@ -8,6 +8,8 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
 - Prioridad: si hay registros de la Universidad del Norte o de las Universidades de Mayor
   Interés, la tabla muestra exclusivamente esos (hasta 10, primero Uninorte); si no hay,
   muestra los demás registros detectados hasta completar 10.
+- La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor.
+- enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
 Variables de entorno:
     SMTP_USER      — cuenta remitente (dirplaneacionun@gmail.com)

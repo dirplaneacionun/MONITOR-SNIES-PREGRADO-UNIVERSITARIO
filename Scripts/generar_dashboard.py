@@ -1,13 +1,19 @@
 """
 generar_dashboard.py
 --------------------
-Genera los datos del Dashboard (docs/data/*.js) a partir de:
+Genera los datos del Dashboard a partir de:
     Historico/Historico Programas Activos.parquet
     Novedades/Nuevos.parquet, Modificados.parquet, Inactivos.parquet
 
-Las páginas (docs/*.html) y su lógica (docs/assets/) son archivos estáticos: este script
-solo actualiza los datos. Los datos se escriben como scripts (window.SNIES.*) para que las
-páginas funcionen tanto en GitHub Pages como abiertas directamente desde el disco.
+Salidas:
+    docs/data/*.js                       datos compactos de gráficas, filtros y tablas (window.SNIES.*)
+    docs/data/historico/AAAA-MM-DD.parquet  programas activos de cada ejecución, que la tabla de Inicio
+                                         consulta bajo demanda (solo se reescribe un archivo si cambió)
+    docs/*.html                          páginas regeneradas con generar_paginas.py (sufijos de versión
+                                         actualizados según el contenido de estilos, scripts y datos)
+
+La lógica de las páginas (docs/assets/) es estática. Los datos se escriben como scripts para que las
+páginas funcionen en GitHub Pages.
 
 Ejecución:
     python Scripts/generar_dashboard.py
@@ -28,7 +34,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalogos import (  # noqa: E402
     GRUPOS_UNIVERSIDAD, MAYOR_INTERES, MODALIDAD_A_GRUPO, MODALIDADES_GRUPO, TIPOS_CAMBIO,
-    TIPOS_CAMBIO_ETIQUETA, UNINORTE, modalidad_grupo,
+    TIPOS_CAMBIO_ETIQUETA, UNINORTE,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -154,6 +160,14 @@ def escribir_historico(hist: pd.DataFrame) -> list[str]:
     return fechas
 
 
+def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]:
+    """Nombre vigente (el más reciente registrado) de cada universidad de mayor interés, para el filtro."""
+    cols = ["CODIGO_INSTITUCION", "NOMBRE_INSTITUCION", COL_FECHA]
+    todo = pd.concat([hist[cols]] + [d[cols] for d in novedades.values() if set(cols) <= set(d.columns)])
+    ultimo = todo.sort_values(COL_FECHA).groupby("CODIGO_INSTITUCION")["NOMBRE_INSTITUCION"].last()
+    return {str(c): str(ultimo.get(c, f"INSTITUCIÓN {c}")).rstrip("- ").strip() for c in MAYOR_INTERES}
+
+
 # ── Generación ────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -232,6 +246,7 @@ def main() -> int:
         "catalogos": {
             "uninorte": UNINORTE,
             "mayor_interes": list(MAYOR_INTERES),
+            "mayor_interes_nombres": nombres_mayor_interes(hist, novedades),
             "grupos_universidad": list(GRUPOS_UNIVERSIDAD),
             "modalidad_a_grupo": MODALIDAD_A_GRUPO,
             "grupos_modalidad": list(MODALIDADES_GRUPO),

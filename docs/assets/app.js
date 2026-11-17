@@ -157,6 +157,90 @@
     }
   }
 
+  // ── Selector jerárquico de universidades ──────────────────────────────────
+  /**
+   * TODAS LAS UNIVERSIDADES · UNIVERSIDAD DEL NORTE · UNIVERSIDADES DE MAYOR INTERÉS (desplegable con cada
+   * universidad) · OTRAS UNIVERSIDADES. Marcar el grupo de mayor interés selecciona todas sus universidades;
+   * marcar solo algunas deja el grupo en estado parcial.
+   */
+  class SelectorUniversidades {
+    constructor(alCambiar) {
+      this.alCambiar = alCambiar; this.sel = new Set();
+      const [gU, gM, gO] = CAT.grupos_universidad;
+      this.grupos = { U: gU, M: gM, O: gO };
+      const nombres = CAT.mayor_interes_nombres || {};
+      this.codigos = CAT.mayor_interes.map(String).sort((a, b) => String(nombres[a] || a).localeCompare(String(nombres[b] || b), "es"));
+      this.nombres = Object.fromEntries(this.codigos.map((c) => [c, nombres[c] || `INSTITUCIÓN ${c}`]));
+      const el = (this.el = document.createElement("div"));
+      el.className = "ms";
+      el.innerHTML = `<button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false"><span></span></button>
+        <div class="ms-panel" role="listbox" aria-multiselectable="true">
+          <label class="ms-op todos"><input type="checkbox" data-todos checked> TODAS LAS UNIVERSIDADES</label>
+          <div class="ms-ops">
+            <label class="ms-op"><input type="checkbox" data-g="U"> ${esc(gU)}</label>
+            <div class="ms-op ms-padre">
+              <label><input type="checkbox" data-g="M"> ${esc(gM)}</label>
+              <button type="button" class="ms-expandir" aria-expanded="false" aria-label="Mostrar las universidades de mayor interés">▸</button>
+            </div>
+            <div class="ms-hijos" hidden>
+              ${this.codigos.map((c) => `<label class="ms-op hijo"><input type="checkbox" data-c="${c}"> ${esc(this.nombres[c])}</label>`).join("")}
+            </div>
+            <label class="ms-op"><input type="checkbox" data-g="O"> ${esc(gO)}</label>
+          </div>
+        </div>`;
+      this.btn = el.querySelector(".ms-btn");
+      this.padre = el.querySelector('[data-g="M"]');
+      this.hijos = el.querySelector(".ms-hijos");
+      const expandir = el.querySelector(".ms-expandir");
+      this.btn.addEventListener("click", (e) => { e.stopPropagation(); cerrarDesplegables(this); this.alternar(); });
+      el.querySelector(".ms-panel").addEventListener("click", (e) => e.stopPropagation());
+      expandir.addEventListener("click", () => {
+        const abrir = this.hijos.hidden;
+        this.hijos.hidden = !abrir; expandir.textContent = abrir ? "▾" : "▸"; expandir.setAttribute("aria-expanded", abrir);
+      });
+      el.querySelector('[data-g="U"]').addEventListener("change", (e) => this.marcar("U", e.target.checked));
+      el.querySelector('[data-g="O"]').addEventListener("change", (e) => this.marcar("O", e.target.checked));
+      this.padre.addEventListener("change", (e) => { this.codigos.forEach((c) => this.marcar(`C:${c}`, e.target.checked, false)); this.listo(); });
+      el.querySelectorAll("[data-c]").forEach((cb) => cb.addEventListener("change", () => this.marcar(`C:${cb.dataset.c}`, cb.checked)));
+      el.querySelector("[data-todos]").addEventListener("change", () => { this.limpiar(); this.alCambiar(); });
+      desplegables.push(this);
+      this.refrescar();
+    }
+    marcar(token, activo, avisar = true) {
+      activo ? this.sel.add(token) : this.sel.delete(token);
+      if (avisar) this.listo();
+    }
+    listo() { this.refrescar(); this.alCambiar(); }
+    alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
+    cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
+    limpiar() { this.sel.clear(); this.refrescar(); }
+    /** ¿El registro pertenece a la selección? (sin selección: todas las universidades) */
+    pasa(r) {
+      if (!this.sel.size) return true;
+      if (r._GU === this.grupos.U) return this.sel.has("U");
+      if (r._GU === this.grupos.O) return this.sel.has("O");
+      return this.sel.has(`C:${Number(r.CODIGO_INSTITUCION)}`);
+    }
+    refrescar() {
+      const marcadas = this.codigos.filter((c) => this.sel.has(`C:${c}`));
+      this.el.querySelectorAll("[data-c]").forEach((cb) => (cb.checked = this.sel.has(`C:${cb.dataset.c}`)));
+      this.el.querySelector('[data-g="U"]').checked = this.sel.has("U");
+      this.el.querySelector('[data-g="O"]').checked = this.sel.has("O");
+      this.padre.checked = marcadas.length === this.codigos.length;
+      this.padre.indeterminate = marcadas.length > 0 && marcadas.length < this.codigos.length;
+      this.el.querySelector("[data-todos]").checked = this.sel.size === 0;
+      const partes = [];
+      if (this.sel.has("U")) partes.push(this.grupos.U);
+      if (marcadas.length === this.codigos.length) partes.push(this.grupos.M);
+      else if (marcadas.length === 1) partes.push(this.nombres[marcadas[0]]);
+      else if (marcadas.length > 1) partes.push(`${marcadas.length} DE MAYOR INTERÉS`);
+      if (this.sel.has("O")) partes.push(this.grupos.O);
+      this.btn.querySelector("span").textContent = partes.length ? partes.join(" + ") : "TODAS LAS UNIVERSIDADES";
+      this.btn.title = partes.length ? [this.sel.has("U") && this.grupos.U, ...marcadas.map((c) => this.nombres[c]), this.sel.has("O") && this.grupos.O].filter(Boolean).join(" · ") : "TODAS LAS UNIVERSIDADES";
+      this.btn.classList.toggle("con-valor", this.sel.size > 0);
+    }
+  }
+
   // ── Selector de fechas de ejecución: fecha, rango, mes o año ──────────────
   class SelectorFechas {
     constructor(fechas, alCambiar) {
@@ -283,6 +367,11 @@
           barra.appendChild(this.fechas.el);
           return;
         }
+        if (clave === "universidades") {
+          this.ms[clave] = new SelectorUniversidades(config.alCambiar);
+          barra.appendChild(this.ms[clave].el);
+          return;
+        }
         const opciones = (config.opciones && config.opciones[clave]) || this.opcionesDe(def.campo);
         const ms = new Multiselect(def, opciones, (config.etiquetas || {})[clave], config.alCambiar);
         this.ms[clave] = ms;
@@ -314,6 +403,7 @@
     /** ¿El registro cumple los filtros? opciones.sinFecha ignora el rango de fechas. */
     pasa(r, opciones = {}) {
       for (const [clave, ms] of Object.entries(this.ms)) {
+        if (ms.pasa) { if (!ms.pasa(r)) return false; continue; }
         if (ms.sel.size && !ms.sel.has(String(r[DEF_FILTROS[clave].campo]))) return false;
       }
       if (!opciones.sinFecha && this.desde && r.FECHA_DE_OBTENCION) {
@@ -347,9 +437,11 @@
     }, extra || {});
   }
   /** Con conteos pequeños, marcas del eje solo en enteros (evita 0, 0, 1, 1...). */
-  function ejeEntero(valores) {
-    const max = Math.max(0, ...valores.map((v) => Math.abs(v)));
-    return max <= 8 ? { dtick: max <= 4 ? 1 : 2 } : {};
+  function ejeEntero(valores, desdeCero = true) {
+    const abs = valores.map((v) => Math.abs(v));
+    const max = Math.max(0, ...abs), min = desdeCero ? 0 : Math.min(...abs);
+    const rango = max - min;   // rango visible del eje: con rangos cortos, marcas solo en enteros
+    return rango <= 8 ? { dtick: rango <= 4 ? 1 : 2 } : {};
   }
   /** Quita el mensaje "Sin datos" (si lo hay) antes de dibujar; no toca un gráfico existente. */
   function limpiarVacio(div) { if (div.querySelector(".vacio")) div.innerHTML = ""; }
@@ -394,7 +486,8 @@
     }));
     const layout = baseLayout({
       xaxis: ejeMeses(fechas),
-      yaxis: Object.assign({ rangemode: opciones.modo === "stock" && !varias ? "normal" : "tozero", gridcolor: REJILLA, zeroline: false, tickformat: ",d", automargin: true }, ejeEntero(ser.flatMap((s) => s.valores))),
+      yaxis: Object.assign({ rangemode: opciones.modo === "stock" && !varias ? "normal" : "tozero", gridcolor: REJILLA, zeroline: false, tickformat: ",d", automargin: true },
+        ejeEntero(ser.flatMap((s) => s.valores), !(opciones.modo === "stock" && !varias))),
       hovermode: "x unified",
       margin: { l: 56, r: varias ? 12 : 16, t: varias ? 12 : 40, b: 48 },
     });
@@ -518,7 +611,9 @@
       if (v == null || v === "") continue;
       hay = true;
       if (typeof v === "number") continue;
-      if (typeof v === "string" && NUMERO_TEXTO.test(v.trim()) && !/^0\d/.test(v.trim())) continue;
+      // Número guardado como texto: sin ceros a la izquierda y con hasta 15 dígitos (precisión exacta en JavaScript).
+      // Los códigos más largos (ej. CODIGO_ANTERIOR_ICFES) se tratan como texto con orden numérico.
+      if (typeof v === "string" && NUMERO_TEXTO.test(v.trim()) && !/^0\d/.test(v.trim()) && v.replace(/\D/g, "").length <= 15) continue;
       return "texto";
     }
     return hay ? "numero" : "texto";
@@ -533,7 +628,7 @@
     if (typeof v === "number") {
       if (c.startsWith("COSTO_")) return Math.round(v).toLocaleString("es-CO");
       if (c === "PUNTAJE_TOTAL") return v.toLocaleString("es-CO", { maximumFractionDigits: 4 });
-      return Number.isInteger(v) ? String(v) : String(Math.round(v * 10000) / 10000);
+      return Number.isInteger(v) ? String(v) : v.toLocaleString("es-CO", { maximumFractionDigits: 4, useGrouping: false });
     }
     const s = String(v);
     return /^-?\d+\.0+$/.test(s) ? s.replace(/\.0+$/, "") : s;   // "160.0" → "160"
