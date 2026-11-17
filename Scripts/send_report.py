@@ -123,7 +123,7 @@ def _tabla(df: pd.DataFrame, columnas, color: str) -> str:
             f"<thead><tr>{cab}</tr></thead><tbody>{''.join(filas)}</tbody></table>")
 
 
-def _seccion(tipo: str, df: pd.DataFrame | None) -> str:
+def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
     titulo = (f'<h2 style="margin:28px 0 2px;font-family:{FUENTE};font-size:15px;font-weight:800;letter-spacing:.04em;'
@@ -146,7 +146,8 @@ def _seccion(tipo: str, df: pd.DataFrame | None) -> str:
     else:
         nota = "No hubo novedades de la Universidad del Norte ni de las Universidades de Mayor Interés."
     enlace = (f'<p style="margin:4px 0 0;font-family:{FUENTE};font-size:11px;color:{TEXTO2};">{nota} '
-              f'<a href="{DASHBOARD_URL}{cfg["pagina"]}" style="color:{ROJO};font-weight:700;">Ver todos en el Dashboard</a></p>')
+              f'<a href="{DASHBOARD_URL}{cfg["pagina"]}#fecha={fecha.isoformat()}" style="color:{ROJO};font-weight:700;">'
+              f'Ver todos en el Dashboard</a></p>')  # enlace con el filtro de fecha de esta ejecución
     return titulo + desc + _tabla(mostrar, cfg["columnas"], color) + enlace
 
 
@@ -184,9 +185,9 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
     <a href="{DASHBOARD_URL}" style="display:inline-block;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:13px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:12px 32px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
   </td></tr>
   <tr><td style="padding:0 24px 8px;">
-    {_seccion("nuevos", nue)}
-    {_seccion("modificados", mod)}
-    {_seccion("inactivos", ina)}
+    {_seccion("nuevos", nue, fecha)}
+    {_seccion("modificados", mod, fecha)}
+    {_seccion("inactivos", ina, fecha)}
   </td></tr>
   <tr><td style="padding:18px 24px 22px;">
     <div style="background:{GRIS};border-left:4px solid {NEGRO};padding:10px 12px;font-family:{FUENTE};font-size:11px;color:{TEXTO2};">
@@ -252,7 +253,7 @@ def enviar_alerta_falla(fecha: date, etapa: str, detalle: str, log_path: Path) -
       <h2 style="color:{ROJO};border-bottom:3px solid {ROJO};padding-bottom:8px;">ALERTA TÉCNICA · MONITOR SNIES PREGRADO</h2>
       <p style="font-size:13px;">La ejecución del {fecha.strftime('%d/%m/%Y')} no se completó. No se envió el reporte a los destinatarios.</p>
       <table style="border-collapse:collapse;font-size:13px;margin:12px 0;">
-        {fila("ETAPA", etapa)}{fila("DETALLE", detalle)}{fila("LOG", "Logs/" + log_path.name)}
+        {fila("ETAPA", etapa)}{fila("DETALLE", detalle)}{fila("LOG", ("Logs/" if log_path.parent.name == "Logs" else "") + log_path.name)}
       </table>{enlace}
       <h3 style="font-size:14px;">ÚLTIMAS LÍNEAS DEL LOG</h3>
       <pre style="background:{GRIS};padding:12px;font-size:11px;white-space:pre-wrap;">{escape(extracto)}</pre>

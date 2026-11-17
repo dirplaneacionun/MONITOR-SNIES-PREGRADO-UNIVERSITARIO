@@ -31,7 +31,9 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          fetch-depth: 0
+          # Solo la última versión: el pipeline no usa el historial y descargarlo completo
+          # haría cada ejecución más lenta a medida que el repositorio crece.
+          fetch-depth: 1
           # El token de escritura no queda guardado en .git/config durante el pipeline:
           # solo se usa en el paso "Publicar cambios".
           persist-credentials: false
@@ -60,6 +62,34 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      # Pruebas unitarias de la lógica crítica (menos de un segundo). Si alguna falla, el pipeline
+      # no se ejecuta y el histórico, las novedades y el Dashboard no se modifican.
+      - name: Pruebas unitarias
+        id: pruebas
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests 2>&1 | tee "$RUNNER_TEMP/pruebas_unitarias.log"
+
+      - name: Alerta técnica por pruebas fallidas
+        if: failure() && steps.pruebas.outcome == 'failure'
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          python - <<'PYTHON'
+          import datetime as dt, os, sys
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          sys.path.insert(0, "Scripts")
+          from send_report import enviar_alerta_falla
+          enviar_alerta_falla(
+              dt.datetime.now(ZoneInfo("America/Bogota")).date(), "PRUEBAS UNITARIAS",
+              "Una o más pruebas unitarias fallaron: el pipeline no se ejecutó y los datos no se modificaron.",
+              Path(os.environ["RUNNER_TEMP"]) / "pruebas_unitarias.log",
+          )
+          PYTHON
 
       - name: Ejecutar pipeline SNIES
         env:

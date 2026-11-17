@@ -7,10 +7,9 @@
   <meta name="description" content="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="icon" href="data:,">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
+  <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" integrity="sha384-RkASv+6KfBMW9eknReJIJ6b3UnjKOKC5bOUaNgIY778NFbQ8MtWq9Lr/khUgqtTt" crossorigin="anonymous">
-  <link rel="stylesheet" href="assets/estilos.css?v=199c3fca5a">
+  <link rel="stylesheet" href="assets/estilos.css?v=6323c505df">
   <script type="importmap">
     { "imports": {
       "hyparquet": "./assets/vendor/hyparquet/src/index.js",
@@ -58,6 +57,13 @@
         <h2 class="tarjeta-tit" id="t-g-novedades">EVOLUCIÓN ACUMULADA DE NUEVOS, MODIFICADOS E INACTIVOS</h2>
         <p class="tarjeta-sub">Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.</p>
         <div class="grafica " id="g-novedades" role="img" aria-label="Evolución acumulada de nuevos, modificados e inactivos"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta" aria-labelledby="t-g-mayor-interes">
+        <h2 class="tarjeta-tit" id="t-g-mayor-interes">EVOLUCIÓN DE PROGRAMAS ACTIVOS: UNINORTE FRENTE A LAS UNIVERSIDADES DE MAYOR INTERÉS</h2>
+        <p class="tarjeta-sub">Programas activos en cada ejecución de la Universidad del Norte (rojo) y de cada universidad de mayor interés (gris), como líneas independientes: no se suman. Pase el cursor sobre una línea para resaltarla; haga clic en la leyenda para ocultar o aislar universidades. Responde a todos los filtros; el filtro de universidades limita las instituciones mostradas.</p>
+        <div class="grafica alta" id="g-mayor-interes" role="img" aria-label="Evolución de programas activos: uninorte frente a las universidades de mayor interés"></div>
       </section>
     </div>
     <div class="fila">
@@ -125,12 +131,12 @@
   <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js" integrity="sha384-5JqMv4L/Xa0hfvtF06qboNdhvuYXUku9ZrhZh3bSk8VXF0A/RuSLHpLsSV9Zqhl6" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/es.min.js" integrity="sha384-Kw6LvVIC7DwgsJQKl9iQVoSEKfjX0hE8/JbVEVnkQNHLI0x2njGmBcqt2VxcPEKC" crossorigin="anonymous"></script>
-  <script src="data/comun.js?v=b9a94c593f"></script>
+  <script src="data/comun.js?v=f5506f58de"></script>
   <script src="data/activos.js?v=a64ad46a6e"></script>
   <script src="data/nuevos.js?v=e855c70ee8"></script>
   <script src="data/modificados.js?v=fcf894e6a3"></script>
   <script src="data/inactivos.js?v=64a31081a0"></script>
-  <script src="assets/app.js?v=4da449d9e5"></script>
-  <script src="assets/inicio.js?v=bd3a1e358e"></script>
+  <script src="assets/app.js?v=ea7d1ab00e"></script>
+  <script src="assets/inicio.js?v=3d664adf41"></script>
 </body>
 </html>

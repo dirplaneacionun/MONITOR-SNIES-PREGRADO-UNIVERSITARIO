@@ -19,6 +19,10 @@
   const colDiv = A.asignarColores(divisiones);
   const modalidades = C.catalogos.grupos_modalidad;
   const colMod = A.asignarColores(modalidades);
+  // Comparación de Uninorte con cada universidad de mayor interés (líneas independientes, no sumadas)
+  const UNINORTE = Number(C.catalogos.uninorte);
+  const nombreInstitucion = Object.assign({ [UNINORTE]: C.catalogos.grupos_universidad[0] }, C.catalogos.mayor_interes_nombres);
+  const GRIS_CONTEXTO = "#9E9E9E", RESALTADO = "#000000";
 
   const filtros = new A.Filtros($("filtros"), {
     buscar: "Buscar Por Programa Académico, Institución, Modalidad, Código SNIES ...",
@@ -43,6 +47,35 @@
     return campo ? por : total;
   }
   const recortar = (serie, ia, ib) => serie.slice(ia, ib + 1);
+
+  /**
+   * Uninorte (rojo) frente a cada universidad de mayor interés (gris): una línea por institución, ordenadas en
+   * la leyenda por programas activos al final del periodo. Al pasar el cursor, la línea gris se resalta en negro.
+   * El filtro de universidades limita las instituciones mostradas; los demás filtros se aplican igual que en
+   * el resto de la página.
+   */
+  function comparativo(div, vs, n, ia, ib, fechasR) {
+    const codigos = [UNINORTE, ...C.catalogos.mayor_interes.map(Number)];
+    const propias = vs.filter((v) => codigos.includes(Number(v.CODIGO_INSTITUCION)));
+    const por = evolucion(propias, n, "CODIGO_INSTITUCION");
+    const series = codigos
+      .map((c) => ({ c, valores: recortar(por[c] || new Array(n).fill(0), ia, ib) }))
+      .filter((s) => s.valores.some((x) => x > 0));
+    if (!series.length) return A.vacio(div, "Sin programas de Uninorte ni de las universidades de mayor interés para los filtros seleccionados");
+    const ultimo = (s) => s.valores[s.valores.length - 1];
+    const otras = series.filter((s) => s.c !== UNINORTE).sort((a, b) => ultimo(b) - ultimo(a));
+    const uni = series.filter((s) => s.c === UNINORTE);
+    const trazas = [...otras, ...uni].map((s) => ({   // Uninorte al final: se dibuja por encima de las demás
+      nombre: nombreInstitucion[s.c] || `INSTITUCIÓN ${s.c}`, valores: s.valores,
+      color: s.c === UNINORTE ? A.ROJO : GRIS_CONTEXTO, ancho: s.c === UNINORTE ? 3 : 1.5,
+      rango: s.c === UNINORTE ? 1 : 2 + otras.indexOf(s),
+    }));
+    A.lineas(div, fechasR, trazas, { modo: "stock", cercano: true });
+    if (div.removeAllListeners) { div.removeAllListeners("plotly_hover"); div.removeAllListeners("plotly_unhover"); }
+    const gris = (i) => div.data && div.data[i] && div.data[i].line.color !== A.ROJO;
+    div.on("plotly_hover", (e) => { const i = e.points[0].curveNumber; if (gris(i)) Plotly.restyle(div, { "line.color": RESALTADO, "line.width": 2.5 }, [i]); });
+    div.on("plotly_unhover", (e) => { const i = e.points[0].curveNumber; if (gris(i)) Plotly.restyle(div, { "line.color": GRIS_CONTEXTO, "line.width": 1.5 }, [i]); });
+  }
 
   // Tabla de programas activos: siempre desde el histórico (Historico Programas Activos), por ejecución
   let turnoTabla = 0;
@@ -79,9 +112,10 @@
 
     // Evolución de los programas activos (nivel en cada ejecución)
     if (!fechasR.length) {
-      ["g-activos", "g-modalidad", "g-division", "g-cine", "g-sector-evol"].forEach((id) => A.vacio($(id), "Sin descargas de programas activos en el periodo seleccionado"));
+      ["g-activos", "g-mayor-interes", "g-modalidad", "g-division", "g-cine", "g-sector-evol"].forEach((id) => A.vacio($(id), "Sin descargas de programas activos en el periodo seleccionado"));
     } else {
       A.lineas($("g-activos"), fechasR, [{ nombre: "PROGRAMAS ACTIVOS", valores: recortar(evolucion(vs, n), ia, ib), color: A.ROJO }], { modo: "stock" });
+      comparativo($("g-mayor-interes"), vs, n, ia, ib, fechasR);
       const porMod = evolucion(vs, n, "_MG");
       A.lineas($("g-modalidad"), fechasR, modalidades.filter((m) => porMod[m]).map((m) => ({ nombre: m, valores: recortar(porMod[m], ia, ib), color: colMod[m].color, dash: colMod[m].dash })), { modo: "stock" });
       const porDiv = evolucion(vs, n, "DIVISION_UNINORTE");

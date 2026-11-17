@@ -2,7 +2,7 @@
 Prueba de punta a punta del Dashboard (docs/) con Chrome sin interfaz.
 
 Interactúa con cada control (clics reales sobre filtros, selector de fechas, buscador, encabezados de tabla,
-paginación, selector CINE, exportación y navegación) y compara lo que muestra cada componente con un cálculo
+paginación, selector CINE, exportación, navegación y filtros guardados en la dirección) y compara lo que muestra cada componente con un cálculo
 independiente hecho en Python sobre los mismos datos. También verifica la coherencia de los datos generados
 (docs/data) con los archivos fuente (Historico/, Novedades/).
 
@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 sys.path.insert(0, str(ROOT / "Scripts"))
 import catalogos  # noqa: E402
+import historico as historico_fuente  # noqa: E402
 
 RESULTADOS: list[tuple[str, bool, str]] = []
 
@@ -175,6 +176,8 @@ class Pagina:
               conteo: document.querySelector('.conteo-filtro').textContent };
             const ev = g('g-evolucion'); if (ev) out.evolucion = ultimo(ev[0]);
             const act = g('g-activos'); if (act) out.g_activos = ultimo(act[0]);
+            const mi = g('g-mayor-interes');
+            if (mi) out.g_mayor = mi.map(tr => ({ nombre: tr.name.replace(/ · [0-9.]+$/, ''), valor: ultimo(tr), color: tr.line.color }));
             const nov = g('g-novedades'); if (nov) out.g_novedades = nov.map(ultimo);
             const div = g('g-division'); if (div && div[0].y) out.suma_division = div.reduce((a, tr) => a + ultimo(tr), 0);
             const sec = g('g-sector'); if (sec) out.suma_sector = sec[0].values.reduce((a, b) => a + b, 0);
@@ -208,8 +211,13 @@ def esperado_inicio(filtro, busqueda=None, desde=None, hasta=None):
     campos = ["NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "MODALIDAD", "CODIGO_SNIES_DEL_PROGRAMA"]
     fa = [f for f in C["fechas_activos"] if not desde or desde <= f <= hasta]
     fe = [f for f in C["fechas_ejecucion"] if not desde or desde <= f <= hasta]
-    activos = len(filtrar(historico(fa[-1]), filtro, busqueda, campos)) if fa else 0
+    activos_df = filtrar(historico(fa[-1]), filtro, busqueda, campos) if fa else None
+    activos = len(activos_df) if fa else 0
     out = {"activos": activos}
+    # Gráfica Uninorte frente a mayor interés: programas activos por institución al final del periodo
+    codigos = [catalogos.UNINORTE, *catalogos.MAYOR_INTERES]
+    por_inst = activos_df["CODIGO_INSTITUCION"].astype(int).value_counts() if fa else pd.Series(dtype=int)
+    out["mayor"] = {c: int(por_inst.get(c, 0)) for c in codigos}
     for t in NOV:
         df = NOV[t]
         if desde:
@@ -239,6 +247,15 @@ def comparar_inicio(p, nombre, filtro, busqueda=None, desde=None, hasta=None):
         ok &= verificar(f"inicio · {nombre} · gráfica novedades acumuladas",
                         s["g_novedades"] == [e["nuevos_periodo"], e["modificados_periodo"], e["inactivos_periodo"]],
                         f"{s['g_novedades']} vs {[e['nuevos_periodo'], e['modificados_periodo'], e['inactivos_periodo']]}")
+    total_mayor = sum(e["mayor"].values())
+    g_mayor = s.get("g_mayor") or []
+    ok &= verificar(f"inicio · {nombre} · gráfica Uninorte vs mayor interés (total)",
+                    sum(t["valor"] for t in g_mayor) == total_mayor, f"{sum(t['valor'] for t in g_mayor)} vs {total_mayor}")
+    uni = [t for t in g_mayor if t["nombre"] == catalogos.GRUPO_UNINORTE]
+    if e["mayor"][catalogos.UNINORTE]:
+        ok &= verificar(f"inicio · {nombre} · gráfica Uninorte vs mayor interés (Uninorte en rojo)",
+                        len(uni) == 1 and uni[0]["valor"] == e["mayor"][catalogos.UNINORTE] and uni[0]["color"] == "#BE0000",
+                        f"{uni} vs {e['mayor'][catalogos.UNINORTE]}")
     if e["activos"]:
         ok &= verificar(f"inicio · {nombre} · coherencia activos (línea, torta, división)",
                         s.get("g_activos") == s.get("suma_sector") == s.get("suma_division") == e["activos"],
@@ -421,7 +438,7 @@ def probar_rendimiento(p):
 
 
 def consistencia_datos():
-    h = pd.read_parquet(ROOT / "Historico" / "Historico Programas Activos.parquet", columns=["FECHA_DE_OBTENCION"])
+    h = historico_fuente.leer(["FECHA_DE_OBTENCION"])
     por_fecha = h["FECHA_DE_OBTENCION"].dt.strftime("%Y-%m-%d").value_counts().to_dict()
     verificar("datos · fechas del histórico publicadas", sorted(por_fecha) == C["historico_fechas"], f"{len(por_fecha)} vs {len(C['historico_fechas'])}")
     errores = [f for f in C["historico_fechas"] if len(pd.read_parquet(DOCS / "data" / "historico" / f"{f}.parquet", columns=["CODIGO_SNIES_DEL_PROGRAMA"])) != por_fecha.get(f)]
@@ -442,11 +459,93 @@ def consistencia_datos():
               and k["modificados"] == int((NOV["modificados"].FECHA_DE_OBTENCION == u).sum()) and k["activos"] == por_fecha[C["fechas_activos"][-1]], json.dumps(k))
 
 
+def probar_url(d, base):
+    """Filtros en la dirección: carga, normalización, recarga, cambio de apartado, edición manual y limpieza."""
+    ultima = C["ultima_ejecucion"]
+    mes = ultima[:7]
+    desde_mes, hasta_mes = f"{mes}-01", str((pd.Timestamp(f"{mes}-01") + pd.offsets.MonthEnd(0)).date())
+    otras = ("grupo", catalogos.GRUPO_OTRAS)
+    mod_mes = NOV["modificados"][NOV["modificados"].FECHA_DE_OBTENCION.str.startswith(mes)]
+    cambio = mod_mes["TIPO_CAMBIO_DETECTADO"].value_counts().index[0]
+
+    # Carga directa con filtros (incluido un valor inexistente, que debe descartarse)
+    d.get("about:blank")
+    q = Pagina(d, base, f"modificados.html#universidad=otras&sector=PRIVADO&mes={mes}&cambio={cambio.replace(' ', '+')}&division=NO_EXISTE")
+    q.nombre = "url"
+    filtro = {"universidades": otras, "sectores": "PRIVADO", "cambios": cambio}
+    comparar_detalle(q, "modificados", "url · carga directa", filtro, desde=desde_mes, hasta=hasta_mes)
+    verificar("url · valor inexistente descartado", "NO_EXISTE" not in d.current_url, d.current_url)
+    verificar("url · selector de fechas restaurado", q.js("return document.querySelector('.fs-btn span').textContent").endswith(mes[:4]),
+              q.js("return document.querySelector('.fs-btn span').textContent"))
+    d.refresh(); q.esperar_listo()
+    comparar_detalle(q, "modificados", "url · tras recargar", filtro, desde=desde_mes, hasta=hasta_mes)
+    # Cambio de apartado: se conservan los filtros comunes, no el tipo de cambio (propio de Modificados)
+    enlace = d.find_element(By.CSS_SELECTOR, '.nav a[href^="nuevos.html"]')
+    href = enlace.get_attribute("href")
+    verificar("url · menú conserva filtros comunes", "universidad=otras" in href and "sector=PRIVADO" in href and f"mes={mes}" in href, href)
+    verificar("url · menú no arrastra el tipo de cambio", "cambio=" not in href, href)
+    enlace.click(); q.esperar_listo()
+    comparar_detalle(q, "nuevos", "url · tras cambiar de apartado", {"universidades": otras, "sectores": "PRIVADO"}, desde=desde_mes, hasta=hasta_mes)
+    # Edición manual de la dirección en la misma página (evento hashchange)
+    d.get(f"{base}/nuevos.html#fecha={ultima}"); time.sleep(0.5); q.esperar_listo()
+    comparar_detalle(q, "nuevos", "url · edición manual", {}, desde=ultima, hasta=ultima)
+    d.get(f"{base}/nuevos.html#fecha=2099-01-01&sector=INVALIDO"); time.sleep(0.5); q.esperar_listo()
+    verificar("url · parámetros inválidos ignorados", d.current_url.endswith("nuevos.html"), d.current_url)
+    comparar_detalle(q, "nuevos", "url · tras parámetros inválidos", {})
+    # Inicio: rango + universidad, enlaces de las tarjetas, búsqueda y LIMPIAR FILTROS
+    fe = C["fechas_ejecucion"]
+    d.get("about:blank")
+    p = Pagina(d, base, f"index.html#desde={fe[-5]}&hasta={fe[-1]}&universidad=uninorte")
+    p.nombre = "url"
+    uni = {"universidades": ("grupo", catalogos.GRUPO_UNINORTE)}
+    comparar_inicio(p, "url · inicio con rango", uni, desde=fe[-5], hasta=fe[-1])
+    href = d.find_element(By.CSS_SELECTOR, ".kpi.k-nuevos").get_attribute("href")
+    verificar("url · tarjeta KPI conserva filtros", "universidad=uninorte" in href and f"desde={fe[-5]}" in href, href)
+    p.js("""const i = document.querySelector('.buscar'); i.value = 'derecho'; i.dispatchEvent(new Event('input'));""")
+    time.sleep(0.5); p.esperar_listo()
+    verificar("url · búsqueda guardada", "buscar=derecho" in d.current_url, d.current_url)
+    reset_filtros(p)
+    verificar("url · LIMPIAR FILTROS deja la dirección sin filtros", d.current_url.endswith("index.html"), d.current_url)
+    verificar("url · errores de consola", not p.errores(), str(p.errores()[:3]))
+
+
+def probar_movil(d, base):
+    """Pantalla angosta (390 px): leyendas debajo del gráfico y etiquetas del eje X sin superposición."""
+    d.set_window_size(390, 900)
+    try:
+        for pagina in ("index.html", "modificados.html"):
+            d.get("about:blank")
+            q = Pagina(d, base, pagina)
+            info = q.js("""return [...document.querySelectorAll('.grafica')].filter(e => e.data && e.layout && e.layout.xaxis && e.layout.xaxis.tickvals)
+                .map(e => ({ id: e.id, varias: e.data.length > 1 && e.layout.showlegend, orientacion: (e.layout.legend || {}).orientation,
+                             etiquetas: e.layout.xaxis.tickvals.length, ancho: e._fullLayout._size.w,
+                             desborde: document.documentElement.scrollWidth > document.documentElement.clientWidth }));""")
+            mal_leyenda = [i["id"] for i in info if i["varias"] and i["orientacion"] != "h"]
+            mal_eje = [f'{i["id"]}:{i["etiquetas"]}' for i in info if i["etiquetas"] > max(2, i["ancho"] // 40)]
+            verificar(f"móvil · {pagina} · leyendas debajo del gráfico", not mal_leyenda, str(mal_leyenda))
+            verificar(f"móvil · {pagina} · etiquetas del eje sin superposición", not mal_eje, str(mal_eje))
+            verificar(f"móvil · {pagina} · sin desplazamiento horizontal", not any(i["desborde"] for i in info))
+            verificar(f"móvil · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
+    finally:
+        d.set_window_size(1400, 1000)
+
+
+def tipografia_local():
+    """El Dashboard no carga recursos de Google Fonts: la tipografía se sirve desde docs/assets/fuentes."""
+    paginas = [(DOCS / f"{n}.html").read_text(encoding="utf-8") for n in ("index", "nuevos", "modificados", "inactivos")]
+    css = (DOCS / "assets" / "estilos.css").read_text(encoding="utf-8")
+    verificar("tipografía · sin Google Fonts", not any("googleapis" in t or "gstatic" in t for t in paginas + [css]))
+    fuentes = [DOCS / "assets" / "fuentes" / n for n in ("montserrat-latin.woff2", "montserrat-latin-ext.woff2", "OFL.txt")]
+    verificar("tipografía · archivos y licencia presentes", all(f.exists() for f in fuentes))
+    verificar("tipografía · formato woff2", all(f.read_bytes()[:4] == b"wOF2" for f in fuentes[:2]))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rapida", action="store_true", help="Prueba una muestra de opciones por filtro")
     args = ap.parse_args()
     consistencia_datos()
+    tipografia_local()
     srv = servidor()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     d = navegador()
@@ -488,6 +587,8 @@ def main():
                 enlaces = q.d.find_elements(By.CSS_SELECTOR, f'.nav a[href="{nav}"]')
                 verificar(f"{tipo} · enlace de navegación {nav}", len(enlaces) == 1)
             verificar(f"{tipo} · errores de consola", not q.errores(), str(q.errores()[:3]))
+        probar_url(d, base)
+        probar_movil(d, base)
     finally:
         d.quit()
         srv.shutdown()

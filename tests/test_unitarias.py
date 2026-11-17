@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Scripts"))
 
 import catalogos  # noqa: E402
 import generar_dashboard  # noqa: E402
+import historico  # noqa: E402
 import reclasificar  # noqa: E402
 import run_snies  # noqa: E402
 import send_report  # noqa: E402
@@ -62,7 +63,7 @@ class TestDeteccion(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
         self.parches = [
-            mock.patch.object(run_snies, "HISTORICO_FILE", base / "historico.parquet"),
+            mock.patch.object(historico, "HISTORICO_DIR", base),
             mock.patch.object(run_snies, "INACTIVOS_FILE", base / "inactivos.parquet"),
         ]
         for p in self.parches:
@@ -77,7 +78,8 @@ class TestDeteccion(unittest.TestCase):
     def _historico(self, filas):
         df = pd.DataFrame(filas)
         df[F] = pd.to_datetime(df[F])
-        df.to_parquet(run_snies.HISTORICO_FILE, index=False)
+        for fecha, parte in df.groupby(F):
+            parte.to_parquet(historico.ruta(fecha.date()), index=False)
 
     def test_nuevos_inactivos_y_modificados(self):
         anterior = pd.DataFrame([programa(1), programa(2), programa(3, NUMERO_CREDITOS=160.0, MODALIDAD="VIRTUAL")])
@@ -134,6 +136,74 @@ class TestAcumulacion(unittest.TestCase):
             self.assertNotIn("REQUIERE_REVISION", final.columns)
             self.assertEqual(sorted(final[S]), [1, 2, 3])
 
+class TestHistorico(unittest.TestCase):
+    """Histórico particionado: un archivo por ejecución, leído en conjunto como un solo histórico."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.parche = mock.patch.object(historico, "HISTORICO_DIR", Path(self.tmp.name))
+        self.parche.start()
+
+    def tearDown(self):
+        self.parche.stop()
+        self.tmp.cleanup()
+
+    def _guardar(self, fecha, filas):
+        df = pd.DataFrame(filas).assign(**{F: pd.Timestamp(fecha)})
+        run_snies._escribir_parquet(df, historico.ruta(fecha))
+
+    def test_lectura_consolidada_y_filtro_por_fecha(self):
+        self._guardar(dt.date(2026, 11, 3), [programa(1), programa(2)])
+        self._guardar(dt.date(2026, 11, 10), [programa(1), programa(3)])
+        (Path(self.tmp.name) / "otro.parquet").write_bytes(b"")  # archivos ajenos al patrón se ignoran
+        self.assertEqual(historico.fechas(), {dt.date(2026, 11, 3), dt.date(2026, 11, 10)})
+        todo = historico.leer()
+        self.assertEqual(todo[S].tolist(), [1, 2, 1, 3])
+        self.assertTrue(str(todo[F].dtype).startswith("datetime64"))
+        previo = historico.leer([S, F], antes_de=dt.date(2026, 11, 10))
+        self.assertEqual(previo[S].tolist(), [1, 2])
+        self.assertTrue(historico.leer([S], antes_de=dt.date(2026, 11, 3)).empty)
+
+    def test_columna_ausente_en_archivos_antiguos(self):
+        self._guardar(dt.date(2026, 11, 3), [programa(1)])
+        self._guardar(dt.date(2026, 11, 10), [programa(2, COLUMNA_NUEVA="X")])
+        df = historico.leer([S, "COLUMNA_NUEVA"])
+        self.assertEqual(df[S].tolist(), [1, 2])
+        self.assertTrue(pd.isna(df["COLUMNA_NUEVA"].iloc[0]))
+        self.assertEqual(df["COLUMNA_NUEVA"].iloc[1], "X")
+
+    def test_fecha_vacia_en_una_ejecucion_conserva_el_tipo(self):
+        self._guardar(dt.date(2026, 11, 3), [programa(1, FECHA_EJECUTORIA=None)])
+        self._guardar(dt.date(2026, 11, 10), [programa(2, FECHA_EJECUTORIA=dt.datetime(2020, 5, 1))])
+        df = historico.leer()
+        self.assertTrue(str(df["FECHA_EJECUTORIA"].dtype).startswith("datetime64"))
+        self.assertEqual(df["FECHA_EJECUTORIA"].iloc[1], pd.Timestamp("2020-05-01"))
+
+
+    def test_archivo_nuevo_adopta_el_esquema_del_historico(self):
+        # Regresión: una descarga con NUMERO_CREDITOS numérico y JUSTIFICACION vacía generaba un esquema distinto
+        self._guardar(dt.date(2026, 11, 3), [programa(1, NUMERO_CREDITOS="180", JUSTIFICACION="X")])
+        nuevo = pd.DataFrame([programa(2, NUMERO_CREDITOS=180.0, JUSTIFICACION=None),
+                              programa(3, NUMERO_CREDITOS=None, JUSTIFICACION=None)]).assign(**{F: pd.Timestamp("2026-11-10")})
+        fecha = dt.date(2026, 11, 10)
+        run_snies._escribir_parquet(historico.alinear(nuevo, historico.esquema_referencia(fecha)), historico.ruta(fecha))
+        import pyarrow.parquet as pq
+        a, b = pq.read_schema(historico.ruta(dt.date(2026, 11, 3))), pq.read_schema(historico.ruta(fecha))
+        self.assertEqual(a.field("NUMERO_CREDITOS").type, b.field("NUMERO_CREDITOS").type)
+        self.assertEqual(a.field("JUSTIFICACION").type, b.field("JUSTIFICACION").type)
+        df = historico.leer()
+        self.assertEqual(df["NUMERO_CREDITOS"].tolist()[:2], ["180", "180"])
+        self.assertTrue(pd.isna(df["NUMERO_CREDITOS"].iloc[2]))
+
+    def test_lectura_unifica_tipos_mezclados(self):
+        self._guardar(dt.date(2026, 11, 3), [programa(1, NUMERO_CREDITOS="180")])
+        self._guardar(dt.date(2026, 11, 10), [programa(2, NUMERO_CREDITOS=175)])
+        df = historico.leer()
+        self.assertEqual(df["NUMERO_CREDITOS"].tolist(), ["180", "175"])
+        self.assertTrue(pd.api.types.is_string_dtype(df["NUMERO_CREDITOS"]))
+
+
+class TestTipos(unittest.TestCase):
     def test_tipos_estables(self):
         df = pd.DataFrame({"MIXTA": [31, "0031", None], "FECHAS": [dt.date(2026, 1, 1), dt.datetime(2026, 1, 2, 5), None]})
         out = run_snies._tipos_estables(df)
@@ -222,6 +292,27 @@ class TestCorreo(unittest.TestCase):
         self.assertTrue(ctx.check_hostname)
         self.assertEqual(capturado["para"], ["a@example.com", "b@example.com"])
         self.assertNotIn(b"Content-Disposition: attachment", capturado["cuerpo"])
+
+    def test_enlace_de_seccion_filtrado_por_fecha(self):
+        html = send_report.construir_cuerpo(
+            {"pregrado": {"modificados": self._df([1713]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B"),
+                          "total_activos": 1}}, dt.date(2026, 11, 17))
+        self.assertIn(f'{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17"', html)
+
+    def test_alerta_tecnica_solo_al_remitente(self):
+        # Alerta del paso "Pruebas unitarias" del workflow: el log está fuera de Logs/ y no debe presentarse como tal
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"SMTP_USER": "remitente@example.com", "SMTP_PASS": "x", "DESTINATARIOS": "a@example.com"}), \
+                mock.patch.object(send_report, "_enviar") as enviar:
+            log_path = Path(tmp) / "pruebas_unitarias.log"
+            log_path.write_text("FAIL: test_x", encoding="utf-8")
+            send_report.enviar_alerta_falla(dt.date(2026, 11, 17), "PRUEBAS UNITARIAS", "Fallaron pruebas", log_path)
+        msg, _, _, destinatarios = enviar.call_args.args
+        self.assertEqual(destinatarios, ["remitente@example.com"])
+        cuerpo = msg.get_payload()[0].get_payload(decode=True).decode("utf-8")
+        self.assertIn("FAIL: test_x", cuerpo)
+        self.assertIn(">pruebas_unitarias.log<", cuerpo)
+        self.assertNotIn("Logs/pruebas_unitarias.log", cuerpo)
 
 
 class TestRegistroSeguro(unittest.TestCase):

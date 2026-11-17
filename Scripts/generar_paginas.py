@@ -30,8 +30,7 @@ HEAD = '''<!doctype html>
   <meta name="description" content="{desc}">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="icon" href="data:,">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
+  <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" integrity="sha384-RkASv+6KfBMW9eknReJIJ6b3UnjKOKC5bOUaNgIY778NFbQ8MtWq9Lr/khUgqtTt" crossorigin="anonymous">
   <link rel="stylesheet" href="{css}">
   <script type="importmap">
@@ -126,6 +125,10 @@ def main() -> None:
                     "Número de programas universitarios de pregrado activos en el SNIES en cada ejecución de la herramienta. Cada punto corresponde a una descarga."),
             tarjeta("EVOLUCIÓN ACUMULADA DE NUEVOS, MODIFICADOS E INACTIVOS", "g-novedades",
                     "Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.")),
+        ancha("EVOLUCIÓN DE PROGRAMAS ACTIVOS: UNINORTE FRENTE A LAS UNIVERSIDADES DE MAYOR INTERÉS", "g-mayor-interes",
+              "Programas activos en cada ejecución de la Universidad del Norte (rojo) y de cada universidad de mayor interés (gris), "
+              "como líneas independientes: no se suman. Pase el cursor sobre una línea para resaltarla; haga clic en la leyenda para "
+              "ocultar o aislar universidades. Responde a todos los filtros; el filtro de universidades limita las instituciones mostradas.", "alta"),
         ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR MODALIDAD", "g-modalidad",
               "Programas activos en cada ejecución según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual."),
         ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR DIVISIÓN DE UNINORTE", "g-division",

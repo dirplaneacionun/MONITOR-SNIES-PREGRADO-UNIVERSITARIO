@@ -61,7 +61,7 @@
       { type: "bar", x: fechas, y: baja, name: `REDUCCIONES · ${A.fmt(tot(baja))}`, marker: { color: A.ROJO }, customdata: baja.map(Math.abs), hovertemplate: "Reducciones: <b>%{customdata:,}</b><extra></extra>" },
     ], {
       barmode: "relative", bargap: 0.15, hovermode: "x unified",
-      xaxis: A.ejeMeses(fechas),
+      xaxis: A.ejeMeses(fechas, div.clientWidth - 80),
       yaxis: Object.assign({ gridcolor: "#E5E5E5", zeroline: true, zerolinecolor: "#4D4D4D", tickformat: ",d", title: { text: "PROGRAMAS", font: { size: 10 } } }, A.ejeEntero([...sube, ...baja])),
       showlegend: true, margin: { l: 56, r: 12, t: 36, b: 48 },
       legend: { title: { text: "<b>TOTAL</b>" }, orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 10, color: "#000000" } },

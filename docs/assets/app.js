@@ -94,15 +94,16 @@
   }
 
   // ── Filtros desplegables (selección múltiple) ─────────────────────────────
+  // `param`: nombre del parámetro en la dirección de la página (#universidad=...&division=...)
   const DEF_FILTROS = {
-    universidades: { etiqueta: "TODAS LAS UNIVERSIDADES", campo: "_GU", plural: "UNIVERSIDADES" },
-    divisiones: { etiqueta: "TODAS LAS DIVISIONES", campo: "DIVISION_UNINORTE", plural: "DIVISIONES" },
-    cine: { etiqueta: "TODOS LOS CAMPOS DE CINE DETALLADO", campo: "CINE_F_2013_AC_CAMPO_DETALLADO", plural: "CAMPOS CINE", buscar: true },
+    universidades: { etiqueta: "TODAS LAS UNIVERSIDADES", campo: "_GU", plural: "UNIVERSIDADES", param: "universidad" },
+    divisiones: { etiqueta: "TODAS LAS DIVISIONES", campo: "DIVISION_UNINORTE", plural: "DIVISIONES", param: "division" },
+    cine: { etiqueta: "TODOS LOS CAMPOS DE CINE DETALLADO", campo: "CINE_F_2013_AC_CAMPO_DETALLADO", plural: "CAMPOS CINE", buscar: true, param: "cine" },
     fechas: { etiqueta: "TODAS LAS FECHAS", tipo: "fecha" },
-    departamentos: { etiqueta: "TODOS LOS DEPARTAMENTOS", campo: "DEPARTAMENTO_OFERTA_PROGRAMA", plural: "DEPARTAMENTOS", buscar: true },
-    modalidades: { etiqueta: "TODAS LAS MODALIDADES", campo: "_MG", plural: "MODALIDADES" },
-    sectores: { etiqueta: "TODOS LOS SECTORES", campo: "SECTOR", plural: "SECTORES" },
-    cambios: { etiqueta: "TODOS LOS CAMBIOS", campo: "TIPO_CAMBIO_DETECTADO", plural: "CAMBIOS" },
+    departamentos: { etiqueta: "TODOS LOS DEPARTAMENTOS", campo: "DEPARTAMENTO_OFERTA_PROGRAMA", plural: "DEPARTAMENTOS", buscar: true, param: "departamento" },
+    modalidades: { etiqueta: "TODAS LAS MODALIDADES", campo: "_MG", plural: "MODALIDADES", param: "modalidad" },
+    sectores: { etiqueta: "TODOS LOS SECTORES", campo: "SECTOR", plural: "SECTORES", param: "sector" },
+    cambios: { etiqueta: "TODOS LOS CAMBIOS", campo: "TIPO_CAMBIO_DETECTADO", plural: "CAMBIOS", param: "cambio", propio: true },
   };
 
   const desplegables = [];
@@ -120,6 +121,7 @@
   class Multiselect {
     constructor(def, opciones, etiquetas, alCambiar) {
       this.def = def; this.sel = new Set(); this.alCambiar = alCambiar; this.etiquetas = etiquetas || {};
+      this.opciones = new Set(opciones.map(String));
       const el = (this.el = document.createElement("div"));
       el.className = "ms";
       el.innerHTML = `<button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false"><span></span></button>
@@ -147,6 +149,14 @@
     alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
     cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
     limpiar() { this.sel.clear(); this.el.querySelectorAll(".ms-ops input").forEach((cb) => (cb.checked = false)); this.refrescar(); }
+    /** Valores seleccionados (para la dirección de la página). */
+    valores() { return [...this.sel]; }
+    /** Restablece la selección desde la dirección, sin avisar; se descartan los valores que no son opciones. */
+    fijar(valores) {
+      this.sel = new Set(valores.filter((v) => this.opciones.has(v)));
+      this.el.querySelectorAll(".ms-ops input").forEach((cb) => (cb.checked = this.sel.has(cb.value)));
+      this.refrescar();
+    }
     refrescar() {
       const n = this.sel.size;
       const txt = n === 0 ? this.def.etiqueta : n === 1 ? (this.etiquetas[[...this.sel][0]] || [...this.sel][0]) : `${n} ${this.def.plural}`;
@@ -214,6 +224,17 @@
     alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
     cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
     limpiar() { this.sel.clear(); this.refrescar(); }
+    /** Selección para la dirección: "uninorte", "otras" y el código de cada universidad de mayor interés. */
+    valores() { return [...this.sel].map((t) => (t === "U" ? "uninorte" : t === "O" ? "otras" : t.slice(2))); }
+    fijar(valores) {
+      this.sel = new Set();
+      valores.forEach((v) => {
+        if (v === "uninorte") this.sel.add("U");
+        else if (v === "otras") this.sel.add("O");
+        else if (this.codigos.includes(v)) this.sel.add(`C:${v}`);
+      });
+      this.refrescar();
+    }
     /** ¿El registro pertenece a la selección? (sin selección: todas las universidades) */
     pasa(r) {
       if (!this.sel.size) return true;
@@ -246,6 +267,7 @@
     constructor(fechas, alCambiar) {
       this.fechas = fechas; this.alCambiar = alCambiar;
       this.modo = "fecha"; this.desde = null; this.hasta = null; this.etiqueta = "TODAS LAS FECHAS";
+      this.tipoSel = null;   // modo con el que se hizo la selección vigente (fecha, rango, mes o anio)
       const el = (this.el = document.createElement("div"));
       el.className = "ms fs";
       el.innerHTML = `<button type="button" class="ms-btn fs-btn" aria-haspopup="dialog" aria-expanded="false"><span>TODAS LAS FECHAS</span></button>
@@ -329,11 +351,35 @@
       });
     }
     aplicar(desde, hasta, etiqueta) {
-      this.desde = desde; this.hasta = hasta; this.etiqueta = etiqueta;
+      this.desde = desde; this.hasta = hasta; this.etiqueta = etiqueta; this.tipoSel = this.modo;
       this.refrescar(); this.marcar(); this.cerrar(); this.alCambiar();
     }
+    /** Selección como parámetros: fecha=AAAA-MM-DD · desde=...&hasta=... · mes=AAAA-MM · anio=AAAA. */
+    aParams(p) {
+      if (!this.desde) return;
+      if (this.tipoSel === "fecha") p.set("fecha", this.desde);
+      else if (this.tipoSel === "mes") p.set("mes", this.desde.slice(0, 7));
+      else if (this.tipoSel === "anio") p.set("anio", this.desde.slice(0, 4));
+      else { p.set("desde", this.desde); p.set("hasta", this.hasta); }
+    }
+    /** Restablece la selección desde la dirección, sin avisar. Solo acepta fechas, meses o años con ejecuciones. */
+    desdeParams(p) {
+      const hay = (pref) => this.fechas.some((f) => f.startsWith(pref));
+      const f = p.get("fecha"), d = p.get("desde"), h = p.get("hasta"), m = p.get("mes"), a = p.get("anio");
+      let sel = null;
+      if (f && this.fechas.includes(f)) sel = ["fecha", f, f, fmtFecha(f)];
+      else if (d && h && this.fechas.includes(d) && this.fechas.includes(h) && d <= h) sel = ["rango", d, h, `${fmtFecha(d)} A ${fmtFecha(h)}`];
+      else if (m && /^\d{4}-\d{2}$/.test(m) && hay(m)) {
+        const [y, mm] = m.split("-").map(Number);
+        sel = ["mes", `${m}-01`, `${m}-${String(new Date(y, mm, 0).getDate()).padStart(2, "0")}`, `${MESES[mm - 1]} ${y}`];
+      } else if (a && /^\d{4}$/.test(a) && hay(a)) sel = ["anio", `${a}-01-01`, `${a}-12-31`, `AÑO ${a}`];
+      if (!sel) { this.limpiar(); return; }
+      [this.tipoSel, this.desde, this.hasta, this.etiqueta] = sel;
+      this.cambiarModo(this.tipoSel);   // muestra el modo de la selección, con la fecha marcada en el calendario
+      this.refrescar();
+    }
     limpiar() {
-      this.desde = this.hasta = null; this.etiqueta = "TODAS LAS FECHAS";
+      this.desde = this.hasta = null; this.etiqueta = "TODAS LAS FECHAS"; this.tipoSel = null;
       if (this.fp) this.fp.clear();
       this.refrescar(); this.marcar();
     }
@@ -344,36 +390,44 @@
     }
   }
 
+  /** Enlaces internos del Dashboard (menú y tarjetas): conservan los filtros al cambiar de apartado. */
+  const PAGINAS = /^(index|nuevos|modificados|inactivos)\.html$/;
+
   /**
    * Barra de filtros. config = { buscar, claves, registros (para opciones), opciones, etiquetas,
    * camposBusqueda, fechas, alCambiar }
+   *
+   * Los filtros se guardan en la dirección de la página (después de #), de modo que una vista filtrada
+   * se conserva al recargar, puede compartirse o guardarse como favorito, y se mantiene al pasar a otro
+   * apartado. Se usa replaceState para no agregar una entrada al historial del navegador por cada clic.
    */
   class Filtros {
     constructor(cont, config) {
       this.cfg = config; this.texto = ""; this.ms = {};
+      const alCambiar = () => { this.escribirUrl(); config.alCambiar(); };
       const barra = document.createElement("div");
       barra.className = "filtros";
       barra.setAttribute("role", "search");
       const input = document.createElement("input");
       input.type = "search"; input.className = "buscar"; input.placeholder = config.buscar; input.setAttribute("aria-label", config.buscar);
       let t;
-      input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { this.texto = normalizar(input.value).trim(); config.alCambiar(); }, 200); });
+      input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { this.texto = normalizar(input.value).trim(); alCambiar(); }, 200); });
       barra.appendChild(input);
       this.input = input;
       config.claves.forEach((clave) => {
         const def = DEF_FILTROS[clave];
         if (def.tipo === "fecha") {
-          this.fechas = new SelectorFechas(config.fechas, config.alCambiar);
+          this.fechas = new SelectorFechas(config.fechas, alCambiar);
           barra.appendChild(this.fechas.el);
           return;
         }
         if (clave === "universidades") {
-          this.ms[clave] = new SelectorUniversidades(config.alCambiar);
+          this.ms[clave] = new SelectorUniversidades(alCambiar);
           barra.appendChild(this.ms[clave].el);
           return;
         }
         const opciones = (config.opciones && config.opciones[clave]) || this.opcionesDe(def.campo);
-        const ms = new Multiselect(def, opciones, (config.etiquetas || {})[clave], config.alCambiar);
+        const ms = new Multiselect(def, opciones, (config.etiquetas || {})[clave], alCambiar);
         this.ms[clave] = ms;
         barra.appendChild(ms.el);
       });
@@ -386,6 +440,42 @@
       this.conteo.setAttribute("aria-live", "polite");
       barra.appendChild(this.conteo);
       cont.appendChild(barra);
+      // Estado inicial desde la dirección (sin redibujar: la página dibuja una vez al terminar de cargar)
+      this.restaurar(new URLSearchParams(location.hash.slice(1)));
+      this.escribirUrl();
+      // Dirección modificada a mano o por un enlace a la misma página: se aplican los filtros indicados
+      window.addEventListener("hashchange", () => { this.restaurar(new URLSearchParams(location.hash.slice(1))); this.escribirUrl(); config.alCambiar(); });
+    }
+    /** Filtros vigentes como parámetros de la dirección. */
+    estado() {
+      const p = new URLSearchParams();
+      const texto = this.input.value.trim();
+      if (texto) p.set("buscar", texto);
+      for (const [clave, ms] of Object.entries(this.ms)) ms.valores().forEach((v) => p.append(DEF_FILTROS[clave].param, v));
+      if (this.fechas) this.fechas.aParams(p);
+      return p;
+    }
+    /** Aplica los parámetros de la dirección a los controles, sin avisar del cambio. */
+    restaurar(p) {
+      const texto = p.get("buscar") || "";
+      this.input.value = texto; this.texto = normalizar(texto).trim();
+      for (const [clave, ms] of Object.entries(this.ms)) ms.fijar(p.getAll(DEF_FILTROS[clave].param));
+      if (this.fechas) this.fechas.desdeParams(p);
+    }
+    /** Actualiza la dirección y los enlaces internos con los filtros vigentes. */
+    escribirUrl() {
+      const p = this.estado(), h = p.toString();
+      const url = location.pathname + location.search + (h ? `#${h}` : "");
+      if (url !== location.pathname + location.search + location.hash) history.replaceState(null, "", url);
+      // Al cambiar de apartado se conservan los filtros comunes (no los propios de un apartado, como el tipo de cambio)
+      Object.values(DEF_FILTROS).filter((d) => d.propio).forEach((d) => p.delete(d.param));
+      const comun = p.toString();
+      document.querySelectorAll("a[href]").forEach((a) => {
+        const base = a.dataset.base || a.getAttribute("href").split("#")[0];
+        if (!PAGINAS.test(base)) return;
+        a.dataset.base = base;
+        a.setAttribute("href", comun ? `${base}#${comun}` : base);
+      });
     }
     get desde() { return this.fechas ? this.fechas.desde : null; }
     get hasta() { return this.fechas ? this.fechas.hasta : null; }
@@ -398,6 +488,7 @@
       this.texto = ""; this.input.value = "";
       Object.values(this.ms).forEach((m) => m.limpiar());
       if (this.fechas) this.fechas.limpiar();
+      this.escribirUrl();
       this.cfg.alCambiar();
     }
     /** ¿El registro cumple los filtros? opciones.sinFecha ignora el rango de fechas. */
@@ -449,11 +540,15 @@
     Plotly.purge(div);
     div.innerHTML = `<div class="vacio">${esc(msg || "Sin datos para los filtros seleccionados")}</div>`;
   }
-  /** Eje X por meses: etiquetas MES AÑO; cada punto es una ejecución. */
-  function ejeMeses(fechas) {
+  /**
+   * Eje X por meses: etiquetas MES AÑO; cada punto es una ejecución. Con `ancho` (píxeles del gráfico) se
+   * amplía el paso entre etiquetas para que no se superpongan en pantallas angostas (unos 48 px por etiqueta).
+   */
+  function ejeMeses(fechas, ancho) {
     const ini = new Date(fechas[0] + "T00:00:00"), fin = new Date(fechas[fechas.length - 1] + "T00:00:00");
     const meses = (fin.getFullYear() - ini.getFullYear()) * 12 + fin.getMonth() - ini.getMonth() + 1;
-    const paso = meses <= 12 ? 1 : meses <= 24 ? 2 : meses <= 36 ? 3 : 6;
+    let paso = meses <= 12 ? 1 : meses <= 24 ? 2 : meses <= 36 ? 3 : 6;
+    if (ancho) { const max = Math.max(2, Math.floor(ancho / 48)); while (Math.ceil(meses / paso) > max && paso < 12) paso = paso < 3 ? paso + 1 : paso * 2; }
     const vals = [], txt = [];
     for (let y = ini.getFullYear(), m = ini.getMonth(); ; m += paso) {
       while (m > 11) { m -= 12; y++; }
@@ -471,6 +566,9 @@
    * series: [{nombre, valores, color, dash}]
    * modo "acumulado": valores por ejecución que se acumulan (TOTAL = acumulado al final del periodo).
    * modo "stock": valores que ya son un nivel en cada ejecución (TOTAL = valor de la última fecha).
+   * Opcional por serie: ancho (grosor de la línea) y rango (posición en la leyenda).
+   * opciones.cercano: la información emergente muestra solo la línea más cercana al cursor (gráficas con
+   * muchas series, donde la vista unificada por fecha sería ilegible).
    */
   function lineas(div, fechas, series, opciones = {}) {
     if (!fechas.length || !series.length) return vacio(div);
@@ -478,23 +576,28 @@
     const total = (s) => s.valores[s.valores.length - 1];
     const varias = ser.length > 1;
     const etiquetaHover = opciones.modo === "acumulado" ? "acumulado" : "programas";
+    // Pantalla angosta: la leyenda pasa debajo del gráfico (a la derecha taparía las líneas) y el contenedor crece
+    const angosta = varias && div.clientWidth > 0 && div.clientWidth < 640;
+    div.style.height = angosta ? `${300 + ser.length * 22}px` : "";
     const trazas = ser.map((s) => ({
       type: "scatter", mode: "lines", x: fechas, y: s.valores,
-      name: varias ? `${s.nombre} · ${fmt(total(s))}` : s.nombre,
-      line: { color: s.color, width: 2, dash: s.dash || "solid", shape: "linear" },
-      hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}<extra></extra>`,
+      name: varias ? `${angosta && s.nombre.length > 36 ? s.nombre.slice(0, 35) + "…" : s.nombre} · ${fmt(total(s))}` : s.nombre,
+      line: { color: s.color, width: s.ancho || 2, dash: s.dash || "solid", shape: "linear" },
+      legendrank: s.rango || 1000,
+      hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}${opciones.cercano ? " · %{x|%d/%m/%Y}" : ""}<extra></extra>`,
     }));
     const layout = baseLayout({
-      xaxis: ejeMeses(fechas),
+      xaxis: ejeMeses(fechas, div.clientWidth - 80),
       yaxis: Object.assign({ rangemode: opciones.modo === "stock" && !varias ? "normal" : "tozero", gridcolor: REJILLA, zeroline: false, tickformat: ",d", automargin: true },
         ejeEntero(ser.flatMap((s) => s.valores), !(opciones.modo === "stock" && !varias))),
-      hovermode: "x unified",
+      hovermode: opciones.cercano ? "closest" : "x unified",
       margin: { l: 56, r: varias ? 12 : 16, t: varias ? 12 : 40, b: 48 },
     });
     if (varias) {
       Object.assign(layout, {
         showlegend: true,
-        legend: { title: { text: "<b>TOTAL</b>", font: { color: TINTA, size: 11 } }, x: 1.01, xanchor: "left", y: 1, yanchor: "top", font: { size: 10, color: TINTA }, bgcolor: "rgba(255,255,255,0)", itemclick: "toggle", itemdoubleclick: "toggleothers" },
+        legend: Object.assign({ title: { text: "<b>TOTAL</b>", font: { color: TINTA, size: 11 } }, font: { size: 10, color: TINTA }, bgcolor: "rgba(255,255,255,0)", itemclick: "toggle", itemdoubleclick: "toggleothers" },
+          angosta ? { orientation: "h", x: 0, xanchor: "left", y: -0.12, yanchor: "top" } : { x: 1.01, xanchor: "left", y: 1, yanchor: "top" }),
       });
     } else {
       layout.annotations = [{ xref: "paper", yref: "paper", x: 1, y: 1.02, xanchor: "right", yanchor: "bottom", showarrow: false, text: `<b>TOTAL</b> ${fmt(total(ser[0]))}`, font: { size: 12, color: TINTA } }];

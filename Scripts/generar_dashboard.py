@@ -2,7 +2,7 @@
 generar_dashboard.py
 --------------------
 Genera los datos del Dashboard a partir de:
-    Historico/Historico Programas Activos.parquet
+    Historico/Historico Programas Activos AAAA-MM-DD.parquet (un archivo por ejecución)
     Novedades/Nuevos.parquet, Modificados.parquet, Inactivos.parquet
 
 Salidas:
@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import historico  # noqa: E402
 from catalogos import (  # noqa: E402
     GRUPOS_UNIVERSIDAD, MAYOR_INTERES, MODALIDAD_A_GRUPO, MODALIDADES_GRUPO, TIPOS_CAMBIO,
     TIPOS_CAMBIO_ETIQUETA, UNINORTE,
@@ -40,7 +41,6 @@ from catalogos import (  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = ROOT / "docs"
 DATA_DIR = DOCS_DIR / "data"
-HISTORICO_FILE = ROOT / "Historico" / "Historico Programas Activos.parquet"
 NOVEDADES_DIR = ROOT / "Novedades"
 
 COL_SNIES = "CODIGO_SNIES_DEL_PROGRAMA"
@@ -172,11 +172,11 @@ def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]
 
 def main() -> int:
     print("Generando datos del Dashboard...")
-    if not HISTORICO_FILE.exists():
-        print(f"  ERROR: no existe {HISTORICO_FILE}")
+    if not historico.archivos():
+        print(f"  ERROR: no hay archivos del histórico en {historico.HISTORICO_DIR}")
         return 1
 
-    hist = pd.read_parquet(HISTORICO_FILE)
+    hist = historico.leer()
     hist[COL_FECHA] = pd.to_datetime(hist[COL_FECHA]).dt.normalize()
     novedades = {}
     for tipo in ("nuevos", "modificados", "inactivos"):

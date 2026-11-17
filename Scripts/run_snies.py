@@ -12,8 +12,8 @@ Flujo:
     4. Guarda el resultado en "Programas Activos/Programas Activos AAAA-MM-DD.xlsx".
     5. Compara con la ejecución anterior y detecta programas nuevos (o reactivados),
        modificados e inactivos.
-    6. Acumula las novedades en Novedades/*.parquet y el archivo completo en
-       Historico/Historico Programas Activos.parquet.
+    6. Acumula las novedades en Novedades/*.parquet y guarda el archivo completo en
+       Historico/Historico Programas Activos AAAA-MM-DD.parquet (un archivo por ejecución).
     7. Aplica la retención (20 archivos en Programas Activos, 20 logs).
     8. Actualiza los datos del Dashboard (docs/data) y envía el correo institucional.
 
@@ -45,6 +45,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+import historico
+
 # ── Rutas ─────────────────────────────────────────────────────────────────────
 SCRIPTS_DIR    = Path(__file__).resolve().parent
 ROOT           = SCRIPTS_DIR.parent
@@ -54,8 +56,6 @@ ETL_SCRIPT     = ETL_DIR / "Scripts" / "etl_programas.py"
 MAP_SCRIPT     = MAP_DIR / "Scripts" / "pipeline_divisiones.py"
 PROGRAMAS_DIR  = ROOT / "Programas Activos"
 NOVEDADES_DIR  = ROOT / "Novedades"
-HISTORICO_DIR  = ROOT / "Historico"
-HISTORICO_FILE = HISTORICO_DIR / "Historico Programas Activos.parquet"
 LOGS_DIR       = ROOT / "Logs"
 TMP_DIR        = ROOT / "tmp"
 
@@ -481,21 +481,22 @@ def _valor(v) -> str:
 
 def _snies_conocidos(fecha: dt.date) -> set[int]:
     """SNIES que ya existieron antes de `fecha`: en el histórico de activos o en Inactivos."""
+    partes = [historico.leer([COL_SNIES], antes_de=fecha)[COL_SNIES]]
+    if INACTIVOS_FILE.exists():
+        df = pd.read_parquet(INACTIVOS_FILE, columns=[COL_SNIES, COL_FECHA])
+        partes.append(df.loc[pd.to_datetime(df[COL_FECHA]) < pd.Timestamp(fecha), COL_SNIES])
     conocidos: set[int] = set()
-    for path in (HISTORICO_FILE, INACTIVOS_FILE):
-        if path.exists():
-            df = pd.read_parquet(path, columns=[COL_SNIES, COL_FECHA])
-            df = df[pd.to_datetime(df[COL_FECHA]) < pd.Timestamp(fecha)]
-            conocidos |= set(pd.to_numeric(df[COL_SNIES], errors="coerce").dropna().astype("int64"))
+    for serie in partes:
+        conocidos |= set(pd.to_numeric(serie, errors="coerce").dropna().astype("int64"))
     return conocidos
 
 
 def _ultimo_valor_conocido(fecha: dt.date, col: str, snies: list[int]) -> dict[int, str]:
     """Último valor no vacío de `col` en el histórico antes de `fecha`, por SNIES."""
-    if not snies or not HISTORICO_FILE.exists():
+    if not snies:
         return {}
-    h = pd.read_parquet(HISTORICO_FILE, columns=[COL_SNIES, COL_FECHA, col])
-    h = h[h[COL_SNIES].isin(snies) & (pd.to_datetime(h[COL_FECHA]) < pd.Timestamp(fecha))]
+    h = historico.leer([COL_SNIES, COL_FECHA, col], antes_de=fecha)
+    h = h[h[COL_SNIES].isin(snies)]
     h = h.assign(_v=h[col].map(_valor))
     h = h[h["_v"] != ""].sort_values(COL_FECHA)
     return h.groupby(COL_SNIES)["_v"].last().to_dict()
@@ -567,7 +568,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
-    for carpeta in (PROGRAMAS_DIR, NOVEDADES_DIR, HISTORICO_DIR):
+    for carpeta in (PROGRAMAS_DIR, NOVEDADES_DIR, historico.HISTORICO_DIR):
         carpeta.mkdir(parents=True, exist_ok=True)
 
     # 1. Descarga
@@ -643,8 +644,11 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
 
     hoy_hist = hoy.copy()
     hoy_hist[COL_FECHA] = pd.Timestamp(fecha)
-    n_hist = acumular_parquet(HISTORICO_FILE, hoy_hist, fecha, orden_base)
-    log.info(f"  {HISTORICO_FILE.relative_to(ROOT)}: {n_hist:,} registros acumulados")
+    path_hist = historico.ruta(fecha)
+    hoy_hist = historico.alinear(hoy_hist[orden_base], historico.esquema_referencia(fecha))  # mismos tipos que el histórico
+    _escribir_parquet(hoy_hist.sort_values(COL_SNIES, kind="stable", ignore_index=True), path_hist)
+    log.info(f"  {path_hist.relative_to(ROOT)}: {len(hoy_hist):,} registros "
+             f"(histórico: {len(historico.archivos())} ejecuciones)")
 
     if previo is not None:
         for path, df, extra in (
@@ -657,7 +661,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
 
     # 7. Retención
     _seccion("7. RETENCION")
-    fechas_hist = set(pd.to_datetime(pd.read_parquet(HISTORICO_FILE, columns=[COL_FECHA])[COL_FECHA]).dt.date)
+    fechas_hist = historico.fechas()
     archivos = sorted(f for f in PROGRAMAS_DIR.iterdir() if _ARCHIVO_RE.match(f.name))
     exceso = archivos[:-MAX_PROGRAMAS_ACTIVOS] if len(archivos) > MAX_PROGRAMAS_ACTIVOS else []
     for f in exceso:
