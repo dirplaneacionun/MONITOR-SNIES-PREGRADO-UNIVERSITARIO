@@ -1,0 +1,183 @@
+2026-11-17 22:18:59 [INFO] MONITOR SNIES PREGRADO · UNIVERSITARIO · Ejecución del 2026-11-17
+2026-11-17 22:18:59 [INFO] Log consolidado: Logs/monitor_2026-11-17_22-18-59.log
+2026-11-17 22:18:59 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:18:59 [INFO] 1. DESCARGA DEL REPORTE SNIES
+2026-11-17 22:18:59 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:19:05 [INFO]   Abriendo el portal SNIES...
+2026-11-17 22:19:16 [INFO]   Aplicando filtros...
+2026-11-17 22:19:16 [INFO]   Filtro 'Activo' → input#formFiltro:j_idt33:1
+2026-11-17 22:19:20 [INFO]   Filtro 'Activo (' → input#formFiltro:j_idt65:1
+2026-11-17 22:19:24 [INFO]   Filtro 'Pregrado (' → input#formFiltro:j_idt102:1
+2026-11-17 22:19:28 [INFO]   Filtro 'Universitario (' → input#formFiltro:j_idt108:3
+2026-11-17 22:19:34 [INFO]   Solicitando descarga...
+2026-11-17 22:19:43 [INFO]   Descarga completada en 5s.
+2026-11-17 22:19:43 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:19:43 [INFO] 2. NORMALIZACION (ETL-PROGRAMAS-SNIES)
+2026-11-17 22:19:43 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:19:47 [INFO]   Log de la herramienta: Scripts/ETL-PROGRAMAS-SNIES/Logs/etl_2026-11-18_03-19-43.log
+2026-11-17 22:19:47 [INFO]   ┌─ inicio del log de NORMALIZACION (ETL-PROGRAMAS-SNIES)
+2026-11-18 03:19:43  INFO     Inicio — modo: normal · --strict: no · --force: no · --file: todos · --verbose: no · Python 3.14.10 · pandas 3.0.3
+2026-11-18 03:19:43  INFO     Log de esta ejecución: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/ETL-PROGRAMAS-SNIES/Logs/etl_2026-11-18_03-19-43.log
+2026-11-18 03:19:43  INFO     Archivo(s) a procesar: ['Programas.xlsx']
+2026-11-18 03:19:43  INFO     ── Procesando 'Programas.xlsx' ──
+2026-11-18 03:19:44  INFO     Hoja seleccionada: 'Programas'. Hojas descartadas: ['Cobertura convenios', 'Cobertura'].
+2026-11-18 03:19:44  INFO     5,528 fila(s) × 39 columna(s) leídas de la hoja 'Programas'.
+2026-11-18 03:19:44  INFO     Filas no válidas eliminadas del final: 2.
+2026-11-18 03:19:44  INFO     Headers renombrados: 20.
+2026-11-18 03:19:44  WARNING  FECHA_EJECUTORIA: 1 valor(es) fuera del rango plausible (01/01/1950 a 18/11/2026), se conservan sin cambios: 27/06/2029 (fila 2,143, SNIES 1451).
+2026-11-18 03:19:44  WARNING  FECHA_DE_REGISTRO_EN_SNIES: 1 valor(es) fuera del rango plausible (01/01/1950 a 18/11/2026), se conservan sin cambios: 27/06/2029 (fila 2,143, SNIES 1451).
+2026-11-18 03:19:44  INFO     Tipos validados: 13 de 13 columna(s). Convertidas desde texto: CODIGO_INSTITUCION_PADRE (entero), CODIGO_INSTITUCION (entero), REGISTRO_UNICO (entero), VIGENCIA_AÑOS (número), VIGENCIA_TRANSITORIA (fecha).
+2026-11-18 03:19:44  INFO     Columnas excluidas de normalización de valores: 14.
+2026-11-18 03:19:45  INFO     Valores normalizados: 104,117 celda(s) modificada(s) en 23 de 25 columna(s).
+2026-11-18 03:19:45  INFO     Creando 'Programas.xlsx'...
+2026-11-18 03:19:47  INFO     Verificación OK — 39 columna(s) y 5,526 fila(s) confirmadas en 'Programas.xlsx'.
+2026-11-18 03:19:47  INFO     Escrito: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/ETL-PROGRAMAS-SNIES/Salidas/Programas.xlsx
+2026-11-18 03:19:47  INFO     Reemplazando 'Revision Programas.xlsx'...
+2026-11-18 03:19:47  INFO     Verificación OK — 42 columna(s) y 0 fila(s) confirmadas en 'Revision Programas.xlsx'.
+2026-11-18 03:19:47  INFO     Escrito: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/ETL-PROGRAMAS-SNIES/Revision/Revision Programas.xlsx
+2026-11-18 03:19:47  INFO     Resumen de 'Programas.xlsx':
+    Filas exportadas       5,526
+    Columnas exportadas    39
+    Headers renombrados    20
+    Celdas normalizadas    104,117
+    Tipos validados        13 de 13
+    Tipos convertidos      CODIGO_INSTITUCION_PADRE (entero), CODIGO_INSTITUCION (entero), REGISTRO_UNICO (entero), VIGENCIA_AÑOS (número), VIGENCIA_TRANSITORIA (fecha)
+    Alertas de validación  2
+    Archivo de salida      ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/ETL-PROGRAMAS-SNIES/Salidas/Programas.xlsx
+    Tamaño                 823.5 KB
+    Archivo de revisión    ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/ETL-PROGRAMAS-SNIES/Revision/Revision Programas.xlsx (0 fila(s))
+    Tiempo transcurrido    3.72s
+2026-11-18 03:19:47  WARNING  Resultado: PROCESO COMPLETADO CON ALERTAS.
+2026-11-18 03:19:47  INFO     Fin de la ejecución — código de salida: 0.
+  └─ fin del log de NORMALIZACION (ETL-PROGRAMAS-SNIES)
+2026-11-17 22:19:47 [INFO]   NORMALIZACION (ETL-PROGRAMAS-SNIES) completado en 4.4s.
+2026-11-17 22:19:47 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:19:47 [INFO] 3. CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)
+2026-11-17 22:19:47 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:02 [INFO]   Log de la herramienta: Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Logs/pipeline_20261118_031948.log
+2026-11-17 22:20:02 [INFO]   ┌─ inicio del log de CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)
+2026-11-18 03:19:48 [INFO] Iniciando pipeline (1 archivo(s)): Programas.xlsx
+2026-11-18 03:19:48 [DEBUG] Pesos: Capa 1 0.50 | Capa 2 0.25 | Capa 3 0.25 | UMBRAL_MEDIA 0.35
+2026-11-18 03:19:48 [DEBUG] Catalogo de divisiones: 9 divisiones + OTRO
+2026-11-18 03:19:48 [INFO] Validacion de referencias: OK
+2026-11-18 03:19:49 [INFO] Validacion de diccionarios: OK
+2026-11-18 03:19:49 [INFO] Diccionario: huella 8087ee8fe074 (4,960 overrides, 6,526 reglas NBC, 56 NBC, 105 CINE, 241 keywords)
+2026-11-18 03:19:49 [DEBUG] ProgramasUN.xlsx cargado: 357 programas
+2026-11-18 03:19:49 [DEBUG] Diccionario SNIES->Division: 357 entradas
+2026-11-18 03:19:49 [DEBUG] Nombre map inicial: 259 nombres desde ProgramasUN.xlsx + 4916 desde NOMBRE_DIVISION_OVERRIDE
+2026-11-18 03:19:49 [INFO] Retroalimentacion: 32,186 entradas previas
+2026-11-18 03:19:50 [DEBUG] SNIES map total tras retroalimentacion: 32,186 entradas
+
+────────────────────────────────────────────────────────────
+2026-11-18 03:19:50 [INFO] [1/1] Procesando: Programas.xlsx
+2026-11-18 03:19:50 [INFO]   Cargando Excel...
+2026-11-18 03:19:51 [INFO]   Cargado: 5,526 filas
+2026-11-18 03:19:51 [DEBUG]   Capa 2 para programas sin SNIES conocido: +524 nombres verificados
+2026-11-18 03:19:51 [DEBUG]   Pre-normalizando columnas...
+2026-11-18 03:19:51 [DEBUG]   Pre-normalizacion completada en 0.0s
+2026-11-18 03:19:51 [DEBUG]   5,526 registros -> 5,526 combinaciones unicas (100.0%). Clasificando...
+2026-11-18 03:19:52 [DEBUG]   Clasificacion completada: 5,526 registros en 0.9s
+2026-11-18 03:19:52 [DEBUG]   Refinamiento: sin registros BAJA, omitiendo
+2026-11-18 03:19:52 [INFO]   Override por nombre: 2,742 registros coinciden (317 de 4,960 nombres; 35 por nombre con caracteres danados, truncado o con otro orden de palabras equivalente a un override); 0 cambian de division
+2026-11-18 03:19:52 [DEBUG]   Division fija por SNIES (ProgramasUN.xlsx): 29 registros (29 SNIES); 0 cambian de division
+2026-11-18 03:19:52 [INFO]   La clasificacion final cambia la division guardada de 2 SNIES: se reclasifica con ella para que el resultado quede definitivo
+2026-11-18 03:19:54 [INFO]   Reclasificacion completada en 2.2s
+2026-11-18 03:19:54 [INFO]   Resumen: 5,526 registros
+2026-11-18 03:19:54 [INFO]   Origen de la division:
+2026-11-18 03:19:54 [INFO]     Fija por ProgramasUN                                                29  (  0.5%)
+2026-11-18 03:19:54 [INFO]     Fija por Programas.xlsx (mismo SNIES)                                0  (  0.0%)
+2026-11-18 03:19:54 [INFO]     Override por nombre                                              2,734  ( 49.5%)
+2026-11-18 03:19:54 [INFO]     Votacion con SNIES conocido (retroalimentacion)                  2,742  ( 49.6%)  [ALTA 2,742, MEDIA 0, BAJA 0]
+2026-11-18 03:19:54 [INFO]     Votacion sin SNIES conocido (nombre + NBC/CINE)                     21  (  0.4%)  [ALTA 0, MEDIA 21, BAJA 0]
+2026-11-18 03:19:54 [INFO]     Nombre registrado en la retroalimentacion (division fija)            0  (  0.0%)
+2026-11-18 03:19:54 [INFO]     Nombre nuevo de un SNIES registrado (votacion sin Capa 1)            0  (  0.0%)
+2026-11-18 03:19:54 [INFO]   Requieren revision                                                     0  (  0.0%)
+2026-11-18 03:19:54 [INFO] Distribucion por division:
+2026-11-18 03:19:54 [INFO]   INGENIERIAS                                                1,422 ( 25.7%)
+2026-11-18 03:19:54 [INFO]   ESCUELA DE NEGOCIOS                                        1,324 ( 24.0%)
+2026-11-18 03:19:54 [INFO]   HUMANIDADES, ARTES Y CIENCIAS SOCIALES                       813 ( 14.7%)
+2026-11-18 03:19:54 [INFO]   CIENCIAS DE LA SALUD                                         488 (  8.8%)
+2026-11-18 03:19:54 [INFO]   DERECHO, CIENCIA POLITICA Y RELACIONES INTERNACIONALES       353 (  6.4%)
+2026-11-18 03:19:54 [INFO]   CIENCIAS BASICAS                                             343 (  6.2%)
+2026-11-18 03:19:54 [INFO]   INSTITUTO DE EDUCACION                                       273 (  4.9%)
+2026-11-18 03:19:54 [INFO]   ESCUELA DE ARQUITECTURA, URBANISMO Y DISEÑO                  267 (  4.8%)
+2026-11-18 03:19:54 [INFO]   INSTITUTO DE IDIOMAS                                         124 (  2.2%)
+2026-11-18 03:19:54 [INFO]   OTRO                                                         119 (  2.2%)
+2026-11-18 03:19:54 [INFO]   Sin salida anterior para comparar (primera ejecucion de este archivo)
+2026-11-18 03:19:54 [INFO]   Guardando Excel (5,526 filas, puede tardar)...
+2026-11-18 03:20:01 [INFO]   Integridad verificada: valores y tipos originales intactos (3.0s)
+2026-11-18 03:20:01 [INFO] Guardado con formato: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Salidas/Programas.xlsx
+2026-11-18 03:20:01 [INFO]   Revision: 0 programas (0 registros) -> ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Revision/Revision Programas.xlsx
+2026-11-18 03:20:01 [DEBUG] Procesado en 11.3s
+2026-11-18 03:20:01 [INFO] ✔ Programas.xlsx: 5,526 registros · 0 programas por revisar · sin salida anterior comparable · integridad verificada · 11.3s
+2026-11-18 03:20:01 [DEBUG]   SNIES map enriquecido con Programas.xlsx: +23 nuevos (21 solo por votacion), 0 actualizados por su clasificacion final (total: 32,209)
+2026-11-18 03:20:01 [DEBUG]   Nombre map enriquecido: +527 nombres (total: 5702 nombres)
+2026-11-18 03:20:01 [INFO] Division por SNIES verificada en 5,526 SNIES: un mismo nombre tiene una sola division en todos los archivos
+2026-11-18 03:20:01 [INFO] Nombres equivalentes por orden de palabras verificados: 39 grupos con una sola division
+2026-11-18 03:20:01 [DEBUG]   Copia de seguridad: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Retroalimentacion/retroalimentacion_20261118_032001.json.bak
+2026-11-18 03:20:02 [INFO] Retroalimentacion guardada: 32,188 entradas totales (+2 nuevas)
+2026-11-18 03:20:02 [INFO]   Procedencia: HISTORICO 19,049, OVERRIDE 12,782, PROGRAMAS_UN 357
+2026-11-18 03:20:02 [INFO]   21 programa(s) de Programas.xlsx clasificados solo por votacion (sin SNIES verificado) no se guardan: se reevaluan en cada ejecucion hasta que un override los fije
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Archivo                                           Registros      UN  PROGR.  OVERR.   SNIES   NUEVO  REGIS.  N.NOMB  REVISAR  Tiempo
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Programas.xlsx                                        5,526    0.5%    0.0%   49.5%   49.6%    0.4%    0.0%    0.0%        0   11.3s
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Origen de la division (% de registros; prioridad: UN > PROGR. > OVERR. > votacion, salvo en los parquets los nombres antiguos del programa (con override propio, REGIS. o N.NOMB), que conservan su division):
+    UN      fija por ProgramasUN
+    PROGR.  fija por la clasificacion final de Programas.xlsx para el mismo SNIES (solo parquets)
+    OVERR.  override por nombre (NOMBRE_DIVISION_OVERRIDE; exacto, con caracteres danados o truncado equivalente)
+    SNIES   votacion con SNIES conocido (retroalimentacion.json)
+    NUEVO   votacion sin SNIES conocido: nombre parecido + NBC/CINE (programas nuevos)
+    REGIS.  nombre ya registrado en la retroalimentacion: conserva su division (solo parquets)
+    N.NOMB  nombre nuevo de un SNIES registrado (programa renombrado): votacion sin la Capa 1
+  REVISAR = registros con REQUIERE_REVISION=VERDADERO
+2026-11-18 03:20:02 [INFO] Listas de revision (1 archivo(s), 0 programas por revisar) en: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Revision
+
+2026-11-18 03:20:02 [INFO] Archivos de salida en: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Salidas
+2026-11-18 03:20:02 [INFO] Log de la ejecucion: ~/work/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Logs/pipeline_20261118_031948.log
+2026-11-18 03:20:02 [INFO] COMPLETADO en 13.9s: 1/1 archivos OK
+  └─ fin del log de CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)
+2026-11-17 22:20:02 [INFO]   CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES) completado en 14.7s.
+2026-11-17 22:20:02 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:02 [INFO] 4. VALIDACION DEL ARCHIVO PROCESADO
+2026-11-17 22:20:02 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:03 [INFO]   Continuidad: 5,526 programas frente a 5,524 de la ejecución del 2026-11-15 (+0.0%)
+2026-11-17 22:20:03 [INFO]   Programas activos: 5,526 · columnas: 41 · requieren revisión: 0 (lista: Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Revision/Revision Programas.xlsx)
+2026-11-17 22:20:03 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:03 [INFO] 5. DETECCION DE NOVEDADES
+2026-11-17 22:20:03 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:03 [INFO]   Ejecución anterior: 2026-11-15 (5,524 programas, desde el histórico)
+2026-11-17 22:20:03 [INFO]   Nuevos: 3 (reactivados: 0) · Modificados: 13 cambios en 9 programas · Inactivos: 1
+2026-11-17 22:20:03 [INFO]     NUMERO DE CREDITOS: 7
+2026-11-17 22:20:03 [INFO]     NUMERO DE PERIODOS: 5
+2026-11-17 22:20:03 [INFO]     MODALIDAD: 1
+2026-11-17 22:20:03 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:03 [INFO] 6. GUARDADO
+2026-11-17 22:20:03 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:04 [INFO]   Historico/Historico Programas Activos.parquet: +5,526 registros (histórico: 64 ejecuciones)
+2026-11-17 22:20:04 [INFO]   Novedades/Nuevos.parquet: +3 · 914 registros acumulados
+2026-11-17 22:20:04 [INFO]   Novedades/Modificados.parquet: +13 · 1,424 registros acumulados
+2026-11-17 22:20:04 [INFO]   Novedades/Inactivos.parquet: +1 · 180 registros acumulados
+2026-11-17 22:20:04 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:04 [INFO] 7. DASHBOARD
+2026-11-17 22:20:04 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:06 [INFO]   Generando datos del Dashboard...
+2026-11-17 22:20:06 [INFO]   DEPARTAMENTO_OFERTA_PROGRAMA: variantes unificadas {'BOGOTA D.C.': 'BOGOTA, D.C.'}
+2026-11-17 22:20:06 [INFO]   docs/data/comun.js: 0.01 MB
+2026-11-17 22:20:06 [INFO]   docs/data/activos.js: 0.32 MB
+2026-11-17 22:20:06 [INFO]   docs/data/historico/: 64 ejecuciones · 21.10 MB · 1 archivo(s) nuevos o actualizados
+2026-11-17 22:20:06 [INFO]   docs/data/comun.js: 0.01 MB
+2026-11-17 22:20:06 [INFO]   docs/data/nuevos.js: 0.19 MB
+2026-11-17 22:20:06 [INFO]   docs/data/modificados.js: 0.28 MB
+2026-11-17 22:20:06 [INFO]   docs/data/inactivos.js: 0.05 MB
+2026-11-17 22:20:06 [INFO]   Páginas del Dashboard: index, nuevos, modificados e inactivos
+2026-11-17 22:20:06 [INFO]   Última ejecución: 2026-11-17 · KPIs: {'activos': 5526, 'fecha_activos': '2026-11-17', 'nuevos': 3, 'modificados': 13, 'modificados_programas': 9, 'inactivos': 1}
+2026-11-17 22:20:06 [INFO]   Dashboard generado OK
+2026-11-17 22:20:06 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:06 [INFO] 8. CORREO
+2026-11-17 22:20:06 [INFO] ──────────────────────────────────────────────────────────────────────
+2026-11-17 22:20:07 [INFO] Conectando a smtp.gmail.com:587...
+2026-11-17 22:20:08 [INFO] Correo enviado a 1 destinatario(s).
+2026-11-17 22:20:08 [INFO] EJECUCION COMPLETADA

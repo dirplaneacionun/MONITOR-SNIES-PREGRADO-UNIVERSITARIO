@@ -680266,13 +680266,27 @@
     "fecha": "2026-11-15",
     "nombre": "quimica farmaceutica"
   },
+  "119890": {
+    "division": "INGENIERIAS",
+    "origen": "OVERRIDE",
+    "detalle": "ingenieria en inteligencia artificial",
+    "fecha": "2026-11-18",
+    "nombre": "ingenieria en inteligencia artificial"
+  },
+  "119894": {
+    "division": "ESCUELA DE NEGOCIOS",
+    "origen": "OVERRIDE",
+    "detalle": "administracion de empresas",
+    "fecha": "2026-11-18",
+    "nombre": "administracion de empresas"
+  },
   "_meta": {
-    "count": 32186,
+    "count": 32188,
     "formato": 4,
     "registro_nombres": true,
     "origenes": {
       "PROGRAMAS_UN": 357,
-      "OVERRIDE": 12780,
+      "OVERRIDE": 12782,
       "HISTORICO": 19049
     },
     "diccionario": "8087ee8fe074"
