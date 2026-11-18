@@ -14,7 +14,7 @@ Flujo:
     5. Compara con la ejecución anterior, leída del histórico, y detecta programas nuevos
        (o reactivados), modificados e inactivos.
     6. Acumula las novedades en Novedades/*.parquet y agrega la ejecución al histórico
-       (Historico/Historico Programas Activos.parquet, un solo archivo).
+       (Historico/Historico Programas Activos AAAA.parquet, un archivo por año).
     7. Actualiza los datos del Dashboard (docs/data) y envía el correo institucional.
 
 Retención: se conservan los últimos 10 logs de cada herramienta (este orquestador, ETL-PROGRAMAS-SNIES y
@@ -518,8 +518,7 @@ def _ultimo_valor_conocido(fecha: dt.date, col: str, snies: list[int]) -> dict[i
     """Último valor no vacío de `col` en el histórico antes de `fecha`, por SNIES."""
     if not snies:
         return {}
-    h = historico.leer([COL_SNIES, COL_FECHA, col], antes_de=fecha)
-    h = h[h[COL_SNIES].isin(snies)]
+    h = historico.leer([COL_SNIES, COL_FECHA, col], antes_de=fecha, codigos_snies=snies)
     h = h.assign(_v=h[col].map(_valor))
     h = h[h["_v"] != ""].sort_values(COL_FECHA)
     return h.groupby(COL_SNIES)["_v"].last().to_dict()
@@ -667,7 +666,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     _seccion("6. GUARDADO")
     ejecuciones = historico.guardar_ejecucion(
         hoy.sort_values(COL_SNIES, kind="stable", ignore_index=True)[list(hoy.columns)], fecha)
-    log.info(f"  {historico.ruta().relative_to(ROOT)}: +{len(hoy):,} registros "
+    log.info(f"  {historico.ruta(fecha.year).relative_to(ROOT)}: +{len(hoy):,} registros "
              f"(histórico: {ejecuciones} ejecuciones)")
 
     if previo is not None:

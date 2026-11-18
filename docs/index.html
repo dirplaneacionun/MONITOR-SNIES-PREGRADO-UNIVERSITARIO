@@ -76,7 +76,7 @@
     <div class="fila">
       <section class="tarjeta" aria-labelledby="t-g-cine">
         <h2 class="tarjeta-tit" id="t-g-cine">EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR CAMPO DE CINE DETALLADO</h2>
-        <p class="tarjeta-sub">Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 8).</p>
+        <p class="tarjeta-sub">Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 10).</p>
         <div id="cine-ctrl"></div>
         <div class="grafica " id="g-cine" role="img" aria-label="Evolución de los programas activos por campo de cine detallado"></div>
       </section>
@@ -112,24 +112,18 @@
         <div class="grafica baja" id="g-periodos" role="img" aria-label="Programas activos según número de periodos de duración"></div>
       </section>
     </div>
-    <section class="tarjeta" aria-labelledby="t-tabla">
-          <h2 class="tarjeta-tit" id="t-tabla">PROGRAMAS ACADÉMICOS ACTIVOS (HISTÓRICO)</h2>
-          <p class="tarjeta-sub">Consulta del histórico de programas activos: <b data-tabla-periodo></b>. Incluye un registro por programa y ejecución: sin filtro de fecha, todas las ejecuciones; con una fecha, rango, mes o año, las ejecuciones del periodo. Los registros se descargan al llegar a esta sección y se ordenan desde la fecha más reciente; haga clic en un encabezado para ordenar según el tipo de dato. DESCARGAR PARQUET exporta los registros filtrados.</p>
-          <div id="tabla-estado" aria-live="polite"></div>
-          <div id="tabla"></div>
-        </section>
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
   <script src="assets/vendor/plotly/plotly.min.js?v=6d21266ce1"></script>
   <script src="assets/vendor/flatpickr/flatpickr.min.js?v=1eeab1cb77"></script>
   <script src="assets/vendor/flatpickr/l10n/es.min.js?v=dac7fd9270"></script>
-  <script src="data/comun.js?v=10ee0359a0"></script>
-  <script src="data/activos.js?v=fb9c59270e"></script>
-  <script src="data/nuevos.js?v=ef6c76acd6"></script>
-  <script src="data/modificados.js?v=ee3a276b69"></script>
-  <script src="data/inactivos.js?v=de36ea3068"></script>
-  <script src="assets/app.js?v=94259f6416"></script>
-  <script src="assets/inicio.js?v=f43a733ba2"></script>
+  <script src="data/comun.js?v=fef85eceec"></script>
+  <script src="data/activos.js?v=b8818e67dc"></script>
+  <script src="data/nuevos.js?v=d4ea511bda"></script>
+  <script src="data/modificados.js?v=c303732ff1"></script>
+  <script src="data/inactivos.js?v=946e4b18f1"></script>
+  <script src="assets/app.js?v=7cf7dc40ae"></script>
+  <script src="assets/inicio.js?v=828c03e51c"></script>
 </body>
 </html>

@@ -9,7 +9,9 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
   descriptivo de la ejecución (variación frente a la ejecución anterior y programas activos por grupo de
   universidades) y las secciones NUEVOS, MODIFICADOS e INACTIVOS, con un máximo de 10 registros por tabla.
 - Orden de los registros: primero la Universidad del Norte, luego las Universidades de Mayor Interés y
-  después las demás instituciones, hasta completar 10.
+  después las demás instituciones, hasta completar 10. Bajo cada tabla, una nota indica las novedades de la
+  Universidad del Norte y de las Universidades de Mayor Interés y, si la tabla no alcanza a mostrar todos los
+  registros, remite al Dashboard (sección filtrada por la fecha de la ejecución).
 - La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor.
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
@@ -65,18 +67,24 @@ SECCIONES = {
         "titulo": "PROGRAMAS ACADÉMICOS NUEVOS",
         "descripcion": "Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados).",
         "vacio": "No se detectaron programas nuevos en esta ejecución.",
+        "unidad": ("programa nuevo", "programas nuevos"),
+        "pagina": "nuevos.html",
         "columnas": COLUMNAS_BASE,
     },
     "modificados": {
         "titulo": "PROGRAMAS ACADÉMICOS MODIFICADOS",
         "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad.",
         "vacio": "No se detectaron cambios en los programas activos en esta ejecución.",
+        "unidad": ("cambio", "cambios"),
+        "pagina": "modificados.html",
         "columnas": COLUMNAS_BASE + [("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")],
     },
     "inactivos": {
         "titulo": "PROGRAMAS ACADÉMICOS INACTIVOS",
         "descripcion": "Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES.",
         "vacio": "No se detectaron programas inactivos en esta ejecución.",
+        "unidad": ("programa inactivo", "programas inactivos"),
+        "pagina": "inactivos.html",
         "columnas": COLUMNAS_BASE,
     },
 }
@@ -238,6 +246,30 @@ def _descripcion(tipo: str, df: pd.DataFrame | None) -> str:
     return descripcion
 
 
+def _notas(tipo: str, df: pd.DataFrame) -> tuple[list[tuple[str, int]], int]:
+    """
+    Datos de las notas bajo la tabla de una sección: novedades de la Universidad del Norte y de las Universidades
+    de Mayor Interés [(grupo, cantidad)] y número de registros que no caben en la tabla (0 si caben todos).
+    """
+    grupos = df["CODIGO_INSTITUCION"].map(grupo_universidad)
+    interes = [(GRUPO_UNINORTE, int((grupos == GRUPO_UNINORTE).sum())),
+               (GRUPO_MAYOR_INTERES, int((grupos == GRUPO_MAYOR_INTERES).sum()))]
+    return interes, max(len(df) - MAX_FILAS, 0)
+
+
+def _texto_notas(tipo: str, df: pd.DataFrame, negrita=lambda t: t, enlace=lambda t: t) -> list[str]:
+    """Frases de las notas bajo la tabla (comunes al HTML y al texto plano)."""
+    singular, plural = SECCIONES[tipo]["unidad"]
+    interes, fuera = _notas(tipo, df)
+    nombres = {GRUPO_UNINORTE: "Universidad del Norte", GRUPO_MAYOR_INTERES: "Universidades de Mayor Interés"}
+    frases = [" · ".join(f"{negrita(nombres[g] + ':')} {_plural(n, singular, plural)}" for g, n in interes) + "."]
+    if fuera:
+        frases.append(f"La tabla presenta {_num(MAX_FILAS)} de {_num(len(df))} registros, con prioridad para la Universidad "
+                      f"del Norte y las Universidades de Mayor Interés. El detalle completo puede consultarse en el "
+                      f"{enlace('Dashboard')}.")
+    return frases
+
+
 def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
@@ -246,7 +278,12 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
         contenido += (f'<p style="margin:0;font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
                       f'padding:10px 12px;border-radius:6px;">{cfg["vacio"]}</p>')
         return _tarjeta(contenido, color)
-    return _tarjeta(contenido + _tabla(seleccionar(df), cfg["columnas"]), color)
+    url = f'{DASHBOARD_URL}{cfg["pagina"]}#fecha={fecha.isoformat()}'   # sección filtrada por esta ejecución
+    frases = _texto_notas(tipo, df, negrita=lambda t: f'<b style="color:{NEGRO};">{escape(t)}</b>',
+                          enlace=lambda t: f'<a href="{url}" style="color:{ROJO};font-weight:700;">{t}</a>')
+    notas = (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};'
+             f'background:{GRIS};padding:10px 12px;border-radius:6px;">{"<br>".join(frases)}</p>')
+    return _tarjeta(contenido + _tabla(seleccionar(df), cfg["columnas"]) + notas, color)
 
 
 def _kpi(etiqueta: str, valor: str, detalle: str, color: str) -> str:
@@ -279,7 +316,9 @@ def construir_texto(resultados: dict, fecha: date) -> str:
     y su presencia reduce la probabilidad de que el correo se clasifique como no deseado.
     """
     res = resultados.get("pregrado") or {}
-    ajustar = lambda t, ini="", sig="": textwrap.fill(t, 78, initial_indent=ini, subsequent_indent=sig)  # noqa: E731
+    # Sin cortar palabras largas ni en guiones: las direcciones web deben quedar completas y utilizables
+    ajustar = lambda t, ini="", sig="": textwrap.fill(t, 78, initial_indent=ini, subsequent_indent=sig,  # noqa: E731
+                                                      break_long_words=False, break_on_hyphens=False)
     lineas = ["MONITOR SNIES PREGRADO · UNIVERSITARIO",
               "Programas Académicos Universitarios de Pregrado en Colombia",
               f"Reporte de la ejecución del {_fecha(fecha)}",
@@ -304,6 +343,9 @@ def construir_texto(resultados: dict, fecha: date) -> str:
         for i, (_, r) in enumerate(seleccionar(df).iterrows(), 1):
             campos = " | ".join(f"{t}: {_texto(c, r.get(c))}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
             lineas.append(ajustar(f"{i}. {campos}", "  ", "     "))
+        lineas += [ajustar(t) for t in _texto_notas(tipo, df)]
+        if len(df) > MAX_FILAS:   # dirección en su propia línea, completa
+            lineas.append(f"Detalle en el Dashboard: {DASHBOARD_URL}{cfg['pagina']}#fecha={fecha.isoformat()}")
     lineas += ["",
                ajustar("Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de "
                        "Educación Nacional · Dirección de Planeación, Universidad del Norte."),
@@ -380,11 +422,7 @@ def enviar_reporte(resultados: dict, fecha: date) -> None:
     destinatarios = [d.strip() for d in os.environ["DESTINATARIOS"].split(",") if d.strip()]
 
     msg = MIMEMultipart("alternative")
-    res = resultados.get("pregrado") or {}
-    n = {t: 0 if res.get(t) is None else len(res[t]) for t in ("nuevos", "modificados", "inactivos")}
-    # Asunto descriptivo: las cifras de novedades se leen desde la bandeja de entrada
-    msg["Subject"] = (f"MONITOR SNIES PREGRADO · UNIVERSITARIO · Reporte del {fecha.strftime('%d/%m/%Y')}: "
-                      f"{n['nuevos']} nuevos, {n['modificados']} modificados, {n['inactivos']} inactivos")
+    msg["Subject"] = f"MONITOR SNIES PREGRADO · UNIVERSITARIO · Reporte del {fecha.strftime('%d/%m/%Y')}"
     msg["From"] = remitente
     msg["To"] = ", ".join(destinatarios)
     # Alternativas en orden de preferencia creciente: texto plano y luego HTML (el cliente muestra la última que admite)

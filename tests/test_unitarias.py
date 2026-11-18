@@ -8,6 +8,7 @@ Ejecución:
 import datetime as dt
 import logging
 import os
+import re
 import ssl
 import sys
 import tempfile
@@ -102,6 +103,11 @@ class TestDeteccion(unittest.TestCase):
         hoy = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA=None)])
         self.assertTrue(run_snies.detectar_novedades(hoy, anterior, self.fecha)[1].empty)
 
+    def test_lectura_filtrada_por_codigo_snies(self):
+        self._historico([programa(1, **{F: "2026-11-03"}), programa(2, **{F: "2026-11-03"}), programa(3, **{F: "2026-11-10"})])
+        h = historico.leer([S, F], codigos_snies=[1, 3])
+        self.assertEqual(sorted(h[S].tolist()), [1, 3])
+
     def test_dato_que_reaparece_se_compara_con_el_ultimo_conocido(self):
         self._historico([programa(1, **{F: "2026-11-03"}), programa(2, **{F: "2026-11-03"})])
         anterior = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA=None), programa(2, MUNICIPIO_OFERTA_PROGRAMA=None)])
@@ -164,8 +170,11 @@ class TestHistorico(unittest.TestCase):
 
     def _grupos(self):
         import pyarrow.parquet as pq
-        with open(historico.ruta(), "rb") as fh:
-            return pq.ParquetFile(fh).num_row_groups
+        total = 0
+        for _, path in historico.archivos():
+            with open(path, "rb") as fh:
+                total += pq.ParquetFile(fh).num_row_groups
+        return total
 
     def test_lectura_por_fecha_y_ejecucion_anterior(self):
         self._guardar(dt.date(2026, 11, 10), [programa(1), programa(3)])
@@ -186,9 +195,9 @@ class TestHistorico(unittest.TestCase):
     def test_reejecucion_reemplaza_la_fecha_sin_duplicar(self):
         self._guardar(dt.date(2026, 11, 3), [programa(1)])
         self._guardar(dt.date(2026, 11, 10), [programa(2)])
-        antes = historico.ruta().read_bytes()
+        antes = historico.ruta(2026).read_bytes()
         self.assertEqual(self._guardar(dt.date(2026, 11, 10), [programa(2)]), 2)
-        self.assertEqual(historico.ruta().read_bytes(), antes)   # mismos datos: archivo idéntico
+        self.assertEqual(historico.ruta(2026).read_bytes(), antes)   # mismos datos: archivo idéntico
         self._guardar(dt.date(2026, 11, 10), [programa(2), programa(4)])
         self.assertEqual(historico.leer()[S].tolist(), [1, 2, 4])
 
@@ -226,6 +235,27 @@ class TestHistorico(unittest.TestCase):
         self.assertEqual(out["N"].tolist(), ["10", "X"])
         self.assertEqual(out["D"].tolist(), ["2026-01-01", "no es fecha"])
         self.assertEqual(historico.alinear(pd.DataFrame({"N": ["10", None]}), esquema)["N"].tolist()[0], 10.0)
+
+    def test_un_archivo_por_anio_leido_en_conjunto(self):
+        # Diciembre y enero quedan en archivos distintos; el año nuevo adopta el esquema del anterior
+        self._guardar(dt.date(2025, 12, 29), [programa(1, NUMERO_CREDITOS="180"), programa(2)])
+        self._guardar(dt.date(2026, 1, 5), [programa(1, NUMERO_CREDITOS=180.0), programa(3)])
+        self.assertEqual([a for a, _ in historico.archivos()], [2025, 2026])
+        self.assertEqual(historico.ruta(2026).name, "Historico Programas Activos 2026.parquet")
+        import pyarrow.parquet as pq
+        self.assertEqual(pq.read_schema(historico.ruta(2025)).field("NUMERO_CREDITOS").type,
+                         pq.read_schema(historico.ruta(2026)).field("NUMERO_CREDITOS").type)
+        todo = historico.leer()
+        self.assertEqual(todo[S].tolist(), [1, 2, 1, 3])
+        self.assertEqual(todo["NUMERO_CREDITOS"].tolist()[0::2], ["180", "180"])
+        fecha, anterior = historico.ejecucion_anterior(dt.date(2026, 1, 5))   # cruza el cambio de año
+        self.assertEqual((fecha, anterior[S].tolist()), (dt.date(2025, 12, 29), [1, 2]))
+        self.assertEqual(historico.leer([S], antes_de=dt.date(2026, 1, 5))[S].tolist(), [1, 2])
+        self.assertEqual(historico.leer([S], fecha=dt.date(2026, 1, 5))[S].tolist(), [1, 3])
+        # Una reescritura sin cambios deja ambos archivos idénticos
+        antes = {a: p.read_bytes() for a, p in historico.archivos()}
+        historico.reescribir(historico.leer())
+        self.assertEqual({a: p.read_bytes() for a, p in historico.archivos()}, antes)
 
     def test_reescritura_completa_conserva_un_grupo_por_ejecucion(self):
         self._guardar(dt.date(2026, 11, 3), [programa(1)])
@@ -335,14 +365,27 @@ class TestCorreo(unittest.TestCase):
         self.assertEqual(capturado["para"], ["a@example.com", "b@example.com"])
         self.assertNotIn(b"Content-Disposition: attachment", capturado["cuerpo"])
 
-    def test_boton_arriba_y_sin_notas_bajo_las_tablas(self):
+    def test_boton_arriba_y_nota_de_novedades_de_interes(self):
         mod = self._df([1713, 9999]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B")
         html = send_report.construir_cuerpo({"pregrado": {"modificados": mod, "total_activos": 2}}, dt.date(2026, 11, 17))
         self.assertLess(html.index("VER DASHBOARD COMPLETO"), html.index("PROGRAMAS ACTIVOS"))   # antes de los indicadores
         self.assertEqual(html.count("VER DASHBOARD COMPLETO"), 1)
-        self.assertNotIn("Ver todos en el Dashboard", html)
-        self.assertNotIn("No hubo novedades de la Universidad", html)
-        self.assertNotIn("Se muestran", html)
+        texto = re.sub(r"<[^>]+>", "", html)
+        self.assertIn("Universidad del Norte: 1 cambio · Universidades de Mayor Interés: 0 cambios.", texto)
+        self.assertNotIn("La tabla presenta", texto)   # caben todos los registros: sin remisión al Dashboard
+
+    def test_nota_de_limite_remite_al_dashboard(self):
+        # Caso real del 17/11/2026: 13 cambios, 2 de una universidad de mayor interés
+        mod = self._df([9999] * 11 + [1711, 1711]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B")
+        res = {"pregrado": {"modificados": mod, "total_activos": 13}}
+        html = send_report.construir_cuerpo(res, dt.date(2026, 11, 17))
+        texto = re.sub(r"<[^>]+>", "", html)
+        self.assertIn("Universidad del Norte: 0 cambios · Universidades de Mayor Interés: 2 cambios.", texto)
+        self.assertIn("La tabla presenta 10 de 13 registros", texto)
+        self.assertIn(f'href="{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17"', html)
+        plano = send_report.construir_texto(res, dt.date(2026, 11, 17))
+        self.assertIn("La tabla presenta 10 de 13 registros", plano)
+        self.assertIn(f"{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17", plano)
 
     def test_resumen_descriptivo_con_variacion_y_grupos(self):
         hoy = self._df([1713, 1701, 9999, 9999])
@@ -383,13 +426,13 @@ class TestCorreo(unittest.TestCase):
         self.assertNotIn("<", texto)
         self.assertNotIn("—", texto)
 
-    def test_asunto_con_cifras(self):
+    def test_asunto_sin_cifras(self):
         with mock.patch.dict(os.environ, {"SMTP_USER": "r@example.com", "SMTP_PASS": "x", "DESTINATARIOS": "a@example.com"}), \
                 mock.patch.object(send_report, "_enviar") as enviar:
             send_report.enviar_reporte({"pregrado": {"nuevos": self._df([1713]).assign(TIPO_NOVEDAD="NUEVO"),
                                                      "total_activos": 1}}, dt.date(2026, 11, 17))
         asunto = str(enviar.call_args.args[0]["Subject"])
-        self.assertTrue(asunto.endswith("Reporte del 17/11/2026: 1 nuevos, 0 modificados, 0 inactivos"), asunto)
+        self.assertEqual(asunto, "MONITOR SNIES PREGRADO · UNIVERSITARIO · Reporte del 17/11/2026")
 
     def test_alerta_tecnica_solo_al_remitente(self):
         # Alerta del paso "Pruebas unitarias" del workflow: el log está fuera de Logs/ y no debe presentarse como tal
@@ -459,13 +502,29 @@ class TestReclasificacion(unittest.TestCase):
         run_snies._escribir_parquet(pd.DataFrame(filas[:1]).assign(**{F: pd.Timestamp("2026-11-10"), "TIPO_NOVEDAD": "NUEVO"}),
                                     base / "Nuevos.parquet")
 
-        def clasificar(df):
-            k = reclasificar.claves(df)
-            division = df["DIVISION_UNINORTE"].replace({"INGENIERIAS": "CIENCIAS BASICAS"}).values
-            return pd.DataFrame({"DIVISION_UNINORTE": division, "PUNTAJE_TOTAL": 0.9}, index=k.values).groupby(level=0).first()
+        def clasificar(catalogo, registros):
+            # Clasificador simulado: el programa 1 (antes INGENIERIAS) pasa a CIENCIAS BASICAS; el 2 conserva su división
+            self.catalogo = catalogo
+            division = catalogo[S].map({1: "CIENCIAS BASICAS", 2: "ESCUELA DE NEGOCIOS"}).values
+            return pd.DataFrame({"DIVISION_UNINORTE": division, "PUNTAJE_TOTAL": 0.9}, index=catalogo["_K"].values)
         parches.append(mock.patch.object(reclasificar, "clasificar_catalogo", clasificar))
         parches[-1].start()
         return parches
+
+    def test_catalogo_toma_el_registro_mas_reciente_leyendo_por_partes(self):
+        # Misma clave en dos años y en una novedad de la misma fecha: gana la fecha mayor y, a igual fecha, la fuente
+        # posterior (la novedad); cada fuente se entrega por separado, como al leer un año a la vez
+        base = dict(NUCLEO_BASICO_DEL_CONOCIMIENTO="N", CINE_F_2013_AC_CAMPO_DETALLADO="C")
+        h2025 = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA="A", **base, **{F: pd.Timestamp("2025-12-29")})])
+        h2026 = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA="B", **base, **{F: pd.Timestamp("2026-01-05")}),
+                              programa(2, **base, **{F: pd.Timestamp("2026-01-05")})])
+        nov = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA="C", **base, **{F: pd.Timestamp("2026-01-05")}, TIPO_NOVEDAD="NUEVO")])
+        catalogo, total = reclasificar.armar_catalogo(enumerate([h2025, h2026, nov]))
+        self.assertEqual(total, 4)
+        self.assertEqual(len(catalogo), 2)
+        self.assertEqual(catalogo.set_index(S).loc[1, "MUNICIPIO_OFERTA_PROGRAMA"], "C")
+        self.assertNotIn("TIPO_NOVEDAD", catalogo.columns)
+        self.assertNotIn(F, catalogo.columns)
 
     def test_simulacion_no_escribe_y_resume_los_cambios(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -476,7 +535,7 @@ class TestReclasificacion(unittest.TestCase):
                 with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(resumen_md)}):
                     resumen = reclasificar.reclasificar(simular=True)
                 self.assertEqual({p: p.read_bytes() for p in Path(tmp).rglob("*.parquet")}, antes)   # nada se escribe
-                r = resumen[historico.ruta()]
+                r = resumen[historico.HISTORICO_DIR]
                 self.assertEqual((r["registros"], r["cambian"], r["programas"]), (4, 2, 1))
                 self.assertEqual(r["transiciones"], {"INGENIERIAS → CIENCIAS BASICAS": 1})
                 texto = resumen_md.read_text(encoding="utf-8")
@@ -494,7 +553,7 @@ class TestReclasificacion(unittest.TestCase):
                 reclasificar.reclasificar()
                 h = historico.leer()
                 self.assertEqual(h["DIVISION_UNINORTE"].tolist(), ["CIENCIAS BASICAS", "ESCUELA DE NEGOCIOS"] * 2)
-                with open(historico.ruta(), "rb") as fh:
+                with open(historico.ruta(2026), "rb") as fh:
                     self.assertEqual(pq.ParquetFile(fh).num_row_groups, 2)
                 nuevos = pd.read_parquet(Path(tmp) / "Nuevos.parquet")
                 self.assertEqual(nuevos["DIVISION_UNINORTE"].tolist(), ["CIENCIAS BASICAS"])

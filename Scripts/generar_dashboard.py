@@ -2,18 +2,17 @@
 generar_dashboard.py
 --------------------
 Genera los datos del Dashboard a partir de:
-    Historico/Historico Programas Activos.parquet (todas las ejecuciones)
+    Historico/Historico Programas Activos AAAA.parquet (un archivo por año, leídos en conjunto)
     Novedades/Nuevos.parquet, Modificados.parquet, Inactivos.parquet
 
 Salidas:
     docs/data/*.js                       datos compactos de gráficas, filtros y tablas (window.SNIES.*)
-    docs/data/historico/AAAA-MM-DD.parquet  programas activos de cada ejecución, que la tabla de Inicio
-                                         consulta bajo demanda (solo se reescribe un archivo si cambió)
     docs/*.html                          páginas regeneradas con generar_paginas.py (sufijos de versión
                                          actualizados según el contenido de estilos, scripts y datos)
 
 La lógica de las páginas (docs/assets/) es estática. Los datos se escriben como scripts para que las
-páginas funcionen en GitHub Pages.
+páginas funcionen en GitHub Pages. El detalle de programas activos por ejecución no se publica en el
+Dashboard: se consulta en los archivos por año de Historico/.
 
 Ejecución:
     python Scripts/generar_dashboard.py
@@ -25,6 +24,7 @@ import datetime as dt
 import json
 import math
 import re
+import shutil
 import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -53,6 +53,11 @@ COLS_VERSION = [
     COL_SNIES, "NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_INSTITUCION", "SECTOR",
     "DEPARTAMENTO_OFERTA_PROGRAMA", "MODALIDAD", COL_CINE, "DIVISION_UNINORTE", "NUMERO_PERIODOS_DE_DURACION",
 ]
+# Columnas del histórico que usa el Dashboard: las de las versiones de programas, la fecha y el municipio (para
+# unificar sus variantes en las novedades). Leer solo estas columnas reduce a cerca de un tercio la memoria del
+# proceso, que crece con cada ejecución acumulada.
+COLS_HISTORICO = COLS_VERSION + [COL_FECHA, "MUNICIPIO_OFERTA_PROGRAMA"]
+
 COLS_PRIMERO = {
     "nuevos": [COL_FECHA, "TIPO_NOVEDAD"],
     "modificados": [COL_FECHA, "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"],
@@ -124,42 +129,6 @@ def _rangos(indices: list[int]) -> list[list[int]]:
     return rangos
 
 
-def escribir_historico(hist: pd.DataFrame) -> list[str]:
-    """
-    Copia del histórico de programas activos para el Dashboard: un archivo por ejecución en
-    docs/data/historico/AAAA-MM-DD.parquet, para que el navegador descargue solo las fechas consultadas.
-    Un archivo solo se reescribe si su contenido cambió (ej. tras una reclasificación): así cada semana
-    se agrega un archivo nuevo sin alterar los anteriores ni inflar el historial del repositorio.
-    Retorna las fechas disponibles (ISO).
-    """
-    import hashlib
-    import io
-
-    destino = DATA_DIR / "historico"
-    destino.mkdir(parents=True, exist_ok=True)
-    df = _ordenar_columnas(hist.copy(), "activos")
-    for col in df.columns:  # fechas a milisegundos: el lector del navegador las entrega como fechas
-        if str(df[col].dtype).startswith("datetime64"):
-            df[col] = df[col].astype("datetime64[ms]")
-    fechas, escritos = [], 0
-    for fecha, parte in df.groupby(COL_FECHA, sort=True):
-        iso_f = pd.Timestamp(fecha).strftime("%Y-%m-%d")
-        buffer = io.BytesIO()
-        parte.sort_values(COL_SNIES, kind="stable").to_parquet(buffer, index=False, compression="snappy")
-        contenido = buffer.getvalue()
-        path = destino / f"{iso_f}.parquet"
-        if not path.exists() or hashlib.sha256(path.read_bytes()).digest() != hashlib.sha256(contenido).digest():
-            path.write_bytes(contenido)
-            escritos += 1
-        fechas.append(iso_f)
-    for viejo in destino.glob("*.parquet"):  # fechas que ya no están en el histórico
-        if viejo.stem not in fechas:
-            viejo.unlink()
-    total = sum(f.stat().st_size for f in destino.glob("*.parquet")) / 1e6
-    print(f"  docs/data/historico/: {len(fechas)} ejecuciones · {total:.2f} MB · {escritos} archivo(s) nuevos o actualizados")
-    return fechas
-
-
 def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]:
     """Nombre vigente (el más reciente registrado) de cada universidad de mayor interés, para el filtro."""
     cols = ["CODIGO_INSTITUCION", "NOMBRE_INSTITUCION", COL_FECHA]
@@ -173,10 +142,10 @@ def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]
 def main() -> int:
     print("Generando datos del Dashboard...")
     if not historico.existe():
-        print(f"  ERROR: no existe el histórico {historico.ruta()}")
+        print(f"  ERROR: no hay archivos del histórico en {historico.HISTORICO_DIR}")
         return 1
 
-    hist = historico.leer()
+    hist = historico.leer(COLS_HISTORICO)
     hist[COL_FECHA] = pd.to_datetime(hist[COL_FECHA]).dt.normalize()
     novedades = {}
     for tipo in ("nuevos", "modificados", "inactivos"):
@@ -269,11 +238,14 @@ def main() -> int:
         "rangos": versiones["_RANGOS"].tolist(),
     })
 
-    # Histórico completo para la tabla de Inicio: se lee en el navegador solo el bloque de las fechas consultadas
-    comun["historico_fechas"] = escribir_historico(hist)
     escribir_js("comun.js", "comun", comun)
-    for obsoleto in ("activos_tabla.js", "historico.parquet"):  # reemplazados por data/historico/*.parquet
+    # Datos de versiones anteriores del Dashboard que ya no se publican (la tabla de programas activos de Inicio
+    # y sus copias del histórico por ejecución)
+    for obsoleto in ("activos_tabla.js", "historico.parquet"):
         (DATA_DIR / obsoleto).unlink(missing_ok=True)
+    if (DATA_DIR / "historico").is_dir():
+        shutil.rmtree(DATA_DIR / "historico")
+        print("  docs/data/historico/: eliminado (el detalle por ejecución está en Historico/)")
 
     for tipo, df in novedades.items():
         escribir_js(f"{tipo}.js", tipo, codificar(_ordenar_columnas(df, tipo)))

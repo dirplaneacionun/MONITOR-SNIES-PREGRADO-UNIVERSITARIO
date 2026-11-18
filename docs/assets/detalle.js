@@ -154,7 +154,7 @@
     A.lineas($("g-sector-evol"), fechas, Object.keys(A.SECTOR_COLOR).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: porSec[s], color: A.SECTOR_COLOR[s] })), { modo: "acumulado" });
 
     const porCine = A.contarPorFecha(filas, fechas, "CINE_F_2013_AC_CAMPO_DETALLADO");
-    A.lineas($("g-cine"), fechas, selectorCine.sel.map((c) => ({ nombre: c, valores: porCine[c] || new Array(fechas.length).fill(0), color: selectorCine.colores[c] })), { modo: "acumulado" });
+    A.lineas($("g-cine"), fechas, selectorCine.sel.map((c) => ({ nombre: c, valores: porCine[c] || new Array(fechas.length).fill(0), color: selectorCine.colores[c].color, dash: selectorCine.colores[c].dash })), { modo: "acumulado" });
 
     const dep = A.contar(filas, "DEPARTAMENTO_OFERTA_PROGRAMA").slice(0, 10);
     A.barrasH($("g-deptos"), dep.map((d) => d[0]), dep.map((d) => d[1]), color, { unidad: "registros" });

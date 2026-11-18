@@ -17,6 +17,7 @@ import argparse
 import functools
 import http.server
 import json
+import re
 import sys
 import threading
 import time
@@ -78,10 +79,25 @@ for _t, _df in NOV.items():
     _df["FECHA_DE_OBTENCION"] = _df["FECHA_DE_OBTENCION"].astype(str)
 
 
+@functools.lru_cache(maxsize=1)
+def _historico_completo():
+    """Histórico de Historico/ con la misma unificación de variantes de departamento y municipio del Dashboard."""
+    h = historico_fuente.leer()
+    h["FECHA_DE_OBTENCION"] = pd.to_datetime(h["FECHA_DE_OBTENCION"]).dt.strftime("%Y-%m-%d")
+    for col in ("DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA"):
+        conteo = pd.concat([h[col]] + [NOV[t][col] for t in NOV if col in NOV[t]]).value_counts()
+        canonica = {}
+        for valor in conteo.index:   # de más a menos frecuente
+            canonica.setdefault(re.sub(r"[^A-Z0-9Ñ]", "", str(valor)), valor)
+        h[col] = h[col].map(lambda v: v if v is None or (isinstance(v, float) and pd.isna(v))
+                            else canonica.get(re.sub(r"[^A-Z0-9Ñ]", "", str(v)), v))
+    return derivar(h)
+
+
 @functools.lru_cache(maxsize=None)
 def historico(fecha):
-    df = pd.read_parquet(DOCS / "data" / "historico" / f"{fecha}.parquet")
-    return derivar(df)
+    h = _historico_completo()
+    return h[h["FECHA_DE_OBTENCION"] == fecha]
 
 
 CAMPOS = {
@@ -144,11 +160,10 @@ class Pagina:
     def esperar_listo(self, limite=60):
         fin = time.time() + limite
         while time.time() < fin:
-            # Inicio carga su tabla al acercarse a la vista: se desplaza hasta ella para validar también sus registros
-            self.js("const t = document.getElementById('tabla'); if (t && t.dataset.diferida) t.scrollIntoView({block: 'center'});")
-            if self.js("return !!document.querySelector('.filtros') && !(document.getElementById('tabla') || {dataset: {}}).dataset.diferida "
-                       "&& !(document.getElementById('tabla-estado')||{}).textContent "
-                       "&& !!document.querySelector('#tabla [data-n]') && document.querySelector('#tabla [data-n]').textContent !== ''"):
+            # Páginas con tabla (Nuevos, Modificados, Inactivos): lista la tabla. Inicio: lista la barra de filtros.
+            if self.js("return !!document.querySelector('.filtros') && (document.getElementById('tabla') "
+                       "? !!document.querySelector('#tabla [data-n]') && document.querySelector('#tabla [data-n]').textContent !== '' "
+                       ": !!(document.querySelector('.conteo-filtro') || {}).textContent)"):
                 time.sleep(0.15)
                 return
             time.sleep(0.1)
@@ -175,11 +190,11 @@ class Pagina:
             const ultimo = (tr) => tr.y[tr.y.length - 1];
             const out = {
               total: num(t('total')), activos: num(t('k-activos')), nuevos: num(t('k-nuevos')), modificados: num(t('k-modificados')),
-              inactivos: num(t('k-inactivos')), tabla: num(document.querySelector('#tabla [data-n]').textContent),
+              inactivos: num(t('k-inactivos')), tabla: num((document.querySelector('#tabla [data-n]') || {}).textContent),
               conteo: document.querySelector('.conteo-filtro').textContent };
             const ev = g('g-evolucion'); if (ev) out.evolucion = ultimo(ev[0]);
             const act = g('g-activos'); if (act) out.g_activos = ultimo(act[0]);
-            const nov = g('g-novedades'); if (nov) out.g_novedades = nov.map(ultimo);
+            const nov = g('g-novedades'); if (nov) out.g_novedades = Object.fromEntries(nov.map(tr => [tr.name.split(' · ')[0], ultimo(tr)]));
             const div = g('g-division'); if (div && div[0].y) out.suma_division = div.reduce((a, tr) => a + ultimo(tr), 0);
             const sec = g('g-sector'); if (sec) out.suma_sector = sec[0].values.reduce((a, b) => a + b, 0);
             const per = g('g-periodos'); if (per) out.suma_periodos = per[0].y.reduce((a, b) => a + b, 0);
@@ -221,9 +236,6 @@ def esperado_inicio(filtro, busqueda=None, desde=None, hasta=None):
         df = filtrar(df, filtro, busqueda, campos)
         out[f"{t}_periodo"] = len(df)
         out[t] = int((df.FECHA_DE_OBTENCION == (fe[-1] if fe else "")).sum())
-    # Tabla: sin filtro de fecha, todas las ejecuciones del histórico; con filtro, las del periodo
-    fh = [f for f in C["historico_fechas"] if not desde or desde <= f <= hasta]
-    out["tabla"] = sum(len(filtrar(historico(f), filtro, busqueda, campos)) for f in fh)
     return out
 
 
@@ -239,10 +251,10 @@ def comparar_inicio(p, nombre, filtro, busqueda=None, desde=None, hasta=None):
     ok = verificar(f"inicio · {nombre} · KPI activos", s["activos"] == e["activos"], f"{s['activos']} vs {e['activos']}")
     for t in NOV:
         ok &= verificar(f"inicio · {nombre} · KPI {t}", s[t] == e[t], f"{s[t]} vs {e[t]}")
-    ok &= verificar(f"inicio · {nombre} · tabla", s["tabla"] == e["tabla"], f"{s['tabla']} vs {e['tabla']}")
     if s.get("g_novedades"):
         ok &= verificar(f"inicio · {nombre} · gráfica novedades acumuladas",
-                        s["g_novedades"] == [e["nuevos_periodo"], e["modificados_periodo"], e["inactivos_periodo"]],
+                        [s["g_novedades"].get(k) for k in ("NUEVOS", "MODIFICADOS", "INACTIVOS")]
+                        == [e["nuevos_periodo"], e["modificados_periodo"], e["inactivos_periodo"]],
                         f"{s['g_novedades']} vs {[e['nuevos_periodo'], e['modificados_periodo'], e['inactivos_periodo']]}")
     if e["activos"]:
         ok &= verificar(f"inicio · {nombre} · coherencia activos (línea, torta, división)",
@@ -409,6 +421,39 @@ def probar_exportacion(p):
     verificar(f"{p.nombre} · exportación Parquet", r.get("filas") == r.get("tabla") and r.get("columnas") == r.get("cols_tabla"), json.dumps(r))
 
 
+def probar_orden_leyendas(p):
+    """Gráficas de líneas con varias series: leyenda de mayor a menor TOTAL (valor final de cada serie)."""
+    info = p.js("""return [...document.querySelectorAll('.grafica')].filter(e => e.data && e.data.length > 1
+                    && e.data.every(t => t.type === 'scatter' && t.mode === 'lines'))
+                  .map(e => ({ id: e.id, totales: e.data.map(t => t.y[t.y.length - 1]) }));""")
+    mal = [f'{i["id"]}:{i["totales"]}' for i in info if any(a < b for a, b in zip(i["totales"], i["totales"][1:]))]
+    verificar(f"{p.nombre} · leyendas de mayor a menor ({len(info)} gráficas de líneas)", info and not mal, str(mal[:3]))
+
+
+def probar_cine_maximo(p):
+    """El selector CINE admite hasta 10 campos; del 9.º en adelante, línea punteada; el 11.º se rechaza."""
+    inicial = p.js("return document.getElementById('g-cine').data.length")
+    opciones = p.js("return [...document.querySelectorAll('.cine-ctrl select option')].map(o => o.value).filter(Boolean)")
+    actuales = set(p.js("return document.getElementById('g-cine').data.map(t => t.name.split(' · ')[0])"))
+    for v in [o for o in opciones if o not in actuales][:10 - inicial]:
+        p.js("const s = document.querySelector('.cine-ctrl select'); s.value = arguments[0];", v)
+        p.d.find_element(By.CSS_SELECTOR, ".cine-ctrl button").click(); time.sleep(0.2)
+    diez = p.js("return document.getElementById('g-cine').data.map(t => t.line.dash)")
+    extra = [o for o in opciones if o not in set(p.js("return document.getElementById('g-cine').data.map(t => t.name.split(' · ')[0])"))][0]
+    p.js("const s = document.querySelector('.cine-ctrl select'); s.value = arguments[0];", extra)
+    p.d.find_element(By.CSS_SELECTOR, ".cine-ctrl button").click(); time.sleep(0.3)
+    alerta = ""
+    try:
+        a = p.d.switch_to.alert; alerta = a.text; a.accept()
+    except Exception:
+        pass
+    final = p.js("return document.getElementById('g-cine').data.length")
+    verificar(f"{p.nombre} · selector CINE hasta 10 campos", len(diez) == 10 and final == 10 and "10" in alerta
+              and sorted(diez).count("dash") == 2, f"{len(diez)} campos · {final} tras el 11.º · alerta '{alerta}' · estilos {diez}")
+    while p.js("return document.querySelectorAll('.chips .chip').length") > inicial:
+        p.d.find_elements(By.CSS_SELECTOR, ".chips .chip button")[-1].click(); time.sleep(0.15)
+
+
 def probar_cine(p):
     antes = p.js("return document.getElementById('g-cine').data.length")
     p.js("const s = document.querySelector('.cine-ctrl select'); s.value = s.options[s.options.length - 1].value;")
@@ -425,24 +470,16 @@ def probar_rendimiento(p):
     verificar(f"{p.nombre} · rendimiento", p.carga < 15 and dt_ < 5, f"carga inicial {p.carga:.1f}s · filtro {dt_:.2f}s")
 
 
-def probar_carga_diferida(d, base):
-    """La tabla de Inicio no descarga el histórico hasta que el visitante se acerca a ella."""
-    d.get(f"{base}/index.html?diferida=1")
+def probar_inicio_sin_tabla(d, base):
+    """Inicio no tiene tabla de programas activos ni descarga copias del histórico."""
+    d.get(f"{base}/index.html?sin_tabla=1")
     fin = time.time() + 30
     while time.time() < fin and not d.execute_script("return !!(document.getElementById('g-activos') || {}).data"):
         time.sleep(0.1)
     time.sleep(1.5)
-    js_hist = "return performance.getEntriesByType('resource').filter(e => e.name.includes('data/historico/')).length"
-    antes = d.execute_script(js_hist)
-    estado = d.execute_script("return [document.getElementById('tabla').dataset.diferida || '', document.querySelector('#tabla [data-n]').textContent]")
-    verificar("inicio · carga diferida: sin descargar el histórico al abrir", antes == 0 and estado[0] == "pendiente", f"{antes} archivos · {estado}")
-    d.execute_script("document.getElementById('tabla').scrollIntoView({block: 'center'})")
-    fin = time.time() + 60
-    while time.time() < fin and not d.execute_script("return !document.getElementById('tabla').dataset.diferida && /registros/.test(document.querySelector('#tabla [data-n]').textContent) && !document.getElementById('tabla-estado').textContent"):
-        time.sleep(0.1)
-    despues = d.execute_script(js_hist)
-    n = d.execute_script("return document.querySelector('#tabla [data-n]').textContent")
-    verificar("inicio · carga diferida: descarga al llegar a la tabla", despues == len(C["historico_fechas"]), f"{despues} archivos · {n}")
+    sin_tabla = d.execute_script("return !document.getElementById('tabla') && !document.getElementById('t-tabla')")
+    descargas = d.execute_script("return performance.getEntriesByType('resource').filter(e => e.name.includes('data/historico/')).length")
+    verificar("inicio · sin tabla de programas activos ni descargas del histórico", sin_tabla and descargas == 0, f"tabla ausente {sin_tabla} · {descargas} descargas")
     # Librerías, tipografía y datos se sirven desde el propio sitio: ninguna solicitud a terceros
     for pagina in ("index.html", "modificados.html"):
         if pagina != "index.html":
@@ -455,9 +492,9 @@ def probar_carga_diferida(d, base):
 def consistencia_datos():
     h = historico_fuente.leer(["FECHA_DE_OBTENCION"])
     por_fecha = h["FECHA_DE_OBTENCION"].dt.strftime("%Y-%m-%d").value_counts().to_dict()
-    verificar("datos · fechas del histórico publicadas", sorted(por_fecha) == C["historico_fechas"], f"{len(por_fecha)} vs {len(C['historico_fechas'])}")
-    errores = [f for f in C["historico_fechas"] if len(pd.read_parquet(DOCS / "data" / "historico" / f"{f}.parquet", columns=["CODIGO_SNIES_DEL_PROGRAMA"])) != por_fecha.get(f)]
-    verificar("datos · filas por fecha (histórico vs Dashboard)", not errores, str(errores[:5]))
+    verificar("datos · ejecuciones del histórico en el Dashboard", sorted(por_fecha) == C["fechas_activos"], f"{len(por_fecha)} vs {len(C['fechas_activos'])}")
+    verificar("datos · sin copias del histórico publicadas (docs/data/historico)", not (DOCS / "data" / "historico").exists()
+              and "historico_fechas" not in C)
     act = leer_js("activos.js")
     n = len(C["fechas_activos"]); conteo = [0] * n
     for rangos in act["rangos"]:
@@ -566,7 +603,7 @@ def main():
     d = navegador()
     try:
         # Inicio
-        probar_carga_diferida(d, base)
+        probar_inicio_sin_tabla(d, base)
         p = Pagina(d, base, "index.html")
         p.claves = ["universidades", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"]
         comparar = lambda n, f, busqueda=None, desde=None, hasta=None: comparar_inicio(p, n, f, busqueda, desde, hasta)  # noqa: E731
@@ -575,9 +612,9 @@ def main():
         probar_filtros(p, comparar, [c for c in p.claves], args.rapida)
         probar_fechas(p, comparar)
         probar_combinaciones(p, comparar, True)
-        probar_tabla(p, pd.concat([historico(f) for f in C["historico_fechas"]], ignore_index=True))
-        seleccionar_fecha(p, "mes", "2026-10"); probar_exportacion(p); p.d.find_element(By.CSS_SELECTOR, ".fs-quitar").click(); p.esperar_listo()
         probar_cine(p)
+        probar_cine_maximo(p)
+        probar_orden_leyendas(p)
         probar_rendimiento(p)
         verificar("inicio · errores de consola", not p.errores(), str(p.errores()[:3]))
         # Navegación desde las tarjetas KPI
@@ -598,6 +635,7 @@ def main():
             probar_tabla(q, NOV[tipo])
             probar_exportacion(q)
             probar_cine(q)
+            probar_orden_leyendas(q)
             probar_rendimiento(q)
             for nav in ("index.html", "nuevos.html", "modificados.html", "inactivos.html"):
                 enlaces = q.d.find_elements(By.CSS_SELECTOR, f'.nav a[href="{nav}"]')

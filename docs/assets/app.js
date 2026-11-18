@@ -55,43 +55,6 @@
     return filas;
   }
 
-  // ── Histórico de programas activos (docs/data/historico/AAAA-MM-DD.parquet) ─
-  const cacheHistorico = new Map();
-  let hyparquet = null;
-  // Cada ejecución repite casi los mismos textos (instituciones, programas, municipios, fechas). Compartir una sola
-  // copia de cada texto entre todos los registros reduce la memoria del histórico completo a una fracción.
-  const textosUnicos = new Map();
-  const unico = (s) => { const x = textosUnicos.get(s); if (x !== undefined) return x; textosUnicos.set(s, s); return s; };
-  /** Registros de programas activos de una ejecución, leídos del histórico (una sola descarga por fecha). */
-  function leerHistorico(fecha) {
-    if (!cacheHistorico.has(fecha)) {
-      cacheHistorico.set(fecha, (async () => {
-        hyparquet = hyparquet || (await import("hyparquet"));
-        const resp = await fetch(`data/historico/${fecha}.parquet`);
-        if (!resp.ok) throw new Error(`No se pudo leer el histórico del ${fecha} (${resp.status})`);
-        const leidas = await hyparquet.parquetReadObjects({ file: await resp.arrayBuffer() });
-        if (!leidas.length) return leidas;
-        // Los registros se copian sobre una plantilla con todas las columnas: los objetos comparten una misma
-        // estructura interna en el navegador y ocupan cerca de una octava parte de la memoria que los objetos
-        // armados columna por columna (decisivo al consultar las 60 y más ejecuciones del histórico a la vez).
-        const plantilla = JSON.parse(JSON.stringify(Object.fromEntries([...Object.keys(leidas[0]), "_GU", "_MG"].map((c) => [c, null]))));
-        return leidas.map((o) => {
-          const r = { ...plantilla };
-          for (const k in o) {
-            const v = o[k];
-            r[k] = typeof v === "string" ? unico(v)
-              : typeof v === "bigint" ? Number(v)
-              : v instanceof Date ? (isNaN(v) ? null : unico(v.toISOString().slice(0, 10)))
-              : v;
-          }
-          return derivar(r);
-        });
-      })());
-      cacheHistorico.get(fecha).catch(() => cacheHistorico.delete(fecha));
-    }
-    return cacheHistorico.get(fecha);
-  }
-
   /** Color estable por entidad: orden fijo; 9.ª categoría en adelante con línea punteada; OTRO/SIN INFORMACIÓN en gris. */
   function asignarColores(valores) {
     const mapa = {};
@@ -580,8 +543,11 @@
    */
   function lineas(div, fechas, series, opciones = {}) {
     if (!fechas.length || !series.length) return vacio(div);
-    const ser = opciones.modo === "acumulado" ? series.map((s) => Object.assign({}, s, { valores: acumular(s.valores) })) : series;
     const total = (s) => s.valores[s.valores.length - 1];
+    const acumuladas = opciones.modo === "acumulado" ? series.map((s) => Object.assign({}, s, { valores: acumular(s.valores) })) : series;
+    // Leyenda (y orden de las series) de mayor a menor TOTAL; ante empate se conserva el orden recibido.
+    // El color de cada serie no cambia: sigue a la categoría, no a su posición.
+    const ser = acumuladas.map((s, i) => [s, i]).sort((a, b) => total(b[0]) - total(a[0]) || a[1] - b[1]).map((x) => x[0]);
     const varias = ser.length > 1;
     const etiquetaHover = opciones.modo === "acumulado" ? "acumulado" : "programas";
     // Pantalla angosta: la leyenda pasa debajo del gráfico (a la derecha taparía las líneas) y el contenedor crece
@@ -668,11 +634,16 @@
   function plotly(div, trazas, layout) { limpiarVacio(div); Plotly.react(div, trazas, baseLayout(layout), CONFIG_PLOTLY); }
 
   // ── Selector de campos CINE para la gráfica de evolución ──────────────────
+  // Estilos del selector CINE (máximo 10 campos): los 8 colores de la paleta y, del 9.º en adelante, los primeros
+  // colores con línea punteada (misma regla que asignarColores).
+  const ESTILOS_CINE = [...CATEGORICA.map((color) => ({ color, dash: "solid" })),
+    ...CATEGORICA.slice(0, 2).map((color) => ({ color, dash: "dash" }))];
+
   class SelectorCine {
     constructor(cont, opcionesOrdenadas, porDefecto, alCambiar) {
-      this.sel = [...porDefecto]; this.alCambiar = alCambiar; this.max = CATEGORICA.length;
+      this.sel = [...porDefecto].slice(0, ESTILOS_CINE.length); this.alCambiar = alCambiar; this.max = ESTILOS_CINE.length;
       this.colores = {};
-      this.sel.forEach((v, i) => (this.colores[v] = CATEGORICA[i]));
+      this.sel.forEach((v, i) => (this.colores[v] = ESTILOS_CINE[i]));
       cont.innerHTML = `<div class="cine-ctrl"><select aria-label="Buscar Campo De CINE Detallado"><option value="">Buscar Campo De CINE Detallado</option>
         ${opcionesOrdenadas.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>
         <button type="button" class="btn btn-primario">AGREGAR</button></div><div class="chips"></div>`;
@@ -682,13 +653,14 @@
         if (!v || this.sel.includes(v)) return;
         if (this.sel.length >= this.max) { alert(`Máximo ${this.max} campos a la vez. Quite uno para agregar otro.`); return; }
         const usados = new Set(Object.values(this.colores));
-        this.colores[v] = CATEGORICA.find((c) => !usados.has(c)) || CATEGORICA[0];
+        this.colores[v] = ESTILOS_CINE.find((e) => !usados.has(e)) || ESTILOS_CINE[0];
         this.sel.push(v); this.select.value = ""; this.pintar(); this.alCambiar();
       });
       this.pintar();
     }
     pintar() {
-      this.chips.innerHTML = this.sel.map((v) => `<span class="chip"><i style="background:${this.colores[v]}"></i>${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="Quitar ${esc(v)}">×</button></span>`).join("");
+      const muestra = (e) => (e.dash === "solid" ? `background:${e.color}` : `border:2px dashed ${e.color};background:transparent`);
+      this.chips.innerHTML = this.sel.map((v) => `<span class="chip"><i style="${muestra(this.colores[v])}"></i>${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="Quitar ${esc(v)}">×</button></span>`).join("");
       this.chips.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
         this.sel = this.sel.filter((x) => x !== b.dataset.v); delete this.colores[b.dataset.v]; this.pintar(); this.alCambiar();
       }));
@@ -876,7 +848,7 @@
 
   window.App = {
     C, CAT, ESTADO, CATEGORICA, GRIS, SECTOR_COLOR, ROJO, AMARILLO, NEGRO, fmt, fmtFecha, esc, normalizar,
-    decodificar, derivar, leerHistorico, asignarColores, Filtros, SelectorCine, Tabla, lineas, barrasH, barrasV, torta, plotly, vacio,
+    decodificar, derivar, asignarColores, Filtros, SelectorCine, Tabla, lineas, barrasH, barrasV, torta, plotly, vacio,
     contarPorFecha, contar, seriesPorCategoria, ejeMeses, ejeEntero, grupoModalidad, valorFecha, tipoColumna,
   };
 })();

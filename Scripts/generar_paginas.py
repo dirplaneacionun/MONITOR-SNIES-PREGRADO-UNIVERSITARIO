@@ -114,12 +114,6 @@ def main() -> None:
           <a class="kpi k-inactivos" href="inactivos.html"><div class="kpi-et">INACTIVOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-inactivos">–</div><div class="kpi-s">Ejecución del <span data-fecha-ultima></span></div></a>
         </section>
     '''
-    TABLA_INICIO = '''    <section class="tarjeta" aria-labelledby="t-tabla">
-          <h2 class="tarjeta-tit" id="t-tabla">PROGRAMAS ACADÉMICOS ACTIVOS (HISTÓRICO)</h2>
-          <p class="tarjeta-sub">Consulta del histórico de programas activos: <b data-tabla-periodo></b>. Incluye un registro por programa y ejecución: sin filtro de fecha, todas las ejecuciones; con una fecha, rango, mes o año, las ejecuciones del periodo. Los registros se descargan al llegar a esta sección y se ordenan desde la fecha más reciente; haga clic en un encabezado para ordenar según el tipo de dato. DESCARGAR PARQUET exporta los registros filtrados.</p>
-          <div id="tabla-estado" aria-live="polite"></div>
-          <div id="tabla"></div>
-        </section>'''
     cuerpo = [
         KPIS,
         par(tarjeta("EVOLUCIÓN DE LOS PROGRAMAS ACADÉMICOS ACTIVOS", "g-activos",
@@ -131,14 +125,13 @@ def main() -> None:
         ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR DIVISIÓN DE UNINORTE", "g-division",
               "Programas activos en cada ejecución según la división académica de la Universidad del Norte con la que se relacionan. Haga clic en la leyenda para ocultar o aislar divisiones.", "alta"),
         ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR CAMPO DE CINE DETALLADO", "g-cine",
-              "Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 8).", extra='\n        <div id="cine-ctrl"></div>'),
+              "Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 10).", extra='\n        <div id="cine-ctrl"></div>'),
         par(tarjeta("PROGRAMAS ACTIVOS POR SECTOR", "g-sector", "Distribución entre instituciones oficiales y privadas en la ejecución del <span data-fecha-corte></span>."),
             tarjeta("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR SECTOR", "g-sector-evol", "Programas activos de instituciones oficiales y privadas en cada ejecución."), "tercio"),
         par(tarjeta("TOP 10 DEPARTAMENTOS CON MÁS PROGRAMAS ACTIVOS", "g-deptos", "Departamentos de oferta con más programas activos en la ejecución del <span data-fecha-corte></span>."),
             tarjeta("TOP 10 UNIVERSIDADES CON MÁS PROGRAMAS ACTIVOS", "g-univ", "Instituciones con más programas activos en la ejecución del <span data-fecha-corte></span>.")),
         ancha("PROGRAMAS ACTIVOS SEGÚN NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",
               "Cantidad de programas activos según su duración en periodos académicos (semestres o equivalentes) en la ejecución del <span data-fecha-corte></span>.", "baja"),
-        TABLA_INICIO,
     ]
     html = HEAD.format(css=v("assets/estilos.css"), css_fp=v("assets/vendor/flatpickr/flatpickr.min.css"), title="Monitor SNIES Pregrado", desc="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)",
                        body="", h1="MONITOR SNIES PREGRADO · UNIVERSITARIO", sub=f'\n          <p class="enc-sub">{SUB}</p>',
@@ -168,7 +161,7 @@ def main() -> None:
         c.append(par(tarjeta(f"PROGRAMAS {N} POR SECTOR", "g-sector", "Distribución de los registros del periodo filtrado entre instituciones oficiales y privadas."),
                      tarjeta("EVOLUCIÓN ACUMULADA POR SECTOR", "g-sector-evol", f"Programas {n} acumulados de instituciones oficiales y privadas."), "tercio"))
         c.append(ancha("EVOLUCIÓN ACUMULADA POR CAMPO DE CINE DETALLADO", "g-cine",
-                       "Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 8).",
+                       "Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 10).",
                        extra='\n        <div id="cine-ctrl"></div>'))
         c.append(par(tarjeta("TOP 10 DEPARTAMENTOS", "g-deptos", "Departamentos de oferta con más registros en el periodo filtrado."),
                      tarjeta("TOP 10 INSTITUCIONES", "g-instituciones", "Instituciones con más registros en el periodo filtrado.")))

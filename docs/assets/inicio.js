@@ -10,7 +10,6 @@
   S.activos.rangos.forEach((r, i) => (versiones[i]._R = r));
   const nov = { nuevos: A.decodificar(S.nuevos), modificados: A.decodificar(S.modificados), inactivos: A.decodificar(S.inactivos) };
   const fechasActivos = C.fechas_activos;
-  const fechasHistorico = C.historico_fechas || fechasActivos;
   $("ultima").textContent = A.fmtFecha(C.ultima_ejecucion);
 
   // Colores estables por entidad
@@ -30,24 +29,6 @@
     alCambiar: () => actualizar(),
   });
   const selectorCine = new A.SelectorCine($("cine-ctrl"), C.cine_orden, C.cine_por_defecto, () => actualizar());
-  const tablaUI = new A.Tabla($("tabla"), { columnas: ["FECHA_DE_OBTENCION"], archivo: "Programas Academicos Activos" });
-
-  // Carga diferida de la tabla: el histórico completo (más de 20 MB) se descarga solo cuando la tabla se acerca a
-  // la vista, para que quien consulta únicamente indicadores y gráficas no lo descargue. Sin IntersectionObserver
-  // (navegadores muy antiguos) la tabla se carga de inmediato.
-  let tablaActiva = !("IntersectionObserver" in window);
-  if (!tablaActiva) {
-    const contTabla = $("tabla");
-    contTabla.dataset.diferida = "pendiente";
-    const observador = new IntersectionObserver((entradas) => {
-      if (!entradas.some((e) => e.isIntersecting)) return;
-      observador.disconnect();
-      tablaActiva = true;
-      delete contTabla.dataset.diferida;
-      actualizarTabla();
-    }, { rootMargin: "400px 0px" });
-    observador.observe(contTabla);
-  }
 
   /** Conteos por fecha de activos para las versiones que pasan los filtros. */
   function evolucion(vs, n, campo) {
@@ -60,35 +41,6 @@
     return campo ? por : total;
   }
   const recortar = (serie, ia, ib) => serie.slice(ia, ib + 1);
-
-  // Tabla de programas activos: siempre desde el histórico (Historico Programas Activos), un registro por
-  // programa y ejecución. Sin filtro de fecha incluye todas las ejecuciones, como las tablas de los demás apartados.
-  let turnoTabla = 0;
-  async function actualizarTabla() {
-    const turno = ++turnoTabla;
-    const fechas = filtros.desde ? filtros.enRango(fechasHistorico) : fechasHistorico;
-    const periodo = !fechas.length ? "sin descargas en el periodo"
-      : fechas.length === 1 ? `ejecución del ${A.fmtFecha(fechas[0])}`
-      : `${fechas.length} ejecuciones, del ${A.fmtFecha(fechas[0])} al ${A.fmtFecha(fechas[fechas.length - 1])}`;
-    textos("[data-tabla-periodo]", periodo);
-    if (!fechas.length) { tablaUI.mensaje("No hay descargas de programas activos en las fechas seleccionadas."); return; }
-    if (!tablaActiva) { tablaUI.mensaje("Los registros se cargan al desplazarse hasta esta sección."); return; }
-    $("tabla-estado").innerHTML = `<span class="cargando">Consultando el histórico (${fechas.length} ejecución${fechas.length > 1 ? "es" : ""})...</span>`;
-    try {
-      const partes = await Promise.all(fechas.map((f) => A.leerHistorico(f)));
-      if (turno !== turnoTabla) return;   // llegó una consulta más reciente
-      const filas = [];
-      partes.forEach((p) => p.forEach((r) => { if (filtros.pasa(r, { sinFecha: true })) filas.push(r); }));
-      const columnas = Object.keys(partes[0][0] || { FECHA_DE_OBTENCION: null }).filter((c) => !c.startsWith("_"));
-      tablaUI.actualizar(filas, columnas);
-      $("tabla-estado").textContent = "";
-    } catch (e) {
-      if (turno !== turnoTabla) return;
-      console.error(e);
-      tablaUI.mensaje("No se pudo consultar el histórico de programas activos.");
-      $("tabla-estado").textContent = "";
-    }
-  }
 
   function actualizar() {
     const vs = versiones.filter((v) => filtros.pasa(v, { sinFecha: true }));
@@ -106,7 +58,7 @@
       const porDiv = evolucion(vs, n, "DIVISION_UNINORTE");
       A.lineas($("g-division"), fechasR, divisiones.filter((d) => porDiv[d]).map((d) => ({ nombre: d, valores: recortar(porDiv[d], ia, ib), color: colDiv[d].color, dash: colDiv[d].dash })), { modo: "stock" });
       const porCine = evolucion(vs, n, "CINE_F_2013_AC_CAMPO_DETALLADO");
-      A.lineas($("g-cine"), fechasR, selectorCine.sel.map((c) => ({ nombre: c, valores: recortar(porCine[c] || new Array(n).fill(0), ia, ib), color: selectorCine.colores[c] })), { modo: "stock" });
+      A.lineas($("g-cine"), fechasR, selectorCine.sel.map((c) => ({ nombre: c, valores: recortar(porCine[c] || new Array(n).fill(0), ia, ib), color: selectorCine.colores[c].color, dash: selectorCine.colores[c].dash })), { modo: "stock" });
       const porSec = evolucion(vs, n, "SECTOR");
       A.lineas($("g-sector-evol"), fechasR, Object.keys(A.SECTOR_COLOR).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: recortar(porSec[s], ia, ib), color: A.SECTOR_COLOR[s] })), { modo: "stock" });
     }
@@ -144,8 +96,6 @@
     $("k-inactivos").textContent = A.fmt(enUltima("inactivos").length);
     textos("[data-fecha-ultima]", ultimaE ? A.fmtFecha(ultimaE) : "–");
     filtros.conteo.textContent = `${A.fmt(enCorte.length)} programas activos`;
-
-    actualizarTabla();
   }
 
   actualizar();

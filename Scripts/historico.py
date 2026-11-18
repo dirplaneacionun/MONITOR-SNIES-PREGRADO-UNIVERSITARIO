@@ -1,18 +1,24 @@
 """
 historico.py
 ------------
-Acceso al histórico de programas activos, guardado en un único archivo Parquet:
-    Historico/Historico Programas Activos.parquet
+Acceso al histórico de programas activos, guardado en un archivo Parquet por año:
+    Historico/Historico Programas Activos AAAA.parquet
 
-Cada ejecución ocupa su propio grupo de filas (row group) dentro del archivo, en orden de fecha. Al agregar una
-ejecución, los grupos anteriores se vuelven a escribir con los mismos bytes y Git almacena solo la diferencia
-(alrededor de 0,2 MB por ejecución) en lugar de una copia completa del archivo. Solo una reclasificación que
-modifique divisiones antiguas reescribe el contenido de grupos anteriores.
+Motivo de la división por año: GitHub rechaza archivos de más de 100 MB y advierte desde 50 MB. Un archivo
+único crecería unos 17 MB por año (una ejecución semanal de ~5.500 programas); por año, cada archivo queda entre
+17 y 25 MB y el límite no se alcanza, sin importar cuántos años funcione la herramienta. leer() entrega los
+archivos en conjunto, como un solo histórico.
+
+Dentro de cada archivo, cada ejecución ocupa su propio grupo de filas (row group), en orden de fecha. Al agregar
+una ejecución, los grupos anteriores se vuelven a escribir con los mismos bytes y Git almacena solo la diferencia
+(alrededor de 0,2 MB por ejecución). Una reclasificación solo cambia las columnas de clasificación, que Git
+también almacena como diferencia.
 
 Tipos de datos: el reporte del SNIES no siempre entrega una columna con el mismo tipo (por ejemplo,
 NUMERO_CREDITOS llega como número en una descarga y como texto en otra, y una columna sin datos llega sin
-tipo). Cada ejecución nueva adopta el esquema del archivo (alinear) y los números guardados como texto usan
-una sola representación ("10", no "10.0"), para que las comparaciones entre ejecuciones sean exactas.
+tipo). Cada ejecución adopta el esquema del archivo de su año (o, en un año nuevo, el del año anterior) y los
+números guardados como texto usan una sola representación ("10", no "10.0"), para que las comparaciones entre
+ejecuciones sean exactas.
 """
 
 from __future__ import annotations
@@ -27,32 +33,43 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 HISTORICO_DIR = Path(__file__).resolve().parent.parent / "Historico"
-NOMBRE = "Historico Programas Activos.parquet"
+PREFIJO = "Historico Programas Activos"
 COL_FECHA = "FECHA_DE_OBTENCION"
 COMPRESION = "snappy"   # compatible con pandas, Power BI, Excel (Power Query) y la mayoría de herramientas
+_ARCHIVO_RE = re.compile(rf"^{PREFIJO} (\d{{4}})\.parquet$")
 _ENTERO_DECIMAL = re.compile(r"^-?\d+\.0+$")
 
 
-def ruta() -> Path:
-    """Archivo del histórico."""
-    return HISTORICO_DIR / NOMBRE
+def ruta(anio: int) -> Path:
+    """Archivo del histórico del año `anio`."""
+    return HISTORICO_DIR / f"{PREFIJO} {anio}.parquet"
+
+
+def archivos() -> list[tuple[int, Path]]:
+    """Archivos del histórico, ordenados por año: [(año, ruta)]."""
+    if not HISTORICO_DIR.exists():
+        return []
+    encontrados = [(int(m.group(1)), p) for p in HISTORICO_DIR.iterdir() if (m := _ARCHIVO_RE.match(p.name))]
+    return sorted(encontrados)
 
 
 def existe() -> bool:
-    return ruta().exists()
+    return bool(archivos())
 
 
 def esquema() -> pa.Schema | None:
-    """Esquema del histórico (None si aún no existe)."""
-    return pq.read_schema(ruta()) if existe() else None
+    """Esquema del archivo más reciente del histórico (None si aún no hay archivos)."""
+    lista = archivos()
+    return pq.read_schema(lista[-1][1]) if lista else None
 
 
 def fechas() -> list[dt.date]:
     """Fechas de ejecución presentes en el histórico, en orden."""
-    if not existe():
-        return []
-    columna = pq.read_table(ruta(), columns=[COL_FECHA]).column(COL_FECHA).to_pandas()
-    return sorted({pd.Timestamp(v).date() for v in columna.dropna().unique()})
+    encontradas = set()
+    for _, path in archivos():
+        columna = pq.read_table(path, columns=[COL_FECHA]).column(COL_FECHA).to_pandas()
+        encontradas |= {pd.Timestamp(v).date() for v in columna.dropna().unique()}
+    return sorted(encontradas)
 
 
 def _texto(v):
@@ -96,23 +113,70 @@ def alinear(df: pd.DataFrame, esquema_ref: pa.Schema | None) -> pd.DataFrame:
     return df
 
 
+def _tipos_iniciales(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Tipos para la primera ejecución del histórico (sin esquema de referencia): columnas con tipos mezclados
+    (p. ej., 160 y "180") → texto con representación única; columnas solo de fechas → fecha.
+    """
+    df = df.copy()
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+        valores = df[col].dropna()
+        tipos = {type(v) for v in valores}
+        if valores.empty:
+            continue
+        if all(isinstance(v, (pd.Timestamp, dt.datetime, dt.date)) for v in valores):
+            df[col] = pd.to_datetime(df[col])
+        elif len(tipos) > 1:
+            df[col] = df[col].map(_texto).astype("str")
+    return df
+
+
 def leer(columnas: list[str] | None = None, antes_de: dt.date | None = None,
-         fecha: dt.date | None = None) -> pd.DataFrame:
+         fecha: dt.date | None = None, codigos_snies: list[int] | None = None) -> pd.DataFrame:
     """
-    Histórico (todas las ejecuciones, las anteriores a `antes_de` o solo la de `fecha`). Con `columnas`, lee solo
-    esas columnas; una columna que no existe en el histórico se entrega vacía.
+    Histórico consolidado de todos los años (todas las ejecuciones, las anteriores a `antes_de` o solo la de
+    `fecha`). Con `columnas`, lee solo esas columnas; una columna que no existe en algún año se entrega vacía en
+    los registros de ese año. Con `codigos_snies`, solo los registros de esos programas: el filtro se aplica al
+    leer, así que la memoria depende de los programas pedidos y no del tamaño del histórico.
     """
-    if not existe():
-        return pd.DataFrame(columns=columnas or [])
-    nombres = esquema().names
-    leidas = None if columnas is None else [c for c in columnas if c in nombres]
     filtros = []
+    if codigos_snies is not None:
+        filtros.append(("CODIGO_SNIES_DEL_PROGRAMA", "in", [int(c) for c in codigos_snies]))
     if antes_de is not None:
         filtros.append((COL_FECHA, "<", pd.Timestamp(antes_de)))
     if fecha is not None:
         filtros.append((COL_FECHA, "==", pd.Timestamp(fecha)))
-    df = pq.read_table(ruta(), columns=leidas, filters=filtros or None).to_pandas()
-    return df.reindex(columns=columnas) if columnas is not None else df
+    partes = []
+    for anio, path in archivos():
+        if (fecha is not None and anio != fecha.year) or (antes_de is not None and anio > antes_de.year):
+            continue   # el año no puede contener las fechas pedidas
+        nombres = pq.read_schema(path).names
+        leidas = None if columnas is None else [c for c in columnas if c in nombres]
+        parte = pq.read_table(path, columns=leidas, filters=filtros or None).to_pandas()
+        if len(parte):
+            partes.append(parte)
+    if not partes:
+        return pd.DataFrame(columns=columnas or (esquema().names if existe() else []))
+    df = pd.concat(partes, ignore_index=True) if len(partes) > 1 else partes[0]
+    if columnas is not None:
+        df = df.reindex(columns=columnas)
+    # Una columna con tipos distintos entre años (p. ej., vacía en un año) se une como objeto: se unifica
+    for col in df.columns:
+        if df[col].dtype == object:
+            valores = df[col].dropna()
+            if len(valores) and all(isinstance(v, (pd.Timestamp, dt.datetime, dt.date)) for v in valores):
+                df[col] = pd.to_datetime(df[col])
+            elif len(valores):
+                df[col] = df[col].map(_texto).astype("str")
+    return df
+
+
+def leer_anio(anio: int) -> pd.DataFrame:
+    """Todas las ejecuciones del año `anio`, con todas sus columnas (vacío si el año no tiene archivo)."""
+    path = ruta(anio)
+    return pq.read_table(path).to_pandas() if path.exists() else pd.DataFrame()
 
 
 def ejecucion_anterior(fecha: dt.date) -> tuple[dt.date, pd.DataFrame] | None:
@@ -123,14 +187,14 @@ def ejecucion_anterior(fecha: dt.date) -> tuple[dt.date, pd.DataFrame] | None:
     return previas[-1], leer(fecha=previas[-1]).drop(columns=[COL_FECHA])
 
 
-def _escribir(grupos: list[pa.Table], esquema_final: pa.Schema) -> None:
+def _escribir(path: Path, grupos: list[pa.Table], esquema_final: pa.Schema) -> None:
     """Escribe un grupo de filas por ejecución, en el orden recibido, de forma atómica."""
     HISTORICO_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = ruta().with_suffix(".tmp.parquet")
+    tmp = path.with_suffix(".tmp.parquet")
     with pq.ParquetWriter(tmp, esquema_final, compression=COMPRESION) as escritor:
         for grupo in grupos:
             escritor.write_table(grupo)
-    os.replace(tmp, ruta())
+    os.replace(tmp, path)
 
 
 def _fecha_grupo(tabla: pa.Table) -> dt.date:
@@ -144,42 +208,65 @@ def _ajustar(tabla: pa.Table, esquema_final: pa.Schema) -> pa.Table:
     return pa.Table.from_arrays(columnas, schema=esquema_final)
 
 
+def _con_extra(base: pa.Schema, otro: pa.Schema) -> pa.Schema:
+    """`base` más las columnas de `otro` que no tiene, al final (nunca se descartan datos)."""
+    extra = [f for f in otro if f.name not in base.names]
+    return pa.schema(list(base) + extra, metadata=base.metadata) if extra else base
+
+
 def guardar_ejecucion(df: pd.DataFrame, fecha: dt.date) -> int:
     """
-    Agrega (o reemplaza, si se repite la fecha) los programas activos de la ejecución `fecha`. Los grupos de las
-    demás ejecuciones se conservan sin cambios. Si la descarga trae columnas nuevas, se agregan al esquema y
-    quedan vacías en las ejecuciones anteriores. Retorna el número de ejecuciones del histórico.
+    Agrega (o reemplaza, si se repite la fecha) los programas activos de la ejecución `fecha` en el archivo de su
+    año. Los grupos de las demás ejecuciones se conservan sin cambios. Un año nuevo comienza con el esquema del
+    año anterior; si la descarga trae columnas nuevas, se agregan al esquema del año y quedan vacías en sus
+    ejecuciones anteriores. Retorna el número total de ejecuciones del histórico.
     """
-    actual = esquema()
-    nueva = pa.Table.from_pandas(alinear(df.assign(**{COL_FECHA: pd.Timestamp(fecha)}), actual), preserve_index=False)
+    path = ruta(fecha.year)
+    actual = pq.read_schema(path) if path.exists() else None
+    referencia = actual if actual is not None else esquema()
+    df = df.assign(**{COL_FECHA: pd.Timestamp(fecha)})
+    df = alinear(df, referencia) if referencia is not None else _tipos_iniciales(df)
+    nueva = pa.Table.from_pandas(df, preserve_index=False)
     grupos = []
     if actual is not None:
-        with open(ruta(), "rb") as fh:   # se cierra antes de reemplazar el archivo (requisito en Windows)
+        with open(path, "rb") as fh:   # se cierra antes de reemplazar el archivo (requisito en Windows)
             archivo = pq.ParquetFile(fh)
             grupos = [archivo.read_row_group(i) for i in range(archivo.num_row_groups)]
         grupos = [g for g in grupos if _fecha_grupo(g) != fecha]
-        extra = [f for f in nueva.schema if f.name not in actual.names]
-        esquema_final = pa.schema(list(actual) + extra, metadata=actual.metadata) if extra else actual
-        if extra:
-            grupos = [_ajustar(g, esquema_final) for g in grupos]
-    else:
-        esquema_final = nueva.schema
-    nueva = _ajustar(nueva, esquema_final)
-    grupos.append(nueva)
+    esquema_final = _con_extra(referencia, nueva.schema) if referencia is not None else nueva.schema
+    if actual is not None and esquema_final is not actual:
+        grupos = [_ajustar(g, esquema_final) for g in grupos]
+    grupos.append(_ajustar(nueva, esquema_final))
     grupos.sort(key=_fecha_grupo)
-    _escribir(grupos, esquema_final)
-    return len(grupos)
+    _escribir(path, grupos, esquema_final)
+    if referencia is None:
+        _normalizar_esquema(path, grupos)
+    return len(fechas())
+
+
+def _normalizar_esquema(path: Path, grupos: list[pa.Table]) -> None:
+    """
+    Primera escritura del histórico: se reescribe con el esquema tal como queda guardado en el archivo, para que las
+    escrituras posteriores (que parten de ese esquema) produzcan exactamente los mismos bytes si los datos no cambian.
+    """
+    canonico = pq.read_schema(path)
+    _escribir(path, [_ajustar(g, canonico) for g in grupos], canonico)
 
 
 def reescribir(df: pd.DataFrame) -> None:
-    """Reescribe el histórico completo desde `df` (un grupo de filas por fecha), conservando el esquema vigente."""
-    actual = esquema()
-    df = alinear(df, actual)
-    tablas = [pa.Table.from_pandas(parte.reset_index(drop=True), preserve_index=False)
-              for _, parte in df.sort_values(COL_FECHA, kind="stable").groupby(COL_FECHA, sort=True)]
-    if actual is None:
-        esquema_final = tablas[0].schema
-    else:   # columnas que no estaban en el esquema se agregan al final (nunca se descartan datos)
-        extra = [f for f in tablas[0].schema if f.name not in actual.names]
-        esquema_final = pa.schema(list(actual) + extra, metadata=actual.metadata) if extra else actual
-    _escribir([_ajustar(t, esquema_final) for t in tablas], esquema_final)
+    """
+    Reescribe el histórico desde `df` (un archivo por año y un grupo de filas por fecha), conservando el esquema
+    vigente de cada año. Un año cuyo contenido no cambió se reescribe con los mismos bytes.
+    """
+    anios = pd.to_datetime(df[COL_FECHA]).dt.year
+    for anio, parte_anio in df.groupby(anios.values, sort=True):
+        path = ruta(int(anio))
+        actual = pq.read_schema(path) if path.exists() else esquema()
+        parte_anio = alinear(parte_anio, actual)
+        tablas = [pa.Table.from_pandas(parte.reset_index(drop=True), preserve_index=False)
+                  for _, parte in parte_anio.sort_values(COL_FECHA, kind="stable").groupby(COL_FECHA, sort=True)]
+        esquema_final = _con_extra(actual, tablas[0].schema) if actual is not None else tablas[0].schema
+        grupos = [_ajustar(t, esquema_final) for t in tablas]
+        _escribir(path, grupos, esquema_final)
+        if actual is None:
+            _normalizar_esquema(path, grupos)

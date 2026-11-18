@@ -6,7 +6,7 @@ CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNI
 
 Actualiza DIVISION_UNINORTE y PUNTAJE_TOTAL en los archivos que
 alimentan el Dashboard:
-    Historico/Historico Programas Activos.parquet (todas las ejecuciones)
+    Historico/Historico Programas Activos AAAA.parquet (todas las ejecuciones, un archivo por año)
     Novedades/Nuevos.parquet, Novedades/Modificados.parquet, Novedades/Inactivos.parquet
 
 Solo se reescriben los archivos en los que cambia alguna clasificación, para que el repositorio
@@ -15,6 +15,10 @@ no almacene de nuevo archivos sin cambios.
 Método: se arma un catálogo con las combinaciones únicas de (código SNIES, nombre, NBC,
 CINE detallado) de los cuatro archivos y se clasifica una sola vez con el clasificador,
 ejecutado en una copia temporal: la retroalimentación real del clasificador no cambia.
+
+Memoria: el histórico se procesa un año a la vez (primero para armar el catálogo y luego para aplicar la
+clasificación), de modo que la memoria necesaria depende del tamaño de un año y no de cuántos años acumule
+la herramienta.
 
 Resumen: al terminar se registra, por archivo, cuántos registros cambian de división y las transiciones
 principales (programas del histórico). En GitHub Actions el resumen se publica además en la página de la
@@ -62,15 +66,32 @@ def claves(df: pd.DataFrame) -> pd.Series:
     return clave
 
 
-def clasificar_catalogo(df: pd.DataFrame) -> pd.DataFrame:
+def armar_catalogo(fuentes) -> tuple[pd.DataFrame, int]:
     """
-    Clasifica las combinaciones únicas de CLAVE de `df` con CLASIFICAR-DIVISIONES-UNINORTE-SNIES en una copia
-    temporal. Retorna un DataFrame indexado por la clave con DIVISION_UNINORTE y PUNTAJE_TOTAL.
-    De cada combinación se usa su registro más reciente (último en `df`).
+    Combinaciones únicas de CLAVE de todas las fuentes, cada una con su registro más reciente (mayor fecha y, en
+    la misma fecha, la última fuente). `fuentes` entrega (orden, DataFrame) de a una, para no tener todo el
+    histórico en memoria a la vez. Retorna (catálogo con la columna _K, registros revisados).
     """
-    base = [c for c in df.columns if c not in COLS_NO_BASE]
-    catalogo = df[base].assign(_K=claves(df)).drop_duplicates("_K", keep="last")
-    log.info(f"  Catálogo: {len(catalogo):,} combinaciones únicas de {len(df):,} registros "
+    partes, columnas, total = [], {}, 0
+    for orden, df in fuentes:
+        if df.empty:
+            continue
+        total += len(df)
+        base = [c for c in df.columns if c not in COLS_NO_BASE]
+        columnas.update(dict.fromkeys(base))
+        parte = df[base].assign(_K=claves(df), _F=pd.to_datetime(df[COL_FECHA]).values, _S=orden)
+        partes.append(parte.sort_values("_F", kind="stable").drop_duplicates("_K", keep="last"))
+    combinado = pd.concat(partes, ignore_index=True).sort_values(["_F", "_S"], kind="stable")
+    catalogo = combinado.drop_duplicates("_K", keep="last")
+    return catalogo[list(columnas) + ["_K"]], total
+
+
+def clasificar_catalogo(catalogo: pd.DataFrame, registros: int) -> pd.DataFrame:
+    """
+    Clasifica el catálogo (ver armar_catalogo) con CLASIFICAR-DIVISIONES-UNINORTE-SNIES en una copia temporal.
+    Retorna un DataFrame indexado por la clave con DIVISION_UNINORTE y PUNTAJE_TOTAL.
+    """
+    log.info(f"  Catálogo: {len(catalogo):,} combinaciones únicas de {registros:,} registros "
              f"({catalogo[COL_SNIES].nunique():,} códigos SNIES)")
 
     with tempfile.TemporaryDirectory(prefix="snies_clasificacion_") as tmp:
@@ -121,20 +142,26 @@ def aplicar_clasificacion(df: pd.DataFrame, mapa: pd.DataFrame) -> pd.DataFrame:
     return resultado[[c for c in orden if c not in COLS_OBSOLETAS]]
 
 
-def resumen_cambios(antes: pd.DataFrame, despues: pd.DataFrame) -> dict:
+def resumen_cambios(antes: pd.DataFrame, despues: pd.DataFrame, anterior: dict | None = None) -> dict:
     """
     Cambios de DIVISION_UNINORTE entre dos versiones de un archivo (mismas filas, mismo orden): registros que
-    cambian, programas distintos afectados y transiciones "anterior → nueva" contadas por programa.
+    cambian, programas distintos afectados y transiciones "anterior → nueva" contadas por programa. Con
+    `anterior` (el resumen de otro año del mismo conjunto) acumula ambos, sin contar dos veces un programa.
     """
     previa = (antes["DIVISION_UNINORTE"] if "DIVISION_UNINORTE" in antes.columns
               else pd.Series([None] * len(antes))).map(_valor).reset_index(drop=True)
     nueva = despues["DIVISION_UNINORTE"].map(_valor).reset_index(drop=True)
     cambia = previa != nueva
     snies = despues[COL_SNIES].reset_index(drop=True)[cambia]
-    pares = pd.DataFrame({"snies": snies, "previa": previa[cambia], "nueva": nueva[cambia]}).drop_duplicates()
-    transiciones = Counter(f"{a or 'SIN DIVISIÓN'} → {b or 'SIN DIVISIÓN'}" for a, b in zip(pares["previa"], pares["nueva"]))
-    return {"registros": len(despues), "cambian": int(cambia.sum()), "programas": int(snies.nunique()),
-            "transiciones": transiciones}
+    pares = set(zip(snies, previa[cambia], nueva[cambia]))
+    programas = set(snies)
+    registros, cambian = len(despues), int(cambia.sum())
+    if anterior:
+        pares |= anterior["_pares"]; programas |= anterior["_programas"]
+        registros += anterior["registros"]; cambian += anterior["cambian"]
+    transiciones = Counter(f"{a or 'SIN DIVISIÓN'} → {b or 'SIN DIVISIÓN'}" for _, a, b in pares)
+    return {"registros": registros, "cambian": cambian, "programas": len(programas), "transiciones": transiciones,
+            "_pares": pares, "_programas": programas}
 
 
 def publicar_resumen(resumen: dict[Path, dict], simular: bool) -> None:
@@ -145,7 +172,7 @@ def publicar_resumen(resumen: dict[Path, dict], simular: bool) -> None:
               "| Archivo | Registros | Cambian de división | Programas afectados |", "|---|---:|---:|---:|"]
     for p, r in resumen.items():
         lineas.append(f"| {_ruta(p)} | {r['registros']:,} | {r['cambian']:,} | {r['programas']:,} |")
-    transiciones = resumen.get(historico.ruta(), {}).get("transiciones", Counter())
+    transiciones = resumen.get(historico.HISTORICO_DIR, {}).get("transiciones", Counter())
     if transiciones:
         lineas += ["", "### Transiciones principales (programas del histórico)", "",
                    "| División anterior → nueva | Programas |", "|---|---:|"]
@@ -166,29 +193,31 @@ def reclasificar(simular: bool = False) -> dict[Path, dict]:
     Reclasifica el histórico y las novedades con las reglas vigentes del clasificador. Con `simular` solo calcula
     y registra los cambios. Retorna el resumen por archivo (ver resumen_cambios).
     """
-    archivos = [p for p in (historico.ruta(), NUEVOS_FILE, MODIFICADOS_FILE, INACTIVOS_FILE) if p.exists()]
-    if not archivos:
+    # Unidades de trabajo: cada año del histórico (leído por separado) y cada archivo de novedades. El resumen
+    # agrupa los años bajo la clave HISTORICO_DIR.
+    unidades = [(historico.HISTORICO_DIR, historico.ruta(anio), lambda a=anio: historico.leer_anio(a))
+                for anio, _ in historico.archivos()]
+    unidades += [(p, p, lambda p=p: pd.read_parquet(p)) for p in (NUEVOS_FILE, MODIFICADOS_FILE, INACTIVOS_FILE)
+                 if p.exists()]
+    if not unidades:
         raise EtapaError("LECTURA", "No hay archivos para reclasificar.")
 
-    _seccion("1. LECTURA")
-    datos = {}
-    for p in archivos:
-        datos[p] = pd.read_parquet(p)
-        log.info(f"  {_ruta(p)}: {len(datos[p]):,} registros")
+    _seccion("1. CATALOGO (lectura de un archivo a la vez)")
+    catalogo, registros = armar_catalogo((i, leer()) for i, (_, _, leer) in enumerate(unidades))
+    log.info(f"  {len(unidades)} archivo(s) revisados: {registros:,} registros")
 
     _seccion("2. CLASIFICACION DEL CATALOGO")
-    combinado = pd.concat(
-        [d.sort_values(COL_FECHA) for d in datos.values()], ignore_index=True
-    ).sort_values(COL_FECHA, kind="stable")
-    mapa = clasificar_catalogo(combinado)
+    mapa = clasificar_catalogo(catalogo, registros)
 
     _seccion("3. SIMULACION" if simular else "3. ACTUALIZACION")
     sin_cambios = 0
     resumen = {}
-    for p, d in datos.items():
+    for grupo, path, leer in unidades:
+        d = leer()
         nuevo = aplicar_clasificacion(d, mapa)
-        resumen[p] = resumen_cambios(d, nuevo)
-        cambian = resumen[p]["cambian"]
+        parcial = resumen_cambios(d, nuevo)
+        resumen[grupo] = resumen_cambios(d, nuevo, resumen.get(grupo))
+        cambian = parcial["cambian"]
         # Cualquier diferencia de clasificación o de columnas obliga a reescribir; si no hay, el archivo se conserva
         difiere = list(d.columns) != list(nuevo.columns) or any(
             not d[c].map(_valor).reset_index(drop=True).equals(nuevo[c].map(_valor).reset_index(drop=True))
@@ -198,14 +227,14 @@ def reclasificar(simular: bool = False) -> dict[Path, dict]:
             sin_cambios += 1
             continue
         if simular:
-            log.info(f"  {_ruta(p)}: {cambian:,} registro(s) cambiarían de división (simulación: no se escribe)")
+            log.info(f"  {_ruta(path)}: {cambian:,} registro(s) cambiarían de división (simulación: no se escribe)")
             continue
-        if p == historico.ruta():   # conserva el esquema y un grupo de filas por ejecución
+        if grupo == historico.HISTORICO_DIR:   # un grupo de filas por ejecución, en el archivo de su año
             historico.reescribir(nuevo)
         else:
-            _escribir_parquet(nuevo, p)
-        log.info(f"  {_ruta(p)}: {cambian:,} registro(s) cambian de división")
-    log.info(f"  Archivos sin cambios (no se reescriben): {sin_cambios} de {len(datos)}")
+            _escribir_parquet(nuevo, path)
+        log.info(f"  {_ruta(path)}: {cambian:,} registro(s) cambian de división")
+    log.info(f"  Archivos sin cambios (no se reescriben): {sin_cambios} de {len(unidades)}")
     _seccion("4. RESUMEN")
     publicar_resumen(resumen, simular)
     return resumen
