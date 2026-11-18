@@ -1,0 +1,114 @@
+name: Reclasificar divisiones
+
+# Se ejecuta a mano (Actions → "Reclasificar divisiones" → Run workflow) después de ajustar overrides o reglas en
+# Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Scripts/diccionarios.py. Reclasifica el histórico y las novedades,
+# regenera los datos del Dashboard y publica los cambios. No envía correo a los destinatarios.
+on:
+  workflow_dispatch:
+    inputs:
+      publicar:
+        description: "Publicar los cambios (desmarcar para solo simular y revisar el resumen)"
+        type: boolean
+        default: true
+
+# Permisos mínimos: el token solo puede escribir contenido del repositorio (commit de resultados).
+permissions:
+  contents: write
+
+# Mismo grupo que el workflow semanal: nunca se ejecutan a la vez (ambos escriben el histórico y las novedades).
+concurrency:
+  group: snies-monitor
+  cancel-in-progress: false
+
+jobs:
+  reclasificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Acciones fijadas a un commit exacto (las mismas del workflow semanal).
+      - name: Checkout del repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Configurar Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Si alguna prueba falla, no se reclasifica y los datos no se modifican.
+      - name: Pruebas unitarias
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests
+
+      - name: Reclasificar
+        env:
+          # Se pasa como variable de entorno (no se inserta en el script) para evitar inyección de comandos.
+          PUBLICAR: ${{ inputs.publicar }}
+        run: |
+          set -euo pipefail
+          if [ "${PUBLICAR:-true}" = "false" ]; then
+            python Scripts/reclasificar.py --simular
+          else
+            python Scripts/reclasificar.py
+          fi
+
+      - name: Actualizar datos del Dashboard
+        if: inputs.publicar
+        run: |
+          set -euo pipefail
+          python Scripts/generar_dashboard.py
+
+      - name: Publicar cambios
+        if: inputs.publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Sin divisiones distintas no se publica nada (ni siquiera el log).
+          if git diff --quiet -- Historico Novedades; then
+            echo "Ninguna división cambió: no hay nada que publicar."
+            exit 0
+          fi
+
+          git config user.name "snies-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A Historico Novedades docs Logs "Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Revision"
+          git commit -m "Reclasificación de divisiones: $(TZ=America/Bogota date +'%Y-%m-%d')"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+
+      - name: Alerta técnica por falla
+        if: failure()
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          python - <<'PYTHON'
+          import datetime as dt, sys
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          sys.path.insert(0, "Scripts")
+          from send_report import enviar_alerta_falla
+          logs = sorted(Path("Logs").glob("reclasificacion_*.log"))
+          enviar_alerta_falla(
+              dt.datetime.now(ZoneInfo("America/Bogota")).date(), "RECLASIFICACION",
+              "La reclasificación de divisiones no se completó: el histórico y las novedades no se modificaron.",
+              logs[-1] if logs else Path("Logs/sin_log.log"),
+          )
+          PYTHON

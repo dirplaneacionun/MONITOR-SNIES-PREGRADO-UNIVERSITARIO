@@ -441,6 +441,72 @@ class TestReclasificacion(unittest.TestCase):
         self.assertEqual(out["PUNTAJE_TOTAL"].tolist(), [0.9])
         self.assertNotIn("REQUIERE_REVISION", out.columns)
 
+    def _escenario(self, tmp):
+        """Histórico de 2 ejecuciones y Nuevos.parquet en `tmp`; el clasificador simulado pasa INGENIERIAS → CIENCIAS BASICAS."""
+        base = Path(tmp)
+        filas = [programa(1, DIVISION_UNINORTE="INGENIERIAS", PUNTAJE_TOTAL="1", NUCLEO_BASICO_DEL_CONOCIMIENTO="N",
+                          CINE_F_2013_AC_CAMPO_DETALLADO="C"),
+                 programa(2, DIVISION_UNINORTE="ESCUELA DE NEGOCIOS", PUNTAJE_TOTAL="1", NUCLEO_BASICO_DEL_CONOCIMIENTO="N",
+                          CINE_F_2013_AC_CAMPO_DETALLADO="C")]
+        parches = [mock.patch.object(historico, "HISTORICO_DIR", base / "Historico"),
+                   mock.patch.object(reclasificar, "NUEVOS_FILE", base / "Nuevos.parquet"),
+                   mock.patch.object(reclasificar, "MODIFICADOS_FILE", base / "Modificados.parquet"),
+                   mock.patch.object(reclasificar, "INACTIVOS_FILE", base / "Inactivos.parquet")]
+        for p in parches:
+            p.start()
+        for fecha in (dt.date(2026, 11, 3), dt.date(2026, 11, 10)):
+            historico.guardar_ejecucion(pd.DataFrame(filas), fecha)
+        run_snies._escribir_parquet(pd.DataFrame(filas[:1]).assign(**{F: pd.Timestamp("2026-11-10"), "TIPO_NOVEDAD": "NUEVO"}),
+                                    base / "Nuevos.parquet")
+
+        def clasificar(df):
+            k = reclasificar.claves(df)
+            division = df["DIVISION_UNINORTE"].replace({"INGENIERIAS": "CIENCIAS BASICAS"}).values
+            return pd.DataFrame({"DIVISION_UNINORTE": division, "PUNTAJE_TOTAL": 0.9}, index=k.values).groupby(level=0).first()
+        parches.append(mock.patch.object(reclasificar, "clasificar_catalogo", clasificar))
+        parches[-1].start()
+        return parches
+
+    def test_simulacion_no_escribe_y_resume_los_cambios(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parches = self._escenario(tmp)
+            try:
+                antes = {p: p.read_bytes() for p in Path(tmp).rglob("*.parquet")}
+                resumen_md = Path(tmp) / "resumen.md"
+                with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(resumen_md)}):
+                    resumen = reclasificar.reclasificar(simular=True)
+                self.assertEqual({p: p.read_bytes() for p in Path(tmp).rglob("*.parquet")}, antes)   # nada se escribe
+                r = resumen[historico.ruta()]
+                self.assertEqual((r["registros"], r["cambian"], r["programas"]), (4, 2, 1))
+                self.assertEqual(r["transiciones"], {"INGENIERIAS → CIENCIAS BASICAS": 1})
+                texto = resumen_md.read_text(encoding="utf-8")
+                self.assertIn("SIMULACIÓN", texto)
+                self.assertIn("| INGENIERIAS → CIENCIAS BASICAS | 1 |", texto)
+            finally:
+                for p in parches:
+                    p.stop()
+
+    def test_reclasificacion_aplica_y_conserva_un_grupo_por_ejecucion(self):
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory() as tmp:
+            parches = self._escenario(tmp)
+            try:
+                reclasificar.reclasificar()
+                h = historico.leer()
+                self.assertEqual(h["DIVISION_UNINORTE"].tolist(), ["CIENCIAS BASICAS", "ESCUELA DE NEGOCIOS"] * 2)
+                with open(historico.ruta(), "rb") as fh:
+                    self.assertEqual(pq.ParquetFile(fh).num_row_groups, 2)
+                nuevos = pd.read_parquet(Path(tmp) / "Nuevos.parquet")
+                self.assertEqual(nuevos["DIVISION_UNINORTE"].tolist(), ["CIENCIAS BASICAS"])
+                # Segunda pasada: ya no hay cambios y ningún archivo se reescribe
+                antes = {p: p.read_bytes() for p in Path(tmp).rglob("*.parquet")}
+                resumen = reclasificar.reclasificar()
+                self.assertFalse(any(r["cambian"] for r in resumen.values()))
+                self.assertEqual({p: p.read_bytes() for p in Path(tmp).rglob("*.parquet")}, antes)
+            finally:
+                for p in parches:
+                    p.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,16 +16,26 @@ Método: se arma un catálogo con las combinaciones únicas de (código SNIES, n
 CINE detallado) de los cuatro archivos y se clasifica una sola vez con el clasificador,
 ejecutado en una copia temporal: la retroalimentación real del clasificador no cambia.
 
+Resumen: al terminar se registra, por archivo, cuántos registros cambian de división y las transiciones
+principales (programas del histórico). En GitHub Actions el resumen se publica además en la página de la
+ejecución (GITHUB_STEP_SUMMARY).
+
 Ejecución:
-    python Scripts/reclasificar.py
+    python Scripts/reclasificar.py              # reclasifica y reescribe los archivos con cambios
+    python Scripts/reclasificar.py --simular    # solo informa qué cambiaría; no escribe ningún archivo
+
+En GitHub: Actions → "Reclasificar divisiones" → Run workflow (.github/workflows/reclasificar.yml).
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
+import os
 import shutil
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -111,7 +121,51 @@ def aplicar_clasificacion(df: pd.DataFrame, mapa: pd.DataFrame) -> pd.DataFrame:
     return resultado[[c for c in orden if c not in COLS_OBSOLETAS]]
 
 
-def reclasificar() -> None:
+def resumen_cambios(antes: pd.DataFrame, despues: pd.DataFrame) -> dict:
+    """
+    Cambios de DIVISION_UNINORTE entre dos versiones de un archivo (mismas filas, mismo orden): registros que
+    cambian, programas distintos afectados y transiciones "anterior → nueva" contadas por programa.
+    """
+    previa = (antes["DIVISION_UNINORTE"] if "DIVISION_UNINORTE" in antes.columns
+              else pd.Series([None] * len(antes))).map(_valor).reset_index(drop=True)
+    nueva = despues["DIVISION_UNINORTE"].map(_valor).reset_index(drop=True)
+    cambia = previa != nueva
+    snies = despues[COL_SNIES].reset_index(drop=True)[cambia]
+    pares = pd.DataFrame({"snies": snies, "previa": previa[cambia], "nueva": nueva[cambia]}).drop_duplicates()
+    transiciones = Counter(f"{a or 'SIN DIVISIÓN'} → {b or 'SIN DIVISIÓN'}" for a, b in zip(pares["previa"], pares["nueva"]))
+    return {"registros": len(despues), "cambian": int(cambia.sum()), "programas": int(snies.nunique()),
+            "transiciones": transiciones}
+
+
+def publicar_resumen(resumen: dict[Path, dict], simular: bool) -> None:
+    """Registra el resumen en el log y, en GitHub Actions, en la página de la ejecución (GITHUB_STEP_SUMMARY)."""
+    hay_cambios = any(r["cambian"] for r in resumen.values())
+    modo = "SIMULACIÓN (no se escribió ningún archivo)" if simular else "CAMBIOS APLICADOS"
+    lineas = [f"## Reclasificación de divisiones · {modo if hay_cambios else 'SIN CAMBIOS'}", "",
+              "| Archivo | Registros | Cambian de división | Programas afectados |", "|---|---:|---:|---:|"]
+    for p, r in resumen.items():
+        lineas.append(f"| {_ruta(p)} | {r['registros']:,} | {r['cambian']:,} | {r['programas']:,} |")
+    transiciones = resumen.get(historico.ruta(), {}).get("transiciones", Counter())
+    if transiciones:
+        lineas += ["", "### Transiciones principales (programas del histórico)", "",
+                   "| División anterior → nueva | Programas |", "|---|---:|"]
+        lineas += [f"| {t} | {n:,} |" for t, n in transiciones.most_common(15)]
+    if not hay_cambios:
+        lineas += ["", "Ninguna división cambió con las reglas actuales: no hay nada que publicar."]
+    for linea in lineas:
+        if linea.startswith("|") and not linea.startswith("|---"):
+            log.info("  " + linea)
+    destino = os.environ.get("GITHUB_STEP_SUMMARY")
+    if destino:
+        with open(destino, "a", encoding="utf-8") as f:
+            f.write("\n".join(lineas) + "\n")
+
+
+def reclasificar(simular: bool = False) -> dict[Path, dict]:
+    """
+    Reclasifica el histórico y las novedades con las reglas vigentes del clasificador. Con `simular` solo calcula
+    y registra los cambios. Retorna el resumen por archivo (ver resumen_cambios).
+    """
     archivos = [p for p in (historico.ruta(), NUEVOS_FILE, MODIFICADOS_FILE, INACTIVOS_FILE) if p.exists()]
     if not archivos:
         raise EtapaError("LECTURA", "No hay archivos para reclasificar.")
@@ -128,14 +182,13 @@ def reclasificar() -> None:
     ).sort_values(COL_FECHA, kind="stable")
     mapa = clasificar_catalogo(combinado)
 
-    _seccion("3. ACTUALIZACION")
+    _seccion("3. SIMULACION" if simular else "3. ACTUALIZACION")
     sin_cambios = 0
+    resumen = {}
     for p, d in datos.items():
         nuevo = aplicar_clasificacion(d, mapa)
-        if "DIVISION_UNINORTE" in d.columns:
-            cambian = int((d["DIVISION_UNINORTE"].fillna("") != nuevo["DIVISION_UNINORTE"].fillna("")).sum())
-        else:
-            cambian = len(nuevo)
+        resumen[p] = resumen_cambios(d, nuevo)
+        cambian = resumen[p]["cambian"]
         # Cualquier diferencia de clasificación o de columnas obliga a reescribir; si no hay, el archivo se conserva
         difiere = list(d.columns) != list(nuevo.columns) or any(
             not d[c].map(_valor).reset_index(drop=True).equals(nuevo[c].map(_valor).reset_index(drop=True))
@@ -144,21 +197,30 @@ def reclasificar() -> None:
         if not difiere:
             sin_cambios += 1
             continue
+        if simular:
+            log.info(f"  {_ruta(p)}: {cambian:,} registro(s) cambiarían de división (simulación: no se escribe)")
+            continue
         if p == historico.ruta():   # conserva el esquema y un grupo de filas por ejecución
             historico.reescribir(nuevo)
         else:
             _escribir_parquet(nuevo, p)
         log.info(f"  {_ruta(p)}: {cambian:,} registro(s) cambian de división")
     log.info(f"  Archivos sin cambios (no se reescriben): {sin_cambios} de {len(datos)}")
+    _seccion("4. RESUMEN")
+    publicar_resumen(resumen, simular)
+    return resumen
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Reclasificación de divisiones UniNorte del histórico y las novedades.")
+    parser.add_argument("--simular", action="store_true", help="Solo informa qué cambiaría; no escribe ningún archivo.")
+    args = parser.parse_args(argv)
     ahora = dt.datetime.now(ZONA_HORARIA)
     log_path = configurar_logging(ahora, prefijo="reclasificacion")
-    log.info("RECLASIFICACION DE DIVISIONES UNINORTE")
+    log.info("RECLASIFICACION DE DIVISIONES UNINORTE" + (" · SIMULACION" if args.simular else ""))
     log.info(f"Log: {_ruta(log_path)}")
     try:
-        reclasificar()
+        reclasificar(args.simular)
     except Exception as exc:
         log.exception(f"RECLASIFICACION FALLIDA: {exc}")
         return 1
