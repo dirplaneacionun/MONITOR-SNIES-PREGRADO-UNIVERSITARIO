@@ -281,20 +281,29 @@ class TestCorreo(unittest.TestCase):
     def _df(self, codigos):
         return pd.DataFrame([programa(i, CODIGO_INSTITUCION=c, NOMBRE_INSTITUCION=f"INST {c}") for i, c in enumerate(codigos)])
 
-    def test_prioridad_exclusiva(self):
-        mostrar, prioritarios = send_report.seleccionar(self._df([9999] * 10 + [1701, 1713]))
-        self.assertTrue(prioritarios)
-        self.assertEqual(mostrar["CODIGO_INSTITUCION"].tolist(), [1713, 1701])  # Uninorte primero
+    def test_prioridad_y_completa_hasta_diez(self):
+        # Regresión: con 2 registros prioritarios de 13, la tabla mostraba solo esos 2
+        mostrar = send_report.seleccionar(self._df([9999] * 11 + [1711, 1711]))
+        self.assertEqual(len(mostrar), 10)
+        self.assertEqual(mostrar["CODIGO_INSTITUCION"].tolist()[:3], [1711, 1711, 9999])
+        mostrar = send_report.seleccionar(self._df([9999] * 10 + [1701, 1713]))
+        self.assertEqual(mostrar["CODIGO_INSTITUCION"].tolist()[:2], [1713, 1701])   # Uninorte primero
 
     def test_sin_prioritarios_muestra_hasta_diez(self):
-        mostrar, prioritarios = send_report.seleccionar(self._df([9999] * 15))
-        self.assertFalse(prioritarios)
-        self.assertEqual(len(mostrar), 10)
+        self.assertEqual(len(send_report.seleccionar(self._df([9999] * 15))), 10)
+        self.assertEqual(len(send_report.seleccionar(self._df([9999] * 3))), 3)
 
     def test_maximo_diez_prioritarios(self):
-        mostrar, _ = send_report.seleccionar(self._df([1701] * 14 + [1713]))
+        mostrar = send_report.seleccionar(self._df([1701] * 14 + [1713]))
         self.assertEqual(len(mostrar), 10)
         self.assertEqual(mostrar["CODIGO_INSTITUCION"].iloc[0], 1713)
+
+    def test_columnas_de_las_tablas(self):
+        base = ["INSTITUCIÓN", "PROGRAMA", "MODALIDAD", "MUNICIPIO", "DIVISIÓN UNINORTE"]
+        titulos = {t: [c[1] for c in send_report.SECCIONES[t]["columnas"]] for t in send_report.SECCIONES}
+        self.assertEqual(titulos["nuevos"], base)        # sin la columna TIPO
+        self.assertEqual(titulos["inactivos"], base)
+        self.assertEqual(titulos["modificados"], base + ["TIPO DE CAMBIO", "CAMBIO DETECTADO"])
 
     def test_html_escapa_contenido(self):
         df = self._df([1713]).assign(NOMBRE_DEL_PROGRAMA="<script>alert(1)</script>", TIPO_NOVEDAD="NUEVO")
@@ -326,11 +335,14 @@ class TestCorreo(unittest.TestCase):
         self.assertEqual(capturado["para"], ["a@example.com", "b@example.com"])
         self.assertNotIn(b"Content-Disposition: attachment", capturado["cuerpo"])
 
-    def test_enlace_de_seccion_filtrado_por_fecha(self):
-        html = send_report.construir_cuerpo(
-            {"pregrado": {"modificados": self._df([1713]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B"),
-                          "total_activos": 1}}, dt.date(2026, 11, 17))
-        self.assertIn(f'{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17"', html)
+    def test_boton_arriba_y_sin_notas_bajo_las_tablas(self):
+        mod = self._df([1713, 9999]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B")
+        html = send_report.construir_cuerpo({"pregrado": {"modificados": mod, "total_activos": 2}}, dt.date(2026, 11, 17))
+        self.assertLess(html.index("VER DASHBOARD COMPLETO"), html.index("PROGRAMAS ACTIVOS"))   # antes de los indicadores
+        self.assertEqual(html.count("VER DASHBOARD COMPLETO"), 1)
+        self.assertNotIn("Ver todos en el Dashboard", html)
+        self.assertNotIn("No hubo novedades de la Universidad", html)
+        self.assertNotIn("Se muestran", html)
 
     def test_resumen_descriptivo_con_variacion_y_grupos(self):
         hoy = self._df([1713, 1701, 9999, 9999])
@@ -365,7 +377,9 @@ class TestCorreo(unittest.TestCase):
         self.assertIn("1 más que en la ejecución anterior (10/11/2026: 3)", texto)
         self.assertIn("UNIVERSIDAD DEL NORTE: 2; ejecución anterior: 1; variación: +1", texto)
         self.assertIn("1. INSTITUCIÓN: INST 1713", texto)    # Uninorte primero
-        self.assertIn(f"{send_report.DASHBOARD_URL}nuevos.html#fecha=2026-11-17", texto)
+        self.assertIn(f"Dashboard completo: {send_report.DASHBOARD_URL}", texto.splitlines()[3])
+        self.assertNotIn("Ver todos en el Dashboard", texto)
+        self.assertNotIn("TIPO:", texto)
         self.assertNotIn("<", texto)
         self.assertNotIn("—", texto)
 

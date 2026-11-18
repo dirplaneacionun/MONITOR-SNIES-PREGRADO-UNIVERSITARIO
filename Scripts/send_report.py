@@ -5,12 +5,11 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
 
 - Sin emojis ni archivos adjuntos: el detalle completo está en el Dashboard.
 - Dos versiones del mismo contenido (multipart/alternative): texto plano y HTML.
-- Mismo lenguaje visual del Dashboard. Orden: indicadores, resumen descriptivo de la ejecución (variación
-  frente a la ejecución anterior y programas activos por grupo de universidades) y las secciones NUEVOS,
-  MODIFICADOS e INACTIVOS, con un máximo de 10 registros por tabla.
-- Prioridad: si hay registros de la Universidad del Norte o de las Universidades de Mayor
-  Interés, la tabla muestra exclusivamente esos (hasta 10, primero Uninorte); si no hay,
-  muestra los demás registros detectados hasta completar 10.
+- Mismo lenguaje visual del Dashboard. Orden: encabezado con el acceso al Dashboard, indicadores, resumen
+  descriptivo de la ejecución (variación frente a la ejecución anterior y programas activos por grupo de
+  universidades) y las secciones NUEVOS, MODIFICADOS e INACTIVOS, con un máximo de 10 registros por tabla.
+- Orden de los registros: primero la Universidad del Norte, luego las Universidades de Mayor Interés y
+  después las demás instituciones, hasta completar 10.
 - La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor.
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
@@ -56,52 +55,47 @@ TEXTO2, TEXTO3 = "#4D4D4D", "#6B6B6B"   # textos secundarios del Dashboard (--te
 ESTADO = {"nuevos": "#1E8E5A", "modificados": "#F28C00", "inactivos": "#BE0000"}  # validados para daltonismo
 FUENTE = "Montserrat, 'Segoe UI', Arial, sans-serif"
 
+# Columnas comunes de las tres tablas (los modificados agregan el tipo de cambio y el cambio detectado)
+COLUMNAS_BASE = [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
+                     ("MODALIDAD", "MODALIDAD"), ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"),
+                     ("DIVISION_UNINORTE", "DIVISIÓN UNINORTE")]
+
 SECCIONES = {
     "nuevos": {
         "titulo": "PROGRAMAS ACADÉMICOS NUEVOS",
         "descripcion": "Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados).",
         "vacio": "No se detectaron programas nuevos en esta ejecución.",
-        "pagina": "nuevos.html",
-        "columnas": [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
-                     ("MODALIDAD", "MODALIDAD"), ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"),
-                     ("DIVISION_UNINORTE", "DIVISIÓN UNINORTE"), ("TIPO_NOVEDAD", "TIPO")],
+        "columnas": COLUMNAS_BASE,
     },
     "modificados": {
         "titulo": "PROGRAMAS ACADÉMICOS MODIFICADOS",
         "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad.",
         "vacio": "No se detectaron cambios en los programas activos en esta ejecución.",
-        "pagina": "modificados.html",
-        "columnas": [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
-                     ("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")],
+        "columnas": COLUMNAS_BASE + [("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")],
     },
     "inactivos": {
         "titulo": "PROGRAMAS ACADÉMICOS INACTIVOS",
         "descripcion": "Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES.",
         "vacio": "No se detectaron programas inactivos en esta ejecución.",
-        "pagina": "inactivos.html",
-        "columnas": [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
-                     ("MODALIDAD", "MODALIDAD"), ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"),
-                     ("DIVISION_UNINORTE", "DIVISIÓN UNINORTE")],
+        "columnas": COLUMNAS_BASE,
     },
 }
 
 
 # ── Selección con prioridad ───────────────────────────────────────────────────
 
-def seleccionar(df: pd.DataFrame | None) -> tuple[pd.DataFrame, bool]:
+def seleccionar(df: pd.DataFrame | None) -> pd.DataFrame:
     """
-    Retorna (registros a mostrar, si son prioritarios). Si hay registros de la Universidad del
-    Norte o de Universidades de Mayor Interés se muestran solo esos (Uninorte primero).
+    Registros a mostrar en la tabla de una sección (máximo MAX_FILAS): primero la Universidad del Norte, luego
+    las Universidades de Mayor Interés y después las demás instituciones, cada grupo en orden alfabético por
+    institución y programa.
     """
     if df is None or df.empty:
-        return pd.DataFrame(), False
+        return pd.DataFrame()
     grupos = df["CODIGO_INSTITUCION"].map(grupo_universidad)
     prioridad = grupos.map({GRUPO_UNINORTE: 0, GRUPO_MAYOR_INTERES: 1}).fillna(2)
-    df = df.assign(_P=prioridad.values)
-    prioritarios = df[df["_P"] < 2]
-    base = prioritarios if not prioritarios.empty else df
     orden = ["_P", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA"]
-    return base.sort_values(orden, kind="stable").head(MAX_FILAS).drop(columns="_P"), not prioritarios.empty
+    return df.assign(_P=prioridad.values).sort_values(orden, kind="stable").head(MAX_FILAS).drop(columns="_P")
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -150,14 +144,17 @@ def _subtitulo(texto: str) -> str:
 
 
 def _tabla(df: pd.DataFrame, columnas, numericas=()) -> str:
-    th = (f"background:{NEGRO};color:#FFFFFF;font-family:{FUENTE};font-size:11px;font-weight:700;"
-          "letter-spacing:.04em;padding:9px 10px;")
+    # Tablas de más de 5 columnas (modificados): letra y márgenes algo menores para que quepan en el ancho del correo
+    compacta = len(columnas) > 5
+    letra_th, letra_td, margen = ("10px", "11px", "6px") if compacta else ("11px", "12px", "10px")
+    th = (f"background:{NEGRO};color:#FFFFFF;font-family:{FUENTE};font-size:{letra_th};font-weight:700;"
+          f"letter-spacing:.04em;padding:9px {margen};")
     alinear = lambda c: "right" if c in numericas else "left"  # noqa: E731
     cab = "".join(f'<th style="{th}text-align:{alinear(c)};">{escape(t)}</th>' for c, t in columnas)
     filas = []
     for i, (_, r) in enumerate(df.iterrows()):
         fondo = "#FFFFFF" if i % 2 == 0 else "#FAFAFA"
-        td = (f"background:{fondo};font-family:{FUENTE};font-size:12px;color:{NEGRO};padding:7px 10px;"
+        td = (f"background:{fondo};font-family:{FUENTE};font-size:{letra_td};color:{NEGRO};padding:7px {margen};"
               f"border-bottom:1px solid {BORDE};vertical-align:top;")
         filas.append("<tr>" + "".join(
             f'<td style="{td}text-align:{alinear(c)};{"white-space:nowrap;" if c in numericas else ""}">'
@@ -241,17 +238,6 @@ def _descripcion(tipo: str, df: pd.DataFrame | None) -> str:
     return descripcion
 
 
-def _nota(total: int, mostrar: pd.DataFrame, prioritarios: bool) -> str:
-    """Explica qué registros muestra la tabla de la sección (prioridad Uninorte y Universidades de Mayor Interés)."""
-    if prioritarios:
-        return (f"Se muestran {_plural(len(mostrar), 'registro', 'registros')} de la Universidad del Norte y de las "
-                f"Universidades de Mayor Interés, de {_num(total)} detectados.")
-    if total > len(mostrar):
-        return (f"Se muestran {_num(len(mostrar))} de {_num(total)} registros. No hubo novedades de la Universidad "
-                "del Norte ni de las Universidades de Mayor Interés.")
-    return "No hubo novedades de la Universidad del Norte ni de las Universidades de Mayor Interés."
-
-
 def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
@@ -260,11 +246,7 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
         contenido += (f'<p style="margin:0;font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
                       f'padding:10px 12px;border-radius:6px;">{cfg["vacio"]}</p>')
         return _tarjeta(contenido, color)
-    mostrar, prioritarios = seleccionar(df)
-    enlace = (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:11px;color:{TEXTO2};">{_nota(total, mostrar, prioritarios)} '
-              f'<a href="{DASHBOARD_URL}{cfg["pagina"]}#fecha={fecha.isoformat()}" style="color:{ROJO};font-weight:700;">'
-              f'Ver todos en el Dashboard</a></p>')  # enlace con el filtro de fecha de esta ejecución
-    return _tarjeta(contenido + _tabla(mostrar, cfg["columnas"]) + enlace, color)
+    return _tarjeta(contenido + _tabla(seleccionar(df), cfg["columnas"]), color)
 
 
 def _kpi(etiqueta: str, valor: str, detalle: str, color: str) -> str:
@@ -300,7 +282,8 @@ def construir_texto(resultados: dict, fecha: date) -> str:
     ajustar = lambda t, ini="", sig="": textwrap.fill(t, 78, initial_indent=ini, subsequent_indent=sig)  # noqa: E731
     lineas = ["MONITOR SNIES PREGRADO · UNIVERSITARIO",
               "Programas Académicos Universitarios de Pregrado en Colombia",
-              f"Reporte de la ejecución del {_fecha(fecha)}", "",
+              f"Reporte de la ejecución del {_fecha(fecha)}",
+              f"Dashboard completo: {DASHBOARD_URL}", "",
               "INDICADORES"]
     lineas += [f"  {e.capitalize()}: {v} ({d})" for e, v, d, _ in _indicadores(res, fecha)]
     lineas += ["", "RESUMEN DE LA EJECUCIÓN", ajustar(" ".join(_frases_resumen(res, fecha)))]
@@ -318,13 +301,10 @@ def construir_texto(resultados: dict, fecha: date) -> str:
         if not total:
             lineas.append(cfg["vacio"])
             continue
-        mostrar, prioritarios = seleccionar(df)
-        for i, (_, r) in enumerate(mostrar.iterrows(), 1):
+        for i, (_, r) in enumerate(seleccionar(df).iterrows(), 1):
             campos = " | ".join(f"{t}: {_texto(c, r.get(c))}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
             lineas.append(ajustar(f"{i}. {campos}", "  ", "     "))
-        lineas += [ajustar(_nota(total, mostrar, prioritarios)),
-                   f"Ver todos en el Dashboard: {DASHBOARD_URL}{cfg['pagina']}#fecha={fecha.isoformat()}"]
-    lineas += ["", f"Dashboard completo: {DASHBOARD_URL}", "",
+    lineas += ["",
                ajustar("Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de "
                        "Educación Nacional · Dirección de Planeación, Universidad del Norte."),
                "Reporte generado automáticamente en cada ejecución del monitor."]
@@ -342,7 +322,9 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
      y tablas más compactas. Los demás clientes muestran el diseño de escritorio. */
   @media (max-width: 600px) {{
     .kpi {{ display: inline-block !important; width: 50% !important; box-sizing: border-box; padding: 0 4px 8px !important; }}
-    .enc-fecha {{ display: block !important; width: auto !important; text-align: left !important; padding-top: 12px !important; }}
+    .enc-titulo, .enc-fecha {{ display: block !important; width: auto !important; }}
+    .enc-fecha {{ text-align: left !important; padding-top: 14px !important; }}
+    .enc-fecha > div {{ text-align: left !important; display: inline-block !important; }}
     .tabla th, .tabla td {{ padding: 6px !important; font-size: 10.5px !important; }}
   }}
 </style>
@@ -352,9 +334,10 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
 <table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;table-layout:fixed;">
   <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td valign="top">
+      <td class="enc-titulo" valign="top">
         <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
         <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
+        <a href="{DASHBOARD_URL}" style="display:inline-block;margin-top:14px;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:12px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:10px 22px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
       </td>
       <td class="enc-fecha" valign="top" align="right" width="150">
         <div style="border:1px solid #3A3A3A;border-top:3px solid {AMARILLO};border-radius:10px;padding:8px 14px;text-align:right;">
@@ -371,10 +354,7 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
     {_seccion("modificados", mod, fecha)}
     {_seccion("inactivos", ina, fecha)}
   </td></tr>
-  <tr><td align="center" style="padding:4px 0 8px;">
-    <a href="{DASHBOARD_URL}" style="display:inline-block;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:13px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:12px 32px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
-  </td></tr>
-  <tr><td align="center" style="padding:16px 12px 4px;font-family:{FUENTE};font-size:11px;line-height:1.5;color:{TEXTO3};">
+  <tr><td align="center" style="padding:8px 12px 4px;font-family:{FUENTE};font-size:11px;line-height:1.5;color:{TEXTO3};">
     Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte.<br>
     Reporte generado automáticamente en cada ejecución del monitor.
   </td></tr>
