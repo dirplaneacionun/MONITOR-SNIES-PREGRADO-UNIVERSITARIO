@@ -13,3 +13,7 @@ Scripts/ETL-PROGRAMAS-SNIES/Fuentes/Programas.xlsx
 Scripts/ETL-PROGRAMAS-SNIES/Salidas/Programas.xlsx
 Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Fuentes/Programas.xlsx
 Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Salidas/Programas.xlsx
+
+# Copias de respaldo de la retroalimentación del clasificador (hasta 10, de ~20 MB cada una): se conservan en cada
+# equipo para restaurar, pero no se versionan porque Git ya guarda todas las versiones de retroalimentacion.json.
+Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Retroalimentacion/*.json.bak
