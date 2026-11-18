@@ -47,12 +47,13 @@
     const n = fechasActivos.length;
     const fechasR = filtros.enRango(fechasActivos);
     const ia = fechasActivos.indexOf(fechasR[0]), ib = fechasActivos.indexOf(fechasR[fechasR.length - 1]);
+    const totales = evolucion(vs, n);
 
     // Evolución de los programas activos (nivel en cada ejecución)
     if (!fechasR.length) {
       ["g-activos", "g-modalidad", "g-division", "g-cine", "g-sector-evol"].forEach((id) => A.vacio($(id), "Sin descargas de programas activos en el periodo seleccionado"));
     } else {
-      A.lineas($("g-activos"), fechasR, [{ nombre: "PROGRAMAS ACTIVOS", valores: recortar(evolucion(vs, n), ia, ib), color: A.ROJO }], { modo: "stock" });
+      A.lineas($("g-activos"), fechasR, [{ nombre: "PROGRAMAS ACTIVOS", valores: recortar(totales, ia, ib), color: A.ROJO }], { modo: "stock" });
       const porMod = evolucion(vs, n, "_MG");
       A.lineas($("g-modalidad"), fechasR, modalidades.filter((m) => porMod[m]).map((m) => ({ nombre: m, valores: recortar(porMod[m], ia, ib), color: colMod[m].color, dash: colMod[m].dash })), { modo: "stock" });
       const porDiv = evolucion(vs, n, "DIVISION_UNINORTE");
@@ -66,7 +67,7 @@
     // Estado en la última ejecución del periodo: KPI de activos, torta de sector, top 10 y periodos
     const corte = ib >= 0 ? ib : n - 1;
     const enCorte = ib >= 0 ? vs.filter((v) => v._R.some(([a, b]) => a <= corte && corte <= b)) : [];
-    textos("[data-fecha-corte]", A.fmtFecha(fechasActivos[corte]));
+    textos("[data-fecha-corte]", ib >= 0 ? A.fmtFecha(fechasActivos[corte]) : "–");
     const sec = A.contar(enCorte, "SECTOR");
     A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => A.SECTOR_COLOR[s[0]] || A.GRIS));
     const dep = A.contar(enCorte, "DEPARTAMENTO_OFERTA_PROGRAMA").slice(0, 10);
@@ -89,13 +90,16 @@
     const enUltima = (t) => filtradas[t].filter((r) => r.FECHA_DE_OBTENCION === ultimaE);
     const modU = enUltima("modificados");
     $("k-activos").textContent = A.fmt(enCorte.length);
-    $("k-activos-s").textContent = ib >= 0 ? `Programas activos al ${A.fmtFecha(fechasActivos[corte])}` : "Sin descargas en el periodo";
+    // Con una ejecución anterior (aunque quede fuera del periodo filtrado) se muestra la variación, como el correo
+    $("k-activos-s").textContent = ib < 0 ? "Sin descargas en el periodo"
+      : corte > 0 ? `${A.variacion(enCorte.length, totales[corte - 1])} frente al ${A.fmtFecha(fechasActivos[corte - 1])}`
+      : `Programas activos al ${A.fmtFecha(fechasActivos[corte])}`;
     $("k-nuevos").textContent = A.fmt(enUltima("nuevos").length);
     $("k-modificados").textContent = A.fmt(modU.length);
-    $("k-modificados-s").textContent = `Cambios en ${A.fmt(new Set(modU.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size)} programa(s) · ${A.fmtFecha(ultimaE)}`;
+    $("k-modificados-s").textContent = `Cambios en ${A.plural(new Set(modU.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size, "programa", "programas")} · ${A.fmtFecha(ultimaE)}`;
     $("k-inactivos").textContent = A.fmt(enUltima("inactivos").length);
     textos("[data-fecha-ultima]", ultimaE ? A.fmtFecha(ultimaE) : "–");
-    filtros.conteo.textContent = `${A.fmt(enCorte.length)} programas activos`;
+    filtros.conteo.textContent = A.plural(enCorte.length, "programa activo", "programas activos");
   }
 
   actualizar();

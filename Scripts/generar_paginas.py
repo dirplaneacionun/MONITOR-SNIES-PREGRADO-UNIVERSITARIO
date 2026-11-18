@@ -70,6 +70,7 @@ FOOT = '''
 
 
 def nav(activa):
+    """Menú de apartados (HTML); marca como activo el de la página `activa`."""
     items = [("index.html", "INICIO"), ("nuevos.html", "NUEVOS"), ("modificados.html", "MODIFICADOS"), ("inactivos.html", "INACTIVOS")]
     out = []
     for h, t in items:
@@ -79,6 +80,7 @@ def nav(activa):
 
 
 def tarjeta(tit, gid, desc, clase="", extra=""):
+    """Tarjeta con título, descripción y el contenedor de una gráfica (`gid`); `extra` agrega controles bajo la descripción."""
     return (f'      <section class="tarjeta" aria-labelledby="t-{gid}">\n'
             f'        <h2 class="tarjeta-tit" id="t-{gid}">{tit}</h2>\n'
             f'        <p class="tarjeta-sub">{desc}</p>{extra}\n'
@@ -87,14 +89,17 @@ def tarjeta(tit, gid, desc, clase="", extra=""):
 
 
 def ancha(*a, **k):
+    """Fila con una sola tarjeta de ancho completo."""
     return f'    <div class="fila">\n{tarjeta(*a, **k)}\n    </div>'
 
 
 def par(a, b, cls="dos"):
+    """Fila con dos tarjetas; `cls` define su distribución (dos columnas iguales o un tercio y dos tercios)."""
     return f'    <div class="fila {cls}">\n{a}\n{b}\n    </div>'
 
 
 def scripts(datos, js):
+    """Etiquetas <script> de una página: librerías, archivos de datos `datos`, componentes compartidos y el script `js` propio."""
     # Librerías incluidas en el proyecto (docs/assets/vendor, licencia MIT): el Dashboard no depende de servicios
     # externos para funcionar ni comparte la dirección IP de los visitantes con terceros.
     lineas = [f'  <script src="{v(f"assets/vendor/{lib}")}"></script>'
@@ -105,6 +110,7 @@ def scripts(datos, js):
 
 
 def main() -> None:
+    """Escribe las cuatro páginas del Dashboard (Inicio, Nuevos, Modificados e Inactivos) en docs/."""
     # ── Inicio ────────────────────────────────────────────────────────────────────
     KPIS = '''
         <section class="kpis" aria-label="Indicadores de la última ejecución del periodo filtrado">

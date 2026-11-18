@@ -241,6 +241,7 @@ def reclasificar(simular: bool = False) -> dict[Path, dict]:
 
 
 def main(argv=None) -> int:
+    """Punto de entrada: reclasifica (o simula) y retorna el código de salida (0 = correcto, 1 = falla)."""
     parser = argparse.ArgumentParser(description="Reclasificación de divisiones UniNorte del histórico y las novedades.")
     parser.add_argument("--simular", action="store_true", help="Solo informa qué cambiaría; no escribe ningún archivo.")
     args = parser.parse_args(argv)

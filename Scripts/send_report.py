@@ -109,7 +109,9 @@ def seleccionar(df: pd.DataFrame | None) -> pd.DataFrame:
 # ── HTML ──────────────────────────────────────────────────────────────────────
 # Mismo lenguaje visual del Dashboard: encabezado negro con línea roja, fondo gris claro, tarjetas blancas con
 # borde gris de separación, títulos en mayúsculas y tablas con encabezado negro. Los estilos van en línea
-# porque la mayoría de los clientes de correo ignoran las hojas de estilo.
+# porque la mayoría de los clientes de correo ignoran las hojas de estilo. Colores, tipo de letra, pesos, interletrado,
+# radios, bordes y márgenes son los del Dashboard (docs/assets/estilos.css); solo los tamaños de letra de los
+# indicadores y del encabezado se reducen un escalón (p. ej. valor del indicador 26 px frente a 32 px) para el ancho de 720 px.
 
 def _num(v) -> str:
     """Número con separador de miles institucional (punto)."""
@@ -117,14 +119,17 @@ def _num(v) -> str:
 
 
 def _fecha(d) -> str:
+    """Fecha en formato DD/MM/AAAA."""
     return d.strftime("%d/%m/%Y")
 
 
 def _plural(n: int, singular: str, plural: str) -> str:
+    """Cantidad con su unidad en singular o plural: 1 → "1 programa", 3 → "3 programas"."""
     return f"{_num(n)} {singular if n == 1 else plural}"
 
 
 def _texto(col: str, v) -> str:
+    """Texto de una celda de las tablas: vacío para nulos, etiqueta legible para el tipo de cambio y enteros sin decimales."""
     if v is None or (not isinstance(v, str) and pd.isna(v)):
         return ""
     if col == "TIPO_CAMBIO_DETECTADO":
@@ -143,15 +148,18 @@ def _tarjeta(contenido: str, color: str | None = None) -> str:
 
 
 def _titulo(texto: str, margen: int = 0) -> str:
+    """Título de sección en mayúsculas, con `margen` píxeles de separación superior."""
     return (f'<div style="margin-top:{margen}px;font-family:{FUENTE};font-size:13px;font-weight:800;'
             f'letter-spacing:.05em;color:{NEGRO};">{texto}</div>')
 
 
 def _subtitulo(texto: str) -> str:
+    """Párrafo descriptivo bajo un título."""
     return f'<p style="margin:4px 0 10px;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};">{texto}</p>'
 
 
 def _tabla(df: pd.DataFrame, columnas, numericas=()) -> str:
+    """Tabla HTML con encabezado negro; `columnas` = [(campo, encabezado)] y `numericas` las columnas alineadas a la derecha."""
     # Tablas de más de 5 columnas (modificados): letra y márgenes algo menores para que quepan en el ancho del correo
     compacta = len(columnas) > 5
     letra_th, letra_td, margen = ("10px", "11px", "6px") if compacta else ("11px", "12px", "10px")
@@ -174,6 +182,7 @@ def _tabla(df: pd.DataFrame, columnas, numericas=()) -> str:
 
 
 def _variacion(hoy: int, antes: int | None) -> str:
+    """Variación frente a la ejecución anterior con signo (+3, −2), "Sin variación" si es igual y "–" sin ejecución anterior."""
     if antes is None:
         return "–"
     d = hoy - antes
@@ -239,6 +248,7 @@ def _resumen(res: dict, fecha: date) -> str:
 
 
 def _descripcion(tipo: str, df: pd.DataFrame | None) -> str:
+    """Descripción de una sección; en Modificados agrega el número de cambios y de programas de la ejecución."""
     descripcion = SECCIONES[tipo]["descripcion"]
     if tipo == "modificados" and df is not None and len(df):
         descripcion += (f" En esta ejecución: {_plural(len(df), 'cambio', 'cambios')} en "
@@ -271,6 +281,7 @@ def _texto_notas(tipo: str, df: pd.DataFrame, negrita=lambda t: t, enlace=lambda
 
 
 def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
+    """Tarjeta HTML de una sección (nuevos, modificados o inactivos): descripción, tabla priorizada y notas."""
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
     contenido = _titulo(f"{cfg['titulo']} · {_num(total)}") + _subtitulo(_descripcion(tipo, df))
@@ -287,6 +298,7 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
 
 
 def _kpi(etiqueta: str, valor: str, detalle: str, color: str) -> str:
+    """Celda de indicador del encabezado: etiqueta, valor destacado y detalle, con borde izquierdo de `color`."""
     return (f'<td class="kpi" width="25%" valign="top" style="padding:0 4px;"><div style="background:#FFFFFF;border:1px solid {BORDE};'
             f'border-left:5px solid {color};border-radius:10px;padding:12px 14px;">'
             f'<div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.06em;color:{TEXTO2};">{etiqueta}</div>'
@@ -354,6 +366,7 @@ def construir_texto(resultados: dict, fecha: date) -> str:
 
 
 def construir_cuerpo(resultados: dict, fecha: date) -> str:
+    """Versión HTML del reporte (estilos en línea para los clientes de correo)."""
     res = resultados.get("pregrado") or {}
     nue, mod, ina = (res.get(k) for k in ("nuevos", "modificados", "inactivos"))
     kpis = "".join(_kpi(*k) for k in _indicadores(res, fecha))
@@ -382,7 +395,7 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
         <a href="{DASHBOARD_URL}" style="display:inline-block;margin-top:14px;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:12px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:10px 22px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
       </td>
       <td class="enc-fecha" valign="top" align="right" width="150">
-        <div style="border:1px solid #3A3A3A;border-top:3px solid {AMARILLO};border-radius:10px;padding:8px 14px;text-align:right;">
+        <div style="border:1px solid #333333;border-top:3px solid {AMARILLO};border-radius:10px;padding:8px 14px;text-align:right;">
           <div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.08em;color:#D9D9D9;">EJECUCIÓN</div>
           <div style="font-family:{FUENTE};font-size:18px;font-weight:800;color:#FFFFFF;">{_fecha(fecha)}</div>
         </div>
@@ -407,6 +420,7 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
 # ── Envío ─────────────────────────────────────────────────────────────────────
 
 def _enviar(msg: MIMEMultipart, remitente: str, clave: str, destinatarios: list[str]) -> None:
+    """Envía `msg` por SMTP con STARTTLS y autenticación de la cuenta remitente."""
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as server:
         server.ehlo()
         # Contexto TLS que verifica el certificado y el nombre del servidor (el de smtplib por defecto no lo hace)
@@ -451,20 +465,34 @@ def enviar_alerta_falla(fecha: date, etapa: str, detalle: str, log_path: Path) -
         extracto = "(no se pudo leer el log)"
 
     repo, run_id = os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GITHUB_RUN_ID")
-    enlace = (f'<p style="font-family:{FUENTE};font-size:13px;">Ejecución en GitHub Actions: '
-              f'<a href="https://github.com/{repo}/actions/runs/{run_id}" style="color:{ROJO};">ver detalle</a></p>'
+    enlace = (f'<p style="margin:0 0 10px;font-family:{FUENTE};font-size:12px;color:{TEXTO2};">Ejecución en GitHub Actions: '
+              f'<a href="https://github.com/{repo}/actions/runs/{run_id}" style="color:{ROJO};font-weight:700;">ver detalle</a></p>'
               if repo and run_id else "")
-    fila = lambda k, v: (f'<tr><td style="padding:6px 12px;background:{GRIS};font-weight:700;">{k}</td>'  # noqa: E731
-                         f'<td style="padding:6px 12px;">{escape(v)}</td></tr>')
-    cuerpo = f"""<div style="font-family:{FUENTE};max-width:900px;margin:auto;color:{NEGRO};">
-      <h2 style="color:{ROJO};border-bottom:3px solid {ROJO};padding-bottom:8px;">ALERTA TÉCNICA · MONITOR SNIES PREGRADO</h2>
-      <p style="font-size:13px;">La ejecución del {fecha.strftime('%d/%m/%Y')} no se completó. No se envió el reporte a los destinatarios.</p>
-      <table style="border-collapse:collapse;font-size:13px;margin:12px 0;">
-        {fila("ETAPA", etapa)}{fila("DETALLE", detalle)}{fila("LOG", ("Logs/" if log_path.parent.name == "Logs" else "") + log_path.name)}
-      </table>{enlace}
-      <h3 style="font-size:14px;">ÚLTIMAS LÍNEAS DEL LOG</h3>
-      <pre style="background:{GRIS};padding:12px;font-size:11px;white-space:pre-wrap;">{escape(extracto)}</pre>
-    </div>"""
+    td = f"font-family:{FUENTE};font-size:12px;color:{NEGRO};padding:7px 10px;border-bottom:1px solid {BORDE};vertical-align:top;"
+    fila = lambda k, v: (f'<tr><td style="{td}background:{GRIS};font-weight:700;letter-spacing:.04em;">{k}</td>'  # noqa: E731
+                         f'<td style="{td}">{escape(v)}</td></tr>')
+    # Mismo lenguaje visual que el reporte: encabezado negro con línea roja y tarjeta blanca con borde de estado
+    contenido = (
+        _titulo("LA EJECUCIÓN NO SE COMPLETÓ")
+        + _subtitulo(f"No se envió el reporte a los destinatarios. Ejecución del {_fecha(fecha)}.")
+        + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid {BORDE};margin:4px 0 12px;">'
+        + fila("ETAPA", etapa) + fila("DETALLE", detalle)
+        + fila("LOG", ("Logs/" if log_path.parent.name == "Logs" else "") + log_path.name)
+        + "</table>" + enlace + _titulo("ÚLTIMAS LÍNEAS DEL LOG", 6)
+        + f'<pre style="margin:8px 0 0;background:{GRIS};border-radius:6px;padding:10px 12px;font-size:11px;color:{NEGRO};white-space:pre-wrap;">{escape(extracto)}</pre>'
+    )
+    cuerpo = f"""<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background:{GRIS};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{GRIS};"><tr><td align="center" style="padding:20px 10px;">
+<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;table-layout:fixed;">
+  <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
+    <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">ALERTA TÉCNICA · MONITOR SNIES PREGRADO</div>
+    <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Aviso para la cuenta remitente</div>
+  </td></tr>
+  <tr><td style="padding:16px 0 0;">{_tarjeta(contenido, ROJO)}</td></tr>
+</table></td></tr></table>
+</body></html>"""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"ALERTA TÉCNICA · Monitor SNIES Pregrado · {fecha.strftime('%d/%m/%Y')}"
     msg["From"] = msg["To"] = remitente

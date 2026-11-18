@@ -130,9 +130,21 @@ def filtrar(df, filtro, busqueda=None, campos_busqueda=()):
 
 # ── Navegador ─────────────────────────────────────────────────────────────────
 
+class _ManejadorSilencioso(http.server.SimpleHTTPRequestHandler):
+    """Sirve docs/ sin escribir cada solicitud en la consola (solo se informan las fallas de las pruebas)."""
+
+    def log_message(self, *args, **kwargs):
+        pass
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):   # Chrome cierra conexiones abiertas al navegar: no es una falla
+            pass
+
+
 def servidor():
-    manejador = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(DOCS))
-    manejador.log_message = lambda *a, **k: None
+    manejador = functools.partial(_ManejadorSilencioso, directory=str(DOCS))
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), manejador)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
@@ -189,7 +201,7 @@ class Pagina:
             const g = (id) => { const e = document.getElementById(id); return e && e.data ? e.data : null; };
             const ultimo = (tr) => tr.y[tr.y.length - 1];
             const out = {
-              total: num(t('total')), activos: num(t('k-activos')), nuevos: num(t('k-nuevos')), modificados: num(t('k-modificados')),
+              total: num(t('total')), activos: num(t('k-activos')), activos_sub: t('k-activos-s'), nuevos: num(t('k-nuevos')), modificados: num(t('k-modificados')),
               inactivos: num(t('k-inactivos')), tabla: num((document.querySelector('#tabla [data-n]') || {}).textContent),
               conteo: document.querySelector('.conteo-filtro').textContent };
             const ev = g('g-evolucion'); if (ev) out.evolucion = ultimo(ev[0]);
@@ -223,12 +235,32 @@ def reset_filtros(p):
     p.esperar_listo()
 
 
+def subtitulo_activos(fa, filtro, busqueda, campos):
+    """
+    Texto esperado bajo el KPI de programas activos, calculado desde el histórico sin usar el código del Dashboard:
+    variación frente a la ejecución inmediatamente anterior (aunque quede fuera del periodo filtrado) con el mismo
+    formato del correo, o la fecha del corte si no existe una ejecución anterior.
+    """
+    if not fa:
+        return "Sin descargas en el periodo"
+    todas = C["fechas_activos"]
+    i = todas.index(fa[-1])
+    fmt = lambda iso: f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}"  # noqa: E731
+    if i == 0:
+        return f"Programas activos al {fmt(fa[-1])}"
+    hoy = len(filtrar(historico(todas[i]), filtro, busqueda, campos))
+    antes = len(filtrar(historico(todas[i - 1]), filtro, busqueda, campos))
+    d = hoy - antes
+    cifra = "Sin variación" if d == 0 else f"{'+' if d > 0 else '−'}{abs(d):,}".replace(",", ".")
+    return f"{cifra} frente al {fmt(todas[i - 1])}"
+
+
 def esperado_inicio(filtro, busqueda=None, desde=None, hasta=None):
     campos = ["NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "MODALIDAD", "CODIGO_SNIES_DEL_PROGRAMA"]
     fa = [f for f in C["fechas_activos"] if not desde or desde <= f <= hasta]
     fe = [f for f in C["fechas_ejecucion"] if not desde or desde <= f <= hasta]
     activos = len(filtrar(historico(fa[-1]), filtro, busqueda, campos)) if fa else 0
-    out = {"activos": activos}
+    out = {"activos": activos, "subtitulo_activos": subtitulo_activos(fa, filtro, busqueda, campos)}
     for t in NOV:
         df = NOV[t]
         if desde:
@@ -249,6 +281,8 @@ def esperado_detalle(tipo, filtro, busqueda=None, desde=None, hasta=None):
 def comparar_inicio(p, nombre, filtro, busqueda=None, desde=None, hasta=None):
     e, s = esperado_inicio(filtro, busqueda, desde, hasta), p.estado()
     ok = verificar(f"inicio · {nombre} · KPI activos", s["activos"] == e["activos"], f"{s['activos']} vs {e['activos']}")
+    ok &= verificar(f"inicio · {nombre} · variación del KPI activos", s["activos_sub"] == e["subtitulo_activos"],
+                    f"{s['activos_sub']!r} vs {e['subtitulo_activos']!r}")
     for t in NOV:
         ok &= verificar(f"inicio · {nombre} · KPI {t}", s[t] == e[t], f"{s[t]} vs {e[t]}")
     if s.get("g_novedades"):
@@ -561,6 +595,50 @@ def probar_url(d, base):
     verificar("url · errores de consola", not p.errores(), str(p.errores()[:3]))
 
 
+def probar_fecha_unica(d, base):
+    """
+    Una sola fecha (enlaces del correo: #fecha=AAAA-MM-DD): las gráficas de línea muestran el punto y el eje indica
+    esa fecha. En Inicio, un periodo sin descargas de activos no debe mostrar la fecha de la última descarga.
+    """
+    ultima = C["ultima_ejecucion"]
+    for pagina, grafica in (("nuevos.html", "g-evolucion"), ("modificados.html", "g-evolucion"), ("index.html", "g-activos")):
+        d.get("about:blank")
+        q = Pagina(d, base, f"{pagina}#fecha={ultima}")
+        info = q.js("const g = document.getElementById(arguments[0]); return g && g.data ? "
+                    "{modo: g.data[0].mode, puntos: g.data[0].x.length, ticks: g.layout.xaxis.ticktext} : null", grafica)
+        verificar(f"fecha única · {pagina} · el punto se dibuja",
+                  bool(info) and info["puntos"] == 1 and "markers" in info["modo"], json.dumps(info))
+        verificar(f"fecha única · {pagina} · el eje muestra la fecha",
+                  bool(info) and info["ticks"] == [f"{ultima[8:10]}/{ultima[5:7]}/{ultima[:4]}"], json.dumps(info))
+        verificar(f"fecha única · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
+    solo_novedades = sorted(set(C["fechas_ejecucion"]) - set(C["fechas_activos"]))
+    if solo_novedades:
+        d.get("about:blank")
+        q = Pagina(d, base, f"index.html#fecha={solo_novedades[0]}")
+        fechas = q.js("return [...document.querySelectorAll('[data-fecha-corte]')].map(e => e.textContent)")
+        verificar("periodo sin descargas de activos · no se muestra la fecha de otra descarga",
+                  fechas and all(f == "–" for f in fechas), str(fechas))
+
+
+def probar_consistencia_visual(d, base):
+    """Etiquetas y estados interactivos homogéneos: la tabla usa las mismas etiquetas que el filtro y el correo; todos los botones reaccionan al cursor."""
+    from selenium.webdriver.common.action_chains import ActionChains
+    d.get("about:blank")
+    q = Pagina(d, base, "modificados.html")
+    etiquetas = set(C["catalogos"]["tipos_cambio_etiqueta"].values())
+    celdas = q.js("const j = [...document.querySelectorAll('#tabla th')].findIndex(t => t.dataset.c === 'TIPO_CAMBIO_DETECTADO');"
+                  "return [...new Set([...document.querySelectorAll('#tabla tbody tr')].map(tr => tr.children[j].textContent))];")
+    verificar("consistencia · tipo de cambio de la tabla con la etiqueta del filtro y del correo", bool(celdas) and set(celdas) <= etiquetas, str(celdas))
+    for nombre, selector in (("filtro desplegable", ".filtros .ms-btn"), ("botón", ".filtros .btn-limpiar"), ("descarga", "#tabla [data-pq]")):
+        el = q.d.find_element(By.CSS_SELECTOR, selector)
+        q.js("arguments[0].scrollIntoView({block: 'center'});", el)
+        antes = q.js("return getComputedStyle(arguments[0]).backgroundColor", el)
+        ActionChains(d).move_to_element(el).perform(); time.sleep(0.15)
+        despues = q.js("return getComputedStyle(arguments[0]).backgroundColor", el)
+        verificar(f"consistencia · {nombre} cambia de aspecto al pasar el cursor", antes != despues, f"{antes} → {despues}")
+    verificar("consistencia · errores de consola", not q.errores(), str(q.errores()[:3]))
+
+
 def probar_movil(d, base):
     """Pantalla angosta (390 px): leyendas debajo del gráfico y etiquetas del eje X sin superposición."""
     d.set_window_size(390, 900)
@@ -642,6 +720,8 @@ def main():
                 verificar(f"{tipo} · enlace de navegación {nav}", len(enlaces) == 1)
             verificar(f"{tipo} · errores de consola", not q.errores(), str(q.errores()[:3]))
         probar_url(d, base)
+        probar_fecha_unica(d, base)
+        probar_consistencia_visual(d, base)
         probar_movil(d, base)
     finally:
         d.quit()

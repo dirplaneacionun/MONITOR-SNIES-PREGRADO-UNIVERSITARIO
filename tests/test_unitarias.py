@@ -132,6 +132,25 @@ class TestDeteccion(unittest.TestCase):
         run_snies.validar_continuidad(89, self.fecha, forzar=True)   # caída real confirmada
         run_snies.validar_continuidad(10, dt.date(2026, 11, 10))      # sin ejecución anterior: línea base
 
+    def test_validacion_de_los_filtros_del_portal(self):
+        correcto = pd.DataFrame([programa(1, **run_snies.FILTROS_PORTAL), programa(2, **run_snies.FILTROS_PORTAL)])
+        run_snies.validar_filtros(correcto)   # todas las filas cumplen los filtros: no lanza
+        run_snies.validar_filtros(correcto.assign(NIVEL_ACADEMICO=" pregrado "))   # espacios y mayúsculas no cuentan
+        casos = {
+            "nivel de formación ampliado": correcto.assign(NIVEL_DE_FORMACION=["UNIVERSITARIO", "TECNOLOGICO"]),
+            "programa inactivo": correcto.assign(ESTADO_PROGRAMA=["ACTIVO", "INACTIVO"]),
+            "valor vacío": correcto.assign(NIVEL_ACADEMICO=["PREGRADO", None]),
+            "columna ausente": correcto.drop(columns="ESTADO_INSTITUCION"),
+        }
+        for nombre, df in casos.items():
+            with self.subTest(nombre), self.assertRaises(run_snies.EtapaError) as error:
+                run_snies.validar_filtros(df)
+            self.assertEqual(error.exception.etapa, "VALIDACION")
+        with self.assertRaises(run_snies.EtapaError) as error:
+            run_snies.validar_filtros(casos["nivel de formación ampliado"])
+        self.assertIn("NIVEL_DE_FORMACION: 1 fila(s)", str(error.exception))
+        self.assertIn("no se guardó ningún dato", str(error.exception))
+
     def test_reejecucion_del_mismo_dia_no_marca_reactivados(self):
         # El histórico ya contiene la fecha de hoy (re-ejecución): no debe contar como existencia previa
         self._historico([programa(6, **{F: str(self.fecha)})])
@@ -433,6 +452,20 @@ class TestCorreo(unittest.TestCase):
                                                      "total_activos": 1}}, dt.date(2026, 11, 17))
         asunto = str(enviar.call_args.args[0]["Subject"])
         self.assertEqual(asunto, "MONITOR SNIES PREGRADO · UNIVERSITARIO · Reporte del 17/11/2026")
+
+    def test_paleta_del_correo_coincide_con_la_del_dashboard(self):
+        css = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "estilos.css").read_text(encoding="utf-8")
+        variables = {k: v.upper() for k, v in re.findall(r"--([\w-]+):\s*(#[0-9A-Fa-f]{6})", css)}
+        esperado = {"negro": send_report.NEGRO, "rojo": send_report.ROJO, "amarillo": send_report.AMARILLO,
+                    "gris-claro": send_report.GRIS, "gris-sep": send_report.BORDE, "texto-2": send_report.TEXTO2,
+                    "texto-3": send_report.TEXTO3, "nuevos": send_report.ESTADO["nuevos"],
+                    "modificados": send_report.ESTADO["modificados"], "inactivos": send_report.ESTADO["inactivos"]}
+        for nombre, color in esperado.items():
+            self.assertEqual(variables.get(nombre), color.upper(), f"--{nombre} difiere entre el Dashboard y el correo")
+        # Las gráficas (app.js) usan los mismos colores institucionales y de estado que la hoja de estilos
+        js = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "app.js").read_text(encoding="utf-8").upper()
+        for nombre in ("rojo", "amarillo", "negro", "texto-2", "gris-sep", "nuevos", "modificados", "inactivos"):
+            self.assertIn(f'"{variables[nombre]}"', js, f"--{nombre} ({variables[nombre]}) no se usa igual en app.js")
 
     def test_alerta_tecnica_solo_al_remitente(self):
         # Alerta del paso "Pruebas unitarias" del workflow: el log está fuera de Logs/ y no debe presentarse como tal

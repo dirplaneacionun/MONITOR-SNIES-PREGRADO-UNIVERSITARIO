@@ -18,6 +18,7 @@ GRUPOS_UNIVERSIDAD = (GRUPO_UNINORTE, GRUPO_MAYOR_INTERES, GRUPO_OTRAS)
 
 
 def grupo_universidad(codigo_institucion) -> str:
+    """Grupo de universidades de una institución según su código SNIES; un código vacío o no numérico cuenta como "otras"."""
     try:
         codigo = int(codigo_institucion)
     except (TypeError, ValueError):
@@ -47,6 +48,7 @@ MODALIDAD_A_GRUPO = {valor: grupo for grupo, valores in MODALIDADES_GRUPO.items(
 
 
 def modalidad_grupo(modalidad) -> str:
+    """Modalidad agrupada (presencial, virtual, a distancia, híbrida o dual); un valor vacío o desconocido da SIN INFORMACIÓN."""
     if modalidad is None or str(modalidad).strip() in ("", "nan", "None"):
         return SIN_INFORMACION
     return MODALIDAD_A_GRUPO.get(str(modalidad).strip().upper(), SIN_INFORMACION)

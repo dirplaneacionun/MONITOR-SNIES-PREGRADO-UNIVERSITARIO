@@ -2226,7 +2226,7 @@ NBC_ALIAS = {
     "NO APLICA": "SIN CLASIFICAR",
     "N A": "SIN CLASIFICAR",
     "DISENIO": "DISEÑO",  # variante del nombre del NBC en la fuente
-    # Solo en el Consolidado; sus reglas propias eran una copia vieja de las de SIN CLASIFICAR
+    # Solo aparece en el Consolidado; se unifica con SIN CLASIFICAR para que ambos usen las mismas reglas
     "SIN INFORMACION": "SIN CLASIFICAR",
 }
 

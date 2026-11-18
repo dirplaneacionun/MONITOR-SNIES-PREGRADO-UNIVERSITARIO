@@ -69,6 +69,7 @@ COLS_PRIMERO = {
 # ── Codificación compacta ─────────────────────────────────────────────────────
 
 def _valor_json(v):
+    """Valor serializable en JSON: fechas como AAAA-MM-DD, enteros exactos como int, NaN y nulos como None."""
     if v is None or v is pd.NaT:
         return None
     if isinstance(v, (pd.Timestamp, dt.datetime, dt.date)):
@@ -101,6 +102,7 @@ def codificar(df: pd.DataFrame) -> dict:
 
 
 def escribir_js(nombre: str, clave: str, contenido) -> Path:
+    """Escribe `contenido` como script (window.SNIES[clave] = ...) en docs/data/<nombre> y retorna su ruta."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     path = DATA_DIR / nombre
     texto = json.dumps(contenido, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -112,11 +114,13 @@ def escribir_js(nombre: str, clave: str, contenido) -> Path:
 
 
 def _ordenar_columnas(df: pd.DataFrame, tipo: str) -> pd.DataFrame:
+    """Coloca primero las columnas principales de cada tipo de tabla (COLS_PRIMERO); el resto conserva su orden."""
     primero = [c for c in COLS_PRIMERO[tipo] if c in df.columns]
     return df[primero + [c for c in df.columns if c not in primero]]
 
 
 def _rangos(indices: list[int]) -> list[list[int]]:
+    """Agrupa índices ordenados en rangos consecutivos [inicio, fin]: [0, 1, 2, 5] → [[0, 2], [5, 5]]."""
     indices = [int(i) for i in indices]
     rangos, ini, fin = [], indices[0], indices[0]
     for i in indices[1:]:
@@ -140,6 +144,7 @@ def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]
 # ── Generación ────────────────────────────────────────────────────────────────
 
 def main() -> int:
+    """Genera los datos y las páginas del Dashboard; retorna 0 si terminó correctamente y 1 si no hay histórico."""
     print("Generando datos del Dashboard...")
     if not historico.existe():
         print(f"  ERROR: no hay archivos del histórico en {historico.HISTORICO_DIR}")
@@ -239,8 +244,8 @@ def main() -> int:
     })
 
     escribir_js("comun.js", "comun", comun)
-    # Datos de versiones anteriores del Dashboard que ya no se publican (la tabla de programas activos de Inicio
-    # y sus copias del histórico por ejecución)
+    # Archivos que el Dashboard ya no publica (tabla de programas activos de Inicio y copias del histórico por
+    # ejecución): se eliminan si existen para que no queden datos sin uso en docs/
     for obsoleto in ("activos_tabla.js", "historico.parquet"):
         (DATA_DIR / obsoleto).unlink(missing_ok=True)
     if (DATA_DIR / "historico").is_dir():

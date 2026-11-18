@@ -54,6 +54,7 @@ def archivos() -> list[tuple[int, Path]]:
 
 
 def existe() -> bool:
+    """Indica si hay al menos un archivo del histórico."""
     return bool(archivos())
 
 
@@ -198,6 +199,7 @@ def _escribir(path: Path, grupos: list[pa.Table], esquema_final: pa.Schema) -> N
 
 
 def _fecha_grupo(tabla: pa.Table) -> dt.date:
+    """Fecha de ejecución de un grupo de filas (todas sus filas comparten la misma fecha)."""
     return pd.Timestamp(tabla.column(COL_FECHA)[0].as_py()).date()
 
 

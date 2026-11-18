@@ -135,8 +135,8 @@
     // Total del encabezado y conteo
     const programas = new Set(filas.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size;
     $("total").textContent = A.fmt(filas.length);
-    $("total-s").textContent = tipo === "modificados" ? `${A.fmt(programas)} programas` : "registros";
-    filtros.conteo.textContent = tipo === "modificados" ? `${A.fmt(filas.length)} cambios en ${A.fmt(programas)} programas` : `${A.fmt(filas.length)} programas`;
+    $("total-s").textContent = tipo === "modificados" ? A.plural(programas, "programa", "programas") : (filas.length === 1 ? "registro" : "registros");
+    filtros.conteo.textContent = tipo === "modificados" ? `${A.plural(filas.length, "cambio", "cambios")} en ${A.plural(programas, "programa", "programas")}` : A.plural(filas.length, "programa", "programas");
 
     A.lineas($("g-evolucion"), fechas, [{ nombre: NOMBRE, valores: A.contarPorFecha(filas, fechas), color }], { modo: "acumulado" });
     if (tipo === "modificados") {

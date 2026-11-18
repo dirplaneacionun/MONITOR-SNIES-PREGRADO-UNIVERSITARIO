@@ -21,7 +21,7 @@ PROGRAMAS_UN_FILE = "ProgramasUN.xlsx"
 
 # ── Archivos procesables ───────────────────────────────────────────────────────
 # MONITOR-SNIES-PREGRADO-UNIVERSITARIO solo clasifica Programas.xlsx: los parquets (Consolidado, Estudiantes
-# inscritos, admitidos, matriculados, matriculados en primer curso y graduados) no se procesan en esta copia.
+# inscritos, admitidos, matriculados, matriculados en primer curso y graduados) no se procesan en este proyecto.
 ARCHIVOS_PARQUET = []
 
 # Programas.xlsx se procesa primero: su clasificación enriquece las referencias (Capa 1 y Capa 2) de los parquets

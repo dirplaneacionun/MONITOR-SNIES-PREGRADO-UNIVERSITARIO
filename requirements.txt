@@ -30,3 +30,29 @@ six==1.17.0                   # python-dateutil
 tzdata==2026.2                # pandas
 et_xmlfile==2.0.0             # openpyxl
 colorama==0.4.6 ; sys_platform == "win32"  # tqdm
+
+# Dependencias transitivas de selenium, webdriver-manager y rich (fijadas para que la instalación en GitHub Actions
+# y en cualquier equipo use exactamente las versiones validadas). Las marcadas con sys_platform solo las exige Windows.
+urllib3==2.8.0                # selenium, requests
+certifi==2026.10.23           # selenium, requests
+typing_extensions==4.16.0     # selenium
+websocket-client==1.9.2       # selenium
+trio==0.35.0                  # selenium
+trio-websocket==0.12.2        # selenium
+attrs==26.1.0                 # trio
+outcome==1.3.0.post0          # trio
+sniffio==1.3.1                # trio
+sortedcontainers==2.4.0       # trio
+idna==3.20                    # trio, requests
+wsproto==1.3.2                # trio-websocket
+h11==0.16.0                   # wsproto
+PySocks==1.7.1                # urllib3 (selenium)
+cffi==2.1.1 ; sys_platform == "win32"        # trio
+pycparser==3.12 ; sys_platform == "win32"    # cffi
+requests==2.34.2              # webdriver-manager
+charset-normalizer==3.5.2     # requests
+python-dotenv==1.2.4          # webdriver-manager
+packaging==26.3               # webdriver-manager
+markdown-it-py==4.3.0         # rich
+mdurl==0.1.2                  # markdown-it-py
+Pygments==2.21.0              # rich

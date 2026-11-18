@@ -19,6 +19,13 @@
   // ── Utilidades ────────────────────────────────────────────────────────────
   const fmt = (n) => (n == null || isNaN(n) ? "–" : Number(n).toLocaleString("es-CO"));
   const fmtFecha = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
+  /** Cantidad con su unidad en singular o plural (1 programa, 3 programas), igual que el correo. */
+  const plural = (n, singular, plural_) => `${fmt(n)} ${n === 1 ? singular : plural_}`;
+  /** Variación frente a la ejecución anterior con signo (+3, −2) o "Sin variación"; mismo formato que el correo. */
+  const variacion = (hoy, antes) => {
+    const d = hoy - antes;
+    return d === 0 ? "Sin variación" : `${d > 0 ? "+" : "−"}${fmt(Math.abs(d))}`;
+  };
   const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
   const normalizar = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -530,7 +537,13 @@
       vals.push(`${y}-${String(m + 1).padStart(2, "0")}-01`);
       txt.push(`${MESES[m]}<br>${y}`);
     }
-    const rango = fechas.length === 1 ? undefined : [fechas[0], fechas[fechas.length - 1]];
+    if (fechas.length === 1) {
+      // Una sola ejecución: el eje muestra esa fecha, con unos días de margen a cada lado
+      const d = new Date(fechas[0] + "T00:00:00");
+      const desplazar = (n) => isoDe(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
+      return { type: "date", tickmode: "array", tickvals: [fechas[0]], ticktext: [fmtFecha(fechas[0])], range: [desplazar(-3), desplazar(3)], hoverformat: "%d/%m/%Y", showgrid: false, linecolor: "#BDBDBD", ticks: "outside", tickcolor: "#BDBDBD" };
+    }
+    const rango = [fechas[0], fechas[fechas.length - 1]];
     return { type: "date", tickmode: "array", tickvals: vals, ticktext: txt, range: rango, hoverformat: "%d/%m/%Y", showgrid: false, linecolor: "#BDBDBD", ticks: "outside", tickcolor: "#BDBDBD" };
   }
   const acumular = (v) => { let s = 0; return v.map((x) => (s += x)); };
@@ -554,9 +567,10 @@
     const angosta = varias && div.clientWidth > 0 && div.clientWidth < 640;
     div.style.height = angosta ? `${300 + ser.length * 22}px` : "";
     const trazas = ser.map((s) => ({
-      type: "scatter", mode: "lines", x: fechas, y: s.valores,
+      type: "scatter", mode: fechas.length === 1 ? "lines+markers" : "lines", x: fechas, y: s.valores,   // con una sola fecha una línea no se dibuja: se muestra el punto
       name: varias ? `${angosta && s.nombre.length > 36 ? s.nombre.slice(0, 35) + "…" : s.nombre} · ${fmt(total(s))}` : s.nombre,
       line: { color: s.color, width: 2, dash: s.dash || "solid", shape: "linear" },
+      marker: { color: s.color, size: 9 },
       hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}<extra></extra>`,
     }));
     const layout = baseLayout({
@@ -705,6 +719,7 @@
 
   function celda(c, v, tipo) {
     if (v == null || v === "") return "";
+    if (c === "TIPO_CAMBIO_DETECTADO") return CAT.tipos_cambio_etiqueta[v] || String(v);   // misma etiqueta que el filtro, las gráficas y el correo
     if (esFecha(c)) { const s = String(v); return /^\d{4}-\d{2}-\d{2}/.test(s) ? fmtFecha(s) : s; }
     if (tipo === "numero" && typeof v === "string") v = valorNumero(v);   // números guardados como texto
     if (typeof v === "number") {
@@ -847,7 +862,7 @@
   }
 
   window.App = {
-    C, CAT, ESTADO, CATEGORICA, GRIS, SECTOR_COLOR, ROJO, AMARILLO, NEGRO, fmt, fmtFecha, esc, normalizar,
+    C, CAT, ESTADO, CATEGORICA, GRIS, SECTOR_COLOR, ROJO, AMARILLO, NEGRO, fmt, fmtFecha, plural, variacion, esc, normalizar,
     decodificar, derivar, asignarColores, Filtros, SelectorCine, Tabla, lineas, barrasH, barrasV, torta, plotly, vacio,
     contarPorFecha, contar, seriesPorCategoria, ejeMeses, ejeEntero, grupoModalidad, valorFecha, tipoColumna,
   };

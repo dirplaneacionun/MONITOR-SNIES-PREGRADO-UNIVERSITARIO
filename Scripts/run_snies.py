@@ -9,8 +9,9 @@ Flujo:
     2. Normaliza el archivo con ETL-PROGRAMAS-SNIES (Scripts/ETL-PROGRAMAS-SNIES).
     3. Clasifica las divisiones con CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES),
        procesando únicamente Programas.xlsx.
-    4. Valida el archivo procesado, incluida la continuidad con la ejecución anterior del histórico:
-       si los programas caen más de un 10 %, la descarga se considera incompleta y no se guarda nada.
+    4. Valida el archivo procesado: que cada fila cumpla los filtros aplicados en el portal (FILTROS_PORTAL) y la
+       continuidad con la ejecución anterior del histórico: si los programas caen más de un 10 %, la descarga se
+       considera incompleta y no se guarda nada.
     5. Compara con la ejecución anterior, leída del histórico, y detecta programas nuevos
        (o reactivados), modificados e inactivos.
     6. Acumula las novedades en Novedades/*.parquet y agrega la ejecución al histórico
@@ -81,6 +82,14 @@ SUBPROCESO_TIMEOUT = 1_800     # segundos máximos por herramienta (ETL o clasif
 
 COL_SNIES = "CODIGO_SNIES_DEL_PROGRAMA"
 COL_FECHA = "FECHA_DE_OBTENCION"
+# Valor que debe tener cada fila del reporte según los filtros aplicados en el portal (ya normalizado por el ETL).
+# Un valor distinto indica que el portal no aplicó un filtro: ese reporte no se guarda.
+FILTROS_PORTAL = {
+    "ESTADO_INSTITUCION": "ACTIVA",
+    "ESTADO_PROGRAMA": "ACTIVO",
+    "NIVEL_ACADEMICO": "PREGRADO",
+    "NIVEL_DE_FORMACION": "UNIVERSITARIO",
+}
 COLS_CLASIFICACION = ["DIVISION_UNINORTE", "PUNTAJE_TOTAL"]
 # Columnas que ya no se guardan (el clasificador dejó de exportar REQUIERE_REVISION: los programas por revisar
 # están en su lista de revisión). Se retiran también de los archivos acumulados.
@@ -183,6 +192,7 @@ def _depurar(carpeta: Path, patron: re.Pattern, maximo: int, etiqueta: str) -> l
 
 
 def _seccion(titulo: str) -> None:
+    """Encabezado de una etapa en el log consolidado."""
     log.info("─" * 70)
     log.info(titulo)
     log.info("─" * 70)
@@ -191,6 +201,7 @@ def _seccion(titulo: str) -> None:
 # ── Descarga (Selenium) ───────────────────────────────────────────────────────
 
 def _build_driver(download_dir: Path, headless: bool = True):
+    """Chrome controlado por Selenium que guarda las descargas en `download_dir` (sin ventana si `headless`)."""
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
@@ -220,6 +231,7 @@ def _build_driver(download_dir: Path, headless: bool = True):
 
 
 def _safe_click(driver, xpath: str, timeout: int = 15) -> None:
+    """Clic en el elemento de `xpath` cuando es clicable; reintenta una vez si la página lo reemplazó mientras esperaba."""
     from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
@@ -337,6 +349,7 @@ def descargar_snies(download_dir: Path) -> Path:
 # ── Herramientas externas (ETL y clasificador) ────────────────────────────────
 
 def _log_mas_reciente(carpeta: Path, patron: str, desde: float) -> Path | None:
+    """Log más reciente de `carpeta` que cumple `patron` y se modificó desde `desde` (marca de tiempo); None si no hay."""
     candidatos = [f for f in carpeta.glob(patron) if f.stat().st_mtime >= desde - 1]
     return max(candidatos, key=lambda f: f.stat().st_mtime) if candidatos else None
 
@@ -438,6 +451,7 @@ def _tipos_estables(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _escribir_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Escribe `df` en `path` de forma atómica (archivo temporal y reemplazo), con tipos compatibles con Parquet."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp.parquet")
     _tipos_estables(df).to_parquet(tmp, index=False)
@@ -465,6 +479,29 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
     combinado = combinado[columnas].sort_values([COL_FECHA, COL_SNIES], kind="stable", ignore_index=True)
     _escribir_parquet(combinado, path)
     return len(combinado)
+
+
+def validar_filtros(df: pd.DataFrame) -> None:
+    """
+    Protección contra un portal que no aplica algún filtro: una descarga con el universo ampliado (por ejemplo,
+    sin el filtro de nivel de formación) conserva el esquema y puede quedar por debajo de UMBRAL_MAXIMO, pero
+    registraría como nuevos miles de programas que no son del universo vigilado. Cada fila debe cumplir
+    FILTROS_PORTAL; si una columna falta o algún valor difiere, lanza EtapaError sin que se guarde ningún dato.
+    """
+    faltan = [c for c in FILTROS_PORTAL if c not in df.columns]
+    if faltan:
+        raise EtapaError("VALIDACION", f"El archivo procesado no tiene las columnas de los filtros del portal: {faltan}.")
+    problemas = []
+    for columna, esperado in FILTROS_PORTAL.items():
+        valores = df[columna].map(lambda v: "" if pd.isna(v) else str(v).strip().upper())
+        distintos = valores[valores != esperado]
+        if not distintos.empty:
+            detalle = ", ".join(f"{v or 'VACIO'} ({n:,})" for v, n in distintos.value_counts().head(5).items())
+            problemas.append(f"{columna}: {len(distintos):,} fila(s) distintas de {esperado} [{detalle}]")
+    if problemas:
+        raise EtapaError("VALIDACION", "El portal no aplicó los filtros esperados (" + "; ".join(problemas) + "). "
+                                       "Posible cambio en el portal del SNIES: no se guardó ningún dato.")
+    log.info("  Filtros del portal verificados: " + " · ".join(f"{c}={v}" for c, v in FILTROS_PORTAL.items()))
 
 
 def validar_continuidad(n_hoy: int, fecha: dt.date, forzar: bool = False) -> None:
@@ -580,6 +617,7 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
 # ── Flujo principal ───────────────────────────────────────────────────────────
 
 def _parse_args(argv=None) -> argparse.Namespace:
+    """Opciones de la línea de comandos (ver el encabezado del módulo)."""
     p = argparse.ArgumentParser(description="Monitor SNIES de programas universitarios de pregrado.")
     p.add_argument("--archivo", type=Path, help="Procesa un Excel ya descargado en lugar de descargarlo.")
     p.add_argument("--fecha", type=dt.date.fromisoformat,
@@ -592,6 +630,10 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 
 def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
+    """
+    Etapas 1 a 6 del flujo (descarga, normalización, clasificación, validación, detección y guardado). Retorna los
+    resultados que usa el correo; una falla de validación o de una herramienta lanza EtapaError antes de guardar datos.
+    """
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     for carpeta in (NOVEDADES_DIR, historico.HISTORICO_DIR):
         carpeta.mkdir(parents=True, exist_ok=True)
@@ -633,6 +675,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
         raise EtapaError("VALIDACION", f"{len(hoy):,} programas: probable descarga sin filtros.")
     if hoy[COL_SNIES].duplicated().any():
         raise EtapaError("VALIDACION", "Hay códigos SNIES repetidos en el archivo procesado.")
+    validar_filtros(hoy)
     validar_continuidad(len(hoy), fecha, args.forzar)
     try:
         revision = len(pd.read_excel(REVISION_FILE, engine="calamine")) if REVISION_FILE.exists() else 0
@@ -694,6 +737,7 @@ def activos_por_grupo(df: pd.DataFrame) -> dict[str, int]:
 
 
 def main(argv=None) -> int:
+    """Ejecución completa (etapas 1 a 8); retorna 0 si terminó correctamente y 1 si alguna etapa falló."""
     args = _parse_args(argv)
     ahora = dt.datetime.now(ZONA_HORARIA)
     fecha = args.fecha or ahora.date()
