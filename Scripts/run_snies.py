@@ -9,7 +9,8 @@ Flujo:
     2. Normaliza el archivo con ETL-PROGRAMAS-SNIES (Scripts/ETL-PROGRAMAS-SNIES).
     3. Clasifica las divisiones con CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES),
        procesando únicamente Programas.xlsx.
-    4. Valida el archivo procesado.
+    4. Valida el archivo procesado, incluida la continuidad con la ejecución anterior del histórico:
+       si los programas caen más de un 10 %, la descarga se considera incompleta y no se guarda nada.
     5. Compara con la ejecución anterior, leída del histórico, y detecta programas nuevos
        (o reactivados), modificados e inactivos.
     6. Acumula las novedades en Novedades/*.parquet y agrega la ejecución al histórico
@@ -29,6 +30,7 @@ Ejecución:
     python Scripts/run_snies.py --sin-correo         # sin enviar correos
     python Scripts/run_snies.py --archivo RUTA.xlsx --fecha AAAA-MM-DD
                                                      # procesa un archivo ya descargado
+    python Scripts/run_snies.py --forzar             # acepta una caída real de más del 10 %
 """
 
 from __future__ import annotations
@@ -74,6 +76,7 @@ ZONA_HORARIA     = ZoneInfo("America/Bogota")
 SNIES_URL        = "https://hecaa.mineducacion.gov.co/consultaspublicas/programas"
 DOWNLOAD_TIMEOUT = 120         # segundos máximos esperando la descarga
 UMBRAL_MAXIMO    = 10_000      # más programas que esto indica una descarga sin filtros
+CAIDA_MAXIMA     = 0.10        # caída de programas frente a la ejecución anterior que indica una descarga incompleta
 SUBPROCESO_TIMEOUT = 1_800     # segundos máximos por herramienta (ETL o clasificador)
 
 COL_SNIES = "CODIGO_SNIES_DEL_PROGRAMA"
@@ -366,8 +369,11 @@ def _ejecutar_herramienta(etapa: str, cwd: Path, comando: list[str], logs_dir: P
     log.info(f"  {etapa} completado en {time.time() - inicio:.1f}s.")
 
 
-def normalizar_etl(archivo_crudo: Path) -> Path:
-    """Copia el archivo a Fuentes/ del ETL, lo ejecuta y retorna Salidas/Programas.xlsx."""
+def normalizar_etl(archivo_crudo: Path, forzar: bool = False) -> Path:
+    """
+    Copia el archivo a Fuentes/ del ETL, lo ejecuta y retorna Salidas/Programas.xlsx. Con `forzar`, el ETL
+    acepta también una caída de filas mayor a la de su propia protección (--force).
+    """
     fuente = ETL_DIR / "Fuentes" / "Programas.xlsx"
     salida = ETL_DIR / "Salidas" / "Programas.xlsx"
     fuente.parent.mkdir(parents=True, exist_ok=True)
@@ -375,7 +381,7 @@ def normalizar_etl(archivo_crudo: Path) -> Path:
     inicio = time.time()
     _ejecutar_herramienta(
         "NORMALIZACION (ETL-PROGRAMAS-SNIES)", ETL_DIR,
-        [sys.executable, str(ETL_SCRIPT)], ETL_DIR / "Logs", "etl_*.log",
+        [sys.executable, str(ETL_SCRIPT)] + (["--force"] if forzar else []), ETL_DIR / "Logs", "etl_*.log",
     )
     if not salida.exists() or salida.stat().st_mtime < inicio - 1:
         raise EtapaError("NORMALIZACION (ETL-PROGRAMAS-SNIES)", "El ETL no actualizó Salidas/Programas.xlsx.")
@@ -459,6 +465,30 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
     combinado = combinado[columnas].sort_values([COL_FECHA, COL_SNIES], kind="stable", ignore_index=True)
     _escribir_parquet(combinado, path)
     return len(combinado)
+
+
+def validar_continuidad(n_hoy: int, fecha: dt.date, forzar: bool = False) -> None:
+    """
+    Protección contra descargas incompletas: una descarga truncada del SNIES conserva el esquema y pasa las
+    demás validaciones, pero registraría como inactivos los programas faltantes. Si los programas caen más de
+    CAIDA_MAXIMA frente a la ejecución anterior del histórico, la ejecución se detiene antes de guardar datos
+    (EtapaError → alerta técnica). Con `forzar` se acepta la caída y queda registrada en el log.
+    """
+    previas = [f for f in historico.fechas() if f < fecha]
+    if not previas:
+        return
+    n_ant = len(historico.leer([COL_SNIES], fecha=previas[-1]))
+    variacion = (n_hoy - n_ant) / n_ant if n_ant else 0.0
+    log.info(f"  Continuidad: {n_hoy:,} programas frente a {n_ant:,} de la ejecución del "
+             f"{previas[-1].isoformat()} ({variacion:+.1%})")
+    if not n_ant or n_hoy >= n_ant * (1 - CAIDA_MAXIMA):
+        return
+    detalle = (f"La descarga tiene {n_hoy:,} programas frente a {n_ant:,} de la ejecución del "
+               f"{previas[-1].isoformat()} ({-variacion:.0%} menos; umbral {CAIDA_MAXIMA:.0%}).")
+    if not forzar:
+        raise EtapaError("VALIDACION", f"{detalle} Posible descarga incompleta del SNIES: no se guardó ningún dato. "
+                                       "Si la reducción es real, ejecute el workflow con la opción de forzar la validación.")
+    log.warning(f"  {detalle} Se continúa por --forzar.")
 
 
 # ── Detección de novedades ────────────────────────────────────────────────────
@@ -556,6 +586,9 @@ def _parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--fecha", type=dt.date.fromisoformat,
                    help="Fecha de obtención AAAA-MM-DD (por defecto, hoy en hora de Colombia).")
     p.add_argument("--sin-correo", action="store_true", help="No envía correos (pruebas).")
+    p.add_argument("--forzar", action="store_true",
+                   help="Acepta una caída de programas mayor al 10 %% frente a la ejecución anterior (cambio real "
+                        "confirmado en el portal del SNIES).")
     return p.parse_args(argv)
 
 
@@ -579,7 +612,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
 
     # 2. Normalización
     _seccion("2. NORMALIZACION (ETL-PROGRAMAS-SNIES)")
-    normalizado = normalizar_etl(crudo)
+    normalizado = normalizar_etl(crudo, args.forzar)
 
     # 3. Clasificación
     _seccion("3. CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)")
@@ -601,6 +634,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
         raise EtapaError("VALIDACION", f"{len(hoy):,} programas: probable descarga sin filtros.")
     if hoy[COL_SNIES].duplicated().any():
         raise EtapaError("VALIDACION", "Hay códigos SNIES repetidos en el archivo procesado.")
+    validar_continuidad(len(hoy), fecha, args.forzar)
     try:
         revision = len(pd.read_excel(REVISION_FILE, engine="calamine")) if REVISION_FILE.exists() else 0
     except Exception:

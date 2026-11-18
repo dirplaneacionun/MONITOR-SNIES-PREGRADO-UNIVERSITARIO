@@ -115,6 +115,17 @@ class TestDeteccion(unittest.TestCase):
         nuevos = run_snies.detectar_novedades(pd.DataFrame([programa(5)]), pd.DataFrame([programa(1)]), self.fecha)[0]
         self.assertEqual(nuevos["TIPO_NOVEDAD"].tolist(), ["REACTIVADO"])
 
+    def test_proteccion_contra_descarga_incompleta(self):
+        self._historico([programa(i, **{F: "2026-11-10"}) for i in range(100)])
+        run_snies.validar_continuidad(91, self.fecha)    # caída del 9 %: dentro del umbral
+        run_snies.validar_continuidad(150, self.fecha)   # aumento: siempre válido
+        with self.assertRaises(run_snies.EtapaError) as error:
+            run_snies.validar_continuidad(89, self.fecha)  # caída del 11 %: posible descarga truncada
+        self.assertEqual(error.exception.etapa, "VALIDACION")
+        self.assertIn("no se guardó ningún dato", str(error.exception))
+        run_snies.validar_continuidad(89, self.fecha, forzar=True)   # caída real confirmada
+        run_snies.validar_continuidad(10, dt.date(2026, 11, 10))      # sin ejecución anterior: línea base
+
     def test_reejecucion_del_mismo_dia_no_marca_reactivados(self):
         # El histórico ya contiene la fecha de hoy (re-ejecución): no debe contar como existencia previa
         self._historico([programa(6, **{F: str(self.fecha)})])

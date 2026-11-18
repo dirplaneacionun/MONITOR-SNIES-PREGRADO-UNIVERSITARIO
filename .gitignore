@@ -5,3 +5,11 @@ tmp/
 *.tmp
 *.tmp.parquet
 .claude/
+
+# Archivos intermedios de las herramientas: se regeneran en cada ejecución y sus datos quedan en el histórico
+# (Historico/Historico Programas Activos.parquet). No se versionan para que el repositorio no acumule una copia
+# completa de cada Excel por ejecución. Se conservan ProgramasUN.xlsx, retroalimentacion.json y las listas de revisión.
+Scripts/ETL-PROGRAMAS-SNIES/Fuentes/Programas.xlsx
+Scripts/ETL-PROGRAMAS-SNIES/Salidas/Programas.xlsx
+Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Fuentes/Programas.xlsx
+Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Salidas/Programas.xlsx

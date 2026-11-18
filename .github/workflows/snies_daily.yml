@@ -7,6 +7,10 @@ on:
         description: "Enviar el correo a los destinatarios (desactivar solo para pruebas)"
         type: boolean
         default: true
+      forzar_validacion:
+        description: "Aceptar una caída de más del 10 % de los programas (solo si se confirmó en el portal del SNIES)"
+        type: boolean
+        default: false
 
 # Permisos mínimos: el token solo puede escribir contenido del repositorio (commit de resultados).
 permissions:
@@ -98,14 +102,15 @@ jobs:
           DESTINATARIOS: ${{ secrets.DESTINATARIOS }}
           # Se pasa como variable de entorno (no se inserta en el script) para evitar inyección de comandos.
           ENVIAR_CORREO: ${{ inputs.enviar_correo }}
+          FORZAR_VALIDACION: ${{ inputs.forzar_validacion }}
         run: |
           set -euo pipefail
-          # Disparado por cron-job.org (sin parámetros) ENVIAR_CORREO viene vacío y el correo se envía.
-          if [ "${ENVIAR_CORREO:-true}" = "false" ]; then
-            python Scripts/run_snies.py --sin-correo
-          else
-            python Scripts/run_snies.py
-          fi
+          # Disparado por cron-job.org (sin parámetros) las variables vienen vacías: se envía el correo y se
+          # aplica la protección contra descargas incompletas.
+          ARGS=()
+          if [ "${ENVIAR_CORREO:-true}" = "false" ]; then ARGS+=(--sin-correo); fi
+          if [ "${FORZAR_VALIDACION:-false}" = "true" ]; then ARGS+=(--forzar); fi
+          python Scripts/run_snies.py "${ARGS[@]}"
 
       # El pipeline actualiza los datos del Dashboard (docs/data) antes de enviar el correo.
       # Se publica si el flujo termina (con éxito o con error, para conservar el log), pero no si se cancela.
