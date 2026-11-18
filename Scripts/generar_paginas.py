@@ -31,7 +31,7 @@ HEAD = '''<!doctype html>
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="icon" href="data:,">
   <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" integrity="sha384-RkASv+6KfBMW9eknReJIJ6b3UnjKOKC5bOUaNgIY778NFbQ8MtWq9Lr/khUgqtTt" crossorigin="anonymous">
+  <link rel="stylesheet" href="{css_fp}">
   <link rel="stylesheet" href="{css}">
   <script type="importmap">
     {{ "imports": {{
@@ -63,9 +63,6 @@ FOOT = '''
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js" integrity="sha384-5JqMv4L/Xa0hfvtF06qboNdhvuYXUku9ZrhZh3bSk8VXF0A/RuSLHpLsSV9Zqhl6" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/l10n/es.min.js" integrity="sha384-Kw6LvVIC7DwgsJQKl9iQVoSEKfjX0hE8/JbVEVnkQNHLI0x2njGmBcqt2VxcPEKC" crossorigin="anonymous"></script>
 {scripts}
 </body>
 </html>
@@ -98,7 +95,11 @@ def par(a, b, cls="dos"):
 
 
 def scripts(datos, js):
-    lineas = [f'  <script src="{v(f"data/{d}.js")}"></script>' for d in datos]
+    # Librerías incluidas en el proyecto (docs/assets/vendor, licencia MIT): el Dashboard no depende de servicios
+    # externos para funcionar ni comparte la dirección IP de los visitantes con terceros.
+    lineas = [f'  <script src="{v(f"assets/vendor/{lib}")}"></script>'
+              for lib in ("plotly/plotly.min.js", "flatpickr/flatpickr.min.js", "flatpickr/l10n/es.min.js")]
+    lineas += [f'  <script src="{v(f"data/{d}.js")}"></script>' for d in datos]
     lineas += [f'  <script src="{v("assets/app.js")}"></script>', f'  <script src="{v(f"assets/{js}.js")}"></script>']
     return "\n".join(lineas)
 
@@ -139,7 +140,7 @@ def main() -> None:
               "Cantidad de programas activos según su duración en periodos académicos (semestres o equivalentes) en la ejecución del <span data-fecha-corte></span>.", "baja"),
         TABLA_INICIO,
     ]
-    html = HEAD.format(css=v("assets/estilos.css"), title="Monitor SNIES Pregrado", desc="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)",
+    html = HEAD.format(css=v("assets/estilos.css"), css_fp=v("assets/vendor/flatpickr/flatpickr.min.css"), title="Monitor SNIES Pregrado", desc="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)",
                        body="", h1="MONITOR SNIES PREGRADO · UNIVERSITARIO", sub=f'\n          <p class="enc-sub">{SUB}</p>',
                        total='<div class="enc-total"><div class="et">ÚLTIMA EJECUCIÓN</div><div class="ev" id="ultima">–</div></div>', nav=nav("index.html"))
     html += "\n".join(cuerpo) + FOOT.format(scripts=scripts(["comun", "activos", "nuevos", "modificados", "inactivos"], "inicio"))
@@ -197,7 +198,7 @@ def main() -> None:
                  f'      <p class="tarjeta-sub">{nota}</p>\n'
                  '      <div id="tabla"></div>\n'
                  '    </section>')
-        html = HEAD.format(css=v("assets/estilos.css"), title=p["ht"], desc=f'{p["t"].capitalize()} · Monitor SNIES de programas universitarios de pregrado',
+        html = HEAD.format(css=v("assets/estilos.css"), css_fp=v("assets/vendor/flatpickr/flatpickr.min.css"), title=p["ht"], desc=f'{p["t"].capitalize()} · Monitor SNIES de programas universitarios de pregrado',
                            body=f' data-tipo="{tipo}"', h1=p["t"], sub=f'\n          <p class="enc-sub">{p["sub"]}</p>' if p["sub"] else "",
                            total='<div class="enc-total" aria-live="polite"><div class="et">TOTAL</div><div class="ev" id="total">–</div><div class="es" id="total-s"></div></div>',
                            nav=nav(f"{tipo}.html"))

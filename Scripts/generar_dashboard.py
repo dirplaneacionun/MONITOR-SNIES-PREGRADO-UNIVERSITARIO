@@ -2,7 +2,7 @@
 generar_dashboard.py
 --------------------
 Genera los datos del Dashboard a partir de:
-    Historico/Historico Programas Activos AAAA-MM-DD.parquet (un archivo por ejecución)
+    Historico/Historico Programas Activos.parquet (todas las ejecuciones)
     Novedades/Nuevos.parquet, Modificados.parquet, Inactivos.parquet
 
 Salidas:
@@ -172,8 +172,8 @@ def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]
 
 def main() -> int:
     print("Generando datos del Dashboard...")
-    if not historico.archivos():
-        print(f"  ERROR: no hay archivos del histórico en {historico.HISTORICO_DIR}")
+    if not historico.existe():
+        print(f"  ERROR: no existe el histórico {historico.ruta()}")
         return 1
 
     hist = historico.leer()

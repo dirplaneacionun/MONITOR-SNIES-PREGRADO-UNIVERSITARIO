@@ -79,7 +79,7 @@ class TestDeteccion(unittest.TestCase):
         df = pd.DataFrame(filas)
         df[F] = pd.to_datetime(df[F])
         for fecha, parte in df.groupby(F):
-            parte.to_parquet(historico.ruta(fecha.date()), index=False)
+            historico.guardar_ejecucion(parte.drop(columns=[F]), fecha.date())
 
     def test_nuevos_inactivos_y_modificados(self):
         anterior = pd.DataFrame([programa(1), programa(2), programa(3, NUMERO_CREDITOS=160.0, MODALIDAD="VIRTUAL")])
@@ -137,7 +137,7 @@ class TestAcumulacion(unittest.TestCase):
             self.assertEqual(sorted(final[S]), [1, 2, 3])
 
 class TestHistorico(unittest.TestCase):
-    """Histórico particionado: un archivo por ejecución, leído en conjunto como un solo histórico."""
+    """Histórico en un solo archivo: un grupo de filas por ejecución, tipos estables y escritura incremental."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -149,22 +149,39 @@ class TestHistorico(unittest.TestCase):
         self.tmp.cleanup()
 
     def _guardar(self, fecha, filas):
-        df = pd.DataFrame(filas).assign(**{F: pd.Timestamp(fecha)})
-        run_snies._escribir_parquet(df, historico.ruta(fecha))
+        return historico.guardar_ejecucion(pd.DataFrame(filas), fecha)
 
-    def test_lectura_consolidada_y_filtro_por_fecha(self):
-        self._guardar(dt.date(2026, 11, 3), [programa(1), programa(2)])
+    def _grupos(self):
+        import pyarrow.parquet as pq
+        with open(historico.ruta(), "rb") as fh:
+            return pq.ParquetFile(fh).num_row_groups
+
+    def test_lectura_por_fecha_y_ejecucion_anterior(self):
         self._guardar(dt.date(2026, 11, 10), [programa(1), programa(3)])
-        (Path(self.tmp.name) / "otro.parquet").write_bytes(b"")  # archivos ajenos al patrón se ignoran
-        self.assertEqual(historico.fechas(), {dt.date(2026, 11, 3), dt.date(2026, 11, 10)})
+        self._guardar(dt.date(2026, 11, 3), [programa(1), programa(2)])   # fecha anterior: se ubica en orden
+        self.assertEqual(historico.fechas(), [dt.date(2026, 11, 3), dt.date(2026, 11, 10)])
+        self.assertEqual(self._grupos(), 2)
         todo = historico.leer()
         self.assertEqual(todo[S].tolist(), [1, 2, 1, 3])
         self.assertTrue(str(todo[F].dtype).startswith("datetime64"))
-        previo = historico.leer([S, F], antes_de=dt.date(2026, 11, 10))
-        self.assertEqual(previo[S].tolist(), [1, 2])
+        self.assertEqual(historico.leer([S, F], antes_de=dt.date(2026, 11, 10))[S].tolist(), [1, 2])
         self.assertTrue(historico.leer([S], antes_de=dt.date(2026, 11, 3)).empty)
+        fecha, anterior = historico.ejecucion_anterior(dt.date(2026, 11, 17))
+        self.assertEqual(fecha, dt.date(2026, 11, 10))
+        self.assertEqual(anterior[S].tolist(), [1, 3])
+        self.assertNotIn(F, anterior.columns)
+        self.assertIsNone(historico.ejecucion_anterior(dt.date(2026, 11, 3)))
 
-    def test_columna_ausente_en_archivos_antiguos(self):
+    def test_reejecucion_reemplaza_la_fecha_sin_duplicar(self):
+        self._guardar(dt.date(2026, 11, 3), [programa(1)])
+        self._guardar(dt.date(2026, 11, 10), [programa(2)])
+        antes = historico.ruta().read_bytes()
+        self.assertEqual(self._guardar(dt.date(2026, 11, 10), [programa(2)]), 2)
+        self.assertEqual(historico.ruta().read_bytes(), antes)   # mismos datos: archivo idéntico
+        self._guardar(dt.date(2026, 11, 10), [programa(2), programa(4)])
+        self.assertEqual(historico.leer()[S].tolist(), [1, 2, 4])
+
+    def test_columna_nueva_se_agrega_sin_perder_datos(self):
         self._guardar(dt.date(2026, 11, 3), [programa(1)])
         self._guardar(dt.date(2026, 11, 10), [programa(2, COLUMNA_NUEVA="X")])
         df = historico.leer([S, "COLUMNA_NUEVA"])
@@ -173,34 +190,39 @@ class TestHistorico(unittest.TestCase):
         self.assertEqual(df["COLUMNA_NUEVA"].iloc[1], "X")
 
     def test_fecha_vacia_en_una_ejecucion_conserva_el_tipo(self):
-        self._guardar(dt.date(2026, 11, 3), [programa(1, FECHA_EJECUTORIA=None)])
-        self._guardar(dt.date(2026, 11, 10), [programa(2, FECHA_EJECUTORIA=dt.datetime(2020, 5, 1))])
+        self._guardar(dt.date(2026, 11, 3), [programa(1, FECHA_EJECUTORIA=dt.datetime(2019, 1, 1))])
+        self._guardar(dt.date(2026, 11, 10), [programa(2, FECHA_EJECUTORIA=None)])
         df = historico.leer()
         self.assertTrue(str(df["FECHA_EJECUTORIA"].dtype).startswith("datetime64"))
-        self.assertEqual(df["FECHA_EJECUTORIA"].iloc[1], pd.Timestamp("2020-05-01"))
+        self.assertTrue(pd.isna(df["FECHA_EJECUTORIA"].iloc[1]))
 
-
-    def test_archivo_nuevo_adopta_el_esquema_del_historico(self):
-        # Regresión: una descarga con NUMERO_CREDITOS numérico y JUSTIFICACION vacía generaba un esquema distinto
-        self._guardar(dt.date(2026, 11, 3), [programa(1, NUMERO_CREDITOS="180", JUSTIFICACION="X")])
-        nuevo = pd.DataFrame([programa(2, NUMERO_CREDITOS=180.0, JUSTIFICACION=None),
-                              programa(3, NUMERO_CREDITOS=None, JUSTIFICACION=None)]).assign(**{F: pd.Timestamp("2026-11-10")})
-        fecha = dt.date(2026, 11, 10)
-        run_snies._escribir_parquet(historico.alinear(nuevo, historico.esquema_referencia(fecha)), historico.ruta(fecha))
-        import pyarrow.parquet as pq
-        a, b = pq.read_schema(historico.ruta(dt.date(2026, 11, 3))), pq.read_schema(historico.ruta(fecha))
-        self.assertEqual(a.field("NUMERO_CREDITOS").type, b.field("NUMERO_CREDITOS").type)
-        self.assertEqual(a.field("JUSTIFICACION").type, b.field("JUSTIFICACION").type)
+    def test_numeros_como_texto_con_representacion_unica(self):
+        # Regresión: el histórico mezclaba "10.0" y "10" según la ejecución, y las comparaciones fallaban
+        self._guardar(dt.date(2026, 11, 3), [programa(1, NUMERO_CREDITOS="180", NUMERO_PERIODOS_DE_DURACION="10")])
+        self._guardar(dt.date(2026, 11, 10), [programa(2, NUMERO_CREDITOS=180.0, NUMERO_PERIODOS_DE_DURACION="10.0"),
+                                              programa(3, NUMERO_CREDITOS=None, NUMERO_PERIODOS_DE_DURACION=12)])
         df = historico.leer()
         self.assertEqual(df["NUMERO_CREDITOS"].tolist()[:2], ["180", "180"])
         self.assertTrue(pd.isna(df["NUMERO_CREDITOS"].iloc[2]))
-
-    def test_lectura_unifica_tipos_mezclados(self):
-        self._guardar(dt.date(2026, 11, 3), [programa(1, NUMERO_CREDITOS="180")])
-        self._guardar(dt.date(2026, 11, 10), [programa(2, NUMERO_CREDITOS=175)])
-        df = historico.leer()
-        self.assertEqual(df["NUMERO_CREDITOS"].tolist(), ["180", "175"])
+        self.assertEqual(df["NUMERO_PERIODOS_DE_DURACION"].tolist(), ["10", "10", "12"])
         self.assertTrue(pd.api.types.is_string_dtype(df["NUMERO_CREDITOS"]))
+
+    def test_alinear_no_pierde_datos_no_convertibles(self):
+        import pyarrow as pa
+        esquema = pa.schema([("N", pa.float64()), ("D", pa.timestamp("us"))])
+        df = pd.DataFrame({"N": ["10", "X"], "D": ["2026-01-01", "no es fecha"]})
+        out = historico.alinear(df, esquema)
+        self.assertEqual(out["N"].tolist(), ["10", "X"])
+        self.assertEqual(out["D"].tolist(), ["2026-01-01", "no es fecha"])
+        self.assertEqual(historico.alinear(pd.DataFrame({"N": ["10", None]}), esquema)["N"].tolist()[0], 10.0)
+
+    def test_reescritura_completa_conserva_un_grupo_por_ejecucion(self):
+        self._guardar(dt.date(2026, 11, 3), [programa(1)])
+        self._guardar(dt.date(2026, 11, 10), [programa(2)])
+        df = historico.leer()
+        historico.reescribir(df.assign(DIVISION_UNINORTE="CIENCIAS BASICAS"))
+        self.assertEqual(self._grupos(), 2)
+        self.assertEqual(historico.leer()["DIVISION_UNINORTE"].unique().tolist(), ["CIENCIAS BASICAS"])
 
 
 class TestTipos(unittest.TestCase):

@@ -443,6 +443,13 @@ def probar_carga_diferida(d, base):
     despues = d.execute_script(js_hist)
     n = d.execute_script("return document.querySelector('#tabla [data-n]').textContent")
     verificar("inicio · carga diferida: descarga al llegar a la tabla", despues == len(C["historico_fechas"]), f"{despues} archivos · {n}")
+    # Librerías, tipografía y datos se sirven desde el propio sitio: ninguna solicitud a terceros
+    for pagina in ("index.html", "modificados.html"):
+        if pagina != "index.html":
+            d.get(f"{base}/{pagina}"); time.sleep(2)
+        externos = d.execute_script("return performance.getEntriesByType('resource').map(e => e.name).filter(u => !u.startsWith(location.origin))")
+        listo = d.execute_script("return typeof Plotly !== 'undefined' && typeof flatpickr !== 'undefined' && !!document.querySelector('.grafica .main-svg')")
+        verificar(f"{pagina} · sin solicitudes a terceros (Plotly y flatpickr locales)", not externos and listo, f"{externos[:3]} · librerías {listo}")
 
 
 def consistencia_datos():

@@ -6,13 +6,11 @@ CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNI
 
 Actualiza DIVISION_UNINORTE y PUNTAJE_TOTAL en los archivos que
 alimentan el Dashboard:
-    Historico/Historico Programas Activos AAAA-MM-DD.parquet (todas las ejecuciones)
+    Historico/Historico Programas Activos.parquet (todas las ejecuciones)
     Novedades/Nuevos.parquet, Novedades/Modificados.parquet, Novedades/Inactivos.parquet
 
 Solo se reescriben los archivos en los que cambia alguna clasificación, para que el repositorio
 no almacene de nuevo archivos sin cambios.
-
-Los Excel de "Programas Activos" NO se reclasifican.
 
 Método: se arma un catálogo con las combinaciones únicas de (código SNIES, nombre, NBC,
 CINE detallado) de los cuatro archivos y se clasifica una sola vez con el clasificador,
@@ -31,7 +29,6 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
-import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import historico  # noqa: E402
@@ -115,8 +112,7 @@ def aplicar_clasificacion(df: pd.DataFrame, mapa: pd.DataFrame) -> pd.DataFrame:
 
 
 def reclasificar() -> None:
-    archivos = [p for _, p in historico.archivos()]
-    archivos += [p for p in (NUEVOS_FILE, MODIFICADOS_FILE, INACTIVOS_FILE) if p.exists()]
+    archivos = [p for p in (historico.ruta(), NUEVOS_FILE, MODIFICADOS_FILE, INACTIVOS_FILE) if p.exists()]
     if not archivos:
         raise EtapaError("LECTURA", "No hay archivos para reclasificar.")
 
@@ -124,10 +120,7 @@ def reclasificar() -> None:
     datos = {}
     for p in archivos:
         datos[p] = pd.read_parquet(p)
-        if p.parent != historico.HISTORICO_DIR:
-            log.info(f"  {_ruta(p)}: {len(datos[p]):,} registros")
-    n_hist = [len(d) for p, d in datos.items() if p.parent == historico.HISTORICO_DIR]
-    log.info(f"  {_ruta(historico.HISTORICO_DIR)}: {len(n_hist)} ejecuciones · {sum(n_hist):,} registros")
+        log.info(f"  {_ruta(p)}: {len(datos[p]):,} registros")
 
     _seccion("2. CLASIFICACION DEL CATALOGO")
     combinado = pd.concat(
@@ -151,9 +144,10 @@ def reclasificar() -> None:
         if not difiere:
             sin_cambios += 1
             continue
-        if p.parent == historico.HISTORICO_DIR:   # conserva el esquema del archivo (texto, no objeto)
-            nuevo = historico.alinear(nuevo, pq.read_schema(p))
-        _escribir_parquet(nuevo, p)
+        if p == historico.ruta():   # conserva el esquema y un grupo de filas por ejecución
+            historico.reescribir(nuevo)
+        else:
+            _escribir_parquet(nuevo, p)
         log.info(f"  {_ruta(p)}: {cambian:,} registro(s) cambian de división")
     log.info(f"  Archivos sin cambios (no se reescriben): {sin_cambios} de {len(datos)}")
 

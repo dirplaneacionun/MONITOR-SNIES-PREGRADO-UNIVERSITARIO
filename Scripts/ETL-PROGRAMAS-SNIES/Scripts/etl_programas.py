@@ -18,7 +18,7 @@ Si no se encuentra Programas.xlsx en Fuentes/ el proceso termina con error y la
 salida existente no se modifica.
 Si las filas a exportar caen más de un 10% respecto de la salida existente (posible
 fuente truncada), ese archivo se aborta y su salida se conserva; --force lo permite.
-Cada ejecución deja un log en Logs/ (se conservan los últimos 20).
+Cada ejecución deja un log en Logs/ (se conservan los últimos 10).
 """
 
 import argparse
@@ -135,7 +135,7 @@ REVIEW_DIR  = BASE_DIR / "Revision"   # filas excluidas por código SNIES invál
 REVIEW_PREFIX = "Revision "
 LOGS_DIR    = BASE_DIR / "Logs"
 
-_MAX_LOG_FILES = 20
+_MAX_LOG_FILES = 10
 _LOG_NAME_RE   = re.compile(r"etl_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d+)?\.log")
 
 _SOURCE_FILES = [

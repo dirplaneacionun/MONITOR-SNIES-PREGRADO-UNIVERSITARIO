@@ -9,13 +9,15 @@ Flujo:
     2. Normaliza el archivo con ETL-PROGRAMAS-SNIES (Scripts/ETL-PROGRAMAS-SNIES).
     3. Clasifica las divisiones con CLASIFICAR-DIVISIONES-UNINORTE-SNIES (Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES),
        procesando únicamente Programas.xlsx.
-    4. Guarda el resultado en "Programas Activos/Programas Activos AAAA-MM-DD.xlsx".
-    5. Compara con la ejecución anterior y detecta programas nuevos (o reactivados),
-       modificados e inactivos.
-    6. Acumula las novedades en Novedades/*.parquet y guarda el archivo completo en
-       Historico/Historico Programas Activos AAAA-MM-DD.parquet (un archivo por ejecución).
-    7. Aplica la retención (20 archivos en Programas Activos, 20 logs).
-    8. Actualiza los datos del Dashboard (docs/data) y envía el correo institucional.
+    4. Valida el archivo procesado.
+    5. Compara con la ejecución anterior, leída del histórico, y detecta programas nuevos
+       (o reactivados), modificados e inactivos.
+    6. Acumula las novedades en Novedades/*.parquet y agrega la ejecución al histórico
+       (Historico/Historico Programas Activos.parquet, un solo archivo).
+    7. Actualiza los datos del Dashboard (docs/data) y envía el correo institucional.
+
+Retención: se conservan los últimos 10 logs de cada herramienta (este orquestador, ETL-PROGRAMAS-SNIES y
+CLASIFICAR-DIVISIONES-UNINORTE-SNIES).
 
 Si una etapa falla no se envía correo a DESTINATARIOS: se envía una alerta técnica
 solo a la cuenta remitente (SMTP_USER) y el proceso termina con código 1. Si lo que falla
@@ -44,6 +46,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 import historico
 from catalogos import GRUPOS_UNIVERSIDAD, grupo_universidad
@@ -55,7 +58,6 @@ ETL_DIR        = SCRIPTS_DIR / "ETL-PROGRAMAS-SNIES"
 MAP_DIR        = SCRIPTS_DIR / "CLASIFICAR-DIVISIONES-UNINORTE-SNIES"
 ETL_SCRIPT     = ETL_DIR / "Scripts" / "etl_programas.py"
 MAP_SCRIPT     = MAP_DIR / "Scripts" / "pipeline_divisiones.py"
-PROGRAMAS_DIR  = ROOT / "Programas Activos"
 NOVEDADES_DIR  = ROOT / "Novedades"
 LOGS_DIR       = ROOT / "Logs"
 TMP_DIR        = ROOT / "tmp"
@@ -65,8 +67,7 @@ MODIFICADOS_FILE = NOVEDADES_DIR / "Modificados.parquet"
 INACTIVOS_FILE   = NOVEDADES_DIR / "Inactivos.parquet"
 
 # ── Retención ─────────────────────────────────────────────────────────────────
-MAX_PROGRAMAS_ACTIVOS = 20   # archivos Excel semanales en Programas Activos/
-MAX_LOGS              = 20   # logs consolidados en Logs/
+MAX_LOGS = 10   # logs consolidados en Logs/ (por prefijo: monitor y reclasificacion)
 
 # ── Parámetros ────────────────────────────────────────────────────────────────
 ZONA_HORARIA     = ZoneInfo("America/Bogota")
@@ -91,8 +92,6 @@ COLS_VIGILAR = {
     "NUMERO_PERIODOS_DE_DURACION": "NUMERO DE PERIODOS",
     "MODALIDAD":                   "MODALIDAD",
 }
-
-_ARCHIVO_RE = re.compile(r"^Programas Activos (\d{4}-\d{2}-\d{2})\.xlsx$")
 
 XPATHS = {
     "descarga": '//button[.//span[normalize-space()="Descargar programas"]]',
@@ -444,6 +443,9 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
     marca = pd.Timestamp(fecha)
     partes = []
     if path.exists():
+        # Los registros nuevos adoptan los tipos del archivo acumulado: los inactivos provienen del histórico,
+        # donde los números pueden estar guardados como texto
+        nuevos = historico.alinear(nuevos, pq.read_schema(path))
         existente = pd.read_parquet(path)
         existente = existente[pd.to_datetime(existente[COL_FECHA]) != marca]
         partes.append(existente)
@@ -457,18 +459,6 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
     combinado = combinado[columnas].sort_values([COL_FECHA, COL_SNIES], kind="stable", ignore_index=True)
     _escribir_parquet(combinado, path)
     return len(combinado)
-
-
-def archivo_anterior(fecha: dt.date) -> tuple[dt.date, Path] | None:
-    """Archivo de Programas Activos más reciente con fecha estrictamente anterior a `fecha`."""
-    candidatos = []
-    for f in PROGRAMAS_DIR.glob("Programas Activos *.xlsx"):
-        m = _ARCHIVO_RE.match(f.name)
-        if m:
-            f_fecha = dt.date.fromisoformat(m.group(1))
-            if f_fecha < fecha:
-                candidatos.append((f_fecha, f))
-    return max(candidatos) if candidatos else None
 
 
 # ── Detección de novedades ────────────────────────────────────────────────────
@@ -571,7 +561,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
-    for carpeta in (PROGRAMAS_DIR, NOVEDADES_DIR, historico.HISTORICO_DIR):
+    for carpeta in (NOVEDADES_DIR, historico.HISTORICO_DIR):
         carpeta.mkdir(parents=True, exist_ok=True)
 
     # 1. Descarga
@@ -620,16 +610,15 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
 
     # 5. Detección
     _seccion("5. DETECCION DE NOVEDADES")
-    previo = archivo_anterior(fecha)
+    previo = historico.ejecucion_anterior(fecha)
     anterior = None
     orden_base = list(hoy.columns) + [COL_FECHA]
     if previo is None:
-        log.warning("  No hay una ejecución anterior en Programas Activos: esta queda como línea base.")
+        log.warning("  No hay una ejecución anterior en el histórico: esta queda como línea base.")
         nuevos = modificados = inactivos = pd.DataFrame()
     else:
-        fecha_ant, path_ant = previo
-        anterior = leer_programas(path_ant)
-        log.info(f"  Ejecución anterior: {path_ant.name} ({len(anterior):,} programas)")
+        fecha_ant, anterior = previo
+        log.info(f"  Ejecución anterior: {fecha_ant.isoformat()} ({len(anterior):,} programas, desde el histórico)")
         nuevos, modificados, inactivos = detectar_novedades(hoy, anterior, fecha)
         reactivados = int((nuevos.get("TIPO_NOVEDAD", pd.Series(dtype=str)) == "REACTIVADO").sum())
         log.info(f"  Nuevos: {len(nuevos)} (reactivados: {reactivados}) · "
@@ -642,17 +631,10 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
 
     # 6. Guardado
     _seccion("6. GUARDADO")
-    destino = PROGRAMAS_DIR / f"Programas Activos {fecha.isoformat()}.xlsx"
-    shutil.copy2(clasificado, destino)
-    log.info(f"  {destino.relative_to(ROOT)} ({len(hoy):,} programas)")
-
-    hoy_hist = hoy.copy()
-    hoy_hist[COL_FECHA] = pd.Timestamp(fecha)
-    path_hist = historico.ruta(fecha)
-    hoy_hist = historico.alinear(hoy_hist[orden_base], historico.esquema_referencia(fecha))  # mismos tipos que el histórico
-    _escribir_parquet(hoy_hist.sort_values(COL_SNIES, kind="stable", ignore_index=True), path_hist)
-    log.info(f"  {path_hist.relative_to(ROOT)}: {len(hoy_hist):,} registros "
-             f"(histórico: {len(historico.archivos())} ejecuciones)")
+    ejecuciones = historico.guardar_ejecucion(
+        hoy.sort_values(COL_SNIES, kind="stable", ignore_index=True)[list(hoy.columns)], fecha)
+    log.info(f"  {historico.ruta().relative_to(ROOT)}: +{len(hoy):,} registros "
+             f"(histórico: {ejecuciones} ejecuciones)")
 
     if previo is not None:
         for path, df, extra in (
@@ -662,21 +644,6 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
         ):
             total = acumular_parquet(path, df, fecha, orden_base + extra)
             log.info(f"  {path.relative_to(ROOT)}: +{len(df)} · {total:,} registros acumulados")
-
-    # 7. Retención
-    _seccion("7. RETENCION")
-    fechas_hist = historico.fechas()
-    archivos = sorted(f for f in PROGRAMAS_DIR.iterdir() if _ARCHIVO_RE.match(f.name))
-    exceso = archivos[:-MAX_PROGRAMAS_ACTIVOS] if len(archivos) > MAX_PROGRAMAS_ACTIVOS else []
-    for f in exceso:
-        f_fecha = dt.date.fromisoformat(_ARCHIVO_RE.match(f.name).group(1))
-        if f_fecha in fechas_hist:
-            f.unlink()
-            log.info(f"  Eliminado {f.name} (sus registros están en el histórico)")
-        else:
-            log.warning(f"  Se conserva {f.name}: su fecha no está en el histórico")
-    restantes = sum(1 for f in PROGRAMAS_DIR.iterdir() if _ARCHIVO_RE.match(f.name))
-    log.info(f"  Programas Activos: {restantes} archivo(s) (máximo {MAX_PROGRAMAS_ACTIVOS})")
 
     return {"nuevos": nuevos, "modificados": modificados, "inactivos": inactivos,
             "total_activos": len(hoy), "linea_base": previo is None,
@@ -716,7 +683,7 @@ def main(argv=None) -> int:
         return 1
 
     # El Dashboard se actualiza antes del correo, para que su enlace muestre esta ejecución
-    _seccion("8. DASHBOARD")
+    _seccion("7. DASHBOARD")
     try:
         import contextlib
         import io
@@ -739,7 +706,7 @@ def main(argv=None) -> int:
         log.info("EJECUCION TERMINADA CON ERRORES")
         return 1
 
-    _seccion("9. CORREO")
+    _seccion("8. CORREO")
     if args.sin_correo:
         log.info("  Envío omitido (--sin-correo).")
     elif resultados["linea_base"]:

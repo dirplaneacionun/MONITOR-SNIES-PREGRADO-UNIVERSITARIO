@@ -13,7 +13,7 @@ REVISION_DIR = os.path.join(BASE_DIR, "Revision")
 RETROALIMENTACION_DIR = os.path.join(BASE_DIR, "Retroalimentacion")
 
 # ── Logs de ejecución ──────────────────────────────────────────────────────────
-MAX_LOGS = 20  # Se conservan los últimos N logs en LOGS_DIR
+MAX_LOGS = 10  # Se conservan los últimos N logs en LOGS_DIR
 
 # ── Archivos de referencia ─────────────────────────────────────────────────────
 # El catálogo de divisiones vive en diccionarios.DIVISIONES
