@@ -77,6 +77,24 @@ jobs:
           set -euo pipefail
           python -m unittest discover -s tests
 
+      # Versiones de Chrome y de los chromedriver disponibles: se publican también como anotación para poder diagnosticar
+      # un desacuerdo de versiones sin abrir el registro completo.
+      - name: Diagnóstico de Chrome y chromedriver
+        env:
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
+        run: |
+          set +e
+          {
+            echo "chrome: $(google-chrome --version 2>&1)"
+            echo "CHROMEDRIVER_PATH='${CHROMEDRIVER_PATH}'"
+            [ -n "$CHROMEDRIVER_PATH" ] && echo "chromedriver (acción): $("$CHROMEDRIVER_PATH" --version 2>&1)"
+            echo "chromedriver (PATH): $(command -v chromedriver) $(chromedriver --version 2>&1 | head -1)"
+            echo "CHROMEWEBDRIVER='${CHROMEWEBDRIVER:-}'"
+          } > "$RUNNER_TEMP/chrome.txt"
+          cat "$RUNNER_TEMP/chrome.txt"
+          resumen=$(cut -c1-300 "$RUNNER_TEMP/chrome.txt" | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=Chrome y chromedriver::${resumen:0:3000}"
+
       # Recorre las cuatro páginas con todos sus filtros, tablas y gráficas y compara cada valor con un cálculo
       # independiente sobre Historico/ y Novedades/ (unos 3.000 controles; tarda varios minutos).
       - name: Pruebas de punta a punta del Dashboard
@@ -91,7 +109,7 @@ jobs:
           cat "$RUNNER_TEMP/e2e.log"
           if [ "$estado" -ne 0 ]; then
             # El final del registro se muestra también como anotación de la ejecución, sin abrir el registro completo
-            resumen=$(tail -n 25 "$RUNNER_TEMP/e2e.log" | cut -c1-300 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            resumen=$(grep -v '^#[0-9]' "$RUNNER_TEMP/e2e.log" | tail -n 25 | cut -c1-300 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=Prueba de punta a punta del Dashboard::${resumen:0:3500}"
           fi
           exit "$estado"
