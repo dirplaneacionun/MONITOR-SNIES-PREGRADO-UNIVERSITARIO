@@ -33,7 +33,7 @@ jobs:
     steps:
       # Acciones fijadas a un commit exacto (no a una etiqueta movible) para evitar cambios no revisados.
       - name: Checkout del repositorio
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # Solo la última versión: el pipeline no usa el historial y descargarlo completo
           # haría cada ejecución más lenta a medida que el repositorio crece.
