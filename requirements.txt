@@ -18,7 +18,7 @@ xlsxwriter==3.2.9
 
 # Consola y progreso (herramientas ETL y de clasificación)
 rich==15.0.0
-tqdm==4.70.0
+tqdm==4.70.1
 
 # Descarga automatizada del portal SNIES
 selenium==4.52.0
