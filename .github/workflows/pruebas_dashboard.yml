@@ -1,0 +1,82 @@
+name: Pruebas del Dashboard
+
+# Pruebas unitarias y de punta a punta del Dashboard (Chrome sin interfaz, con clics reales sobre cada control). Se
+# ejecutan a mano (Actions → "Pruebas del Dashboard" → Run workflow) y cuando una solicitud de cambios o una publicación
+# modifica el Dashboard, sus generadores o las pruebas. No se ejecutan con las actualizaciones semanales de datos: esas
+# las publica el workflow "SNIES Monitor" con el token del repositorio, que no dispara otros workflows.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "docs/assets/**"
+      - "docs/*.html"
+      - "Scripts/generar_dashboard.py"
+      - "Scripts/generar_paginas.py"
+      - "Scripts/catalogos.py"
+      - "tests/**"
+      - ".github/workflows/pruebas_dashboard.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/assets/**"
+      - "docs/*.html"
+      - "Scripts/generar_dashboard.py"
+      - "Scripts/generar_paginas.py"
+      - "Scripts/catalogos.py"
+      - "tests/**"
+      - ".github/workflows/pruebas_dashboard.yml"
+
+# Solo lectura: las pruebas no modifican el repositorio.
+permissions:
+  contents: read
+
+# Una ejecución por rama: una publicación nueva cancela la prueba que quedó atrás.
+concurrency:
+  group: pruebas-dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Acciones fijadas a un commit exacto (las mismas del workflow semanal).
+      - name: Checkout del repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Configurar Google Chrome
+        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce  # v1
+        with:
+          install-chromedriver: true
+
+      - name: Configurar Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Pruebas unitarias
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests
+
+      # Recorre las cuatro páginas con todos sus filtros, tablas y gráficas y compara cada valor con un cálculo
+      # independiente sobre Historico/ y Novedades/ (unos 3.000 controles; tarda varios minutos).
+      - name: Pruebas de punta a punta del Dashboard
+        run: |
+          set -euo pipefail
+          python tests/e2e_dashboard.py

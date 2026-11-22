@@ -18,19 +18,23 @@
   // Colores estables por entidad
   const todas = (campo) => [...new Set(versiones.map((v) => v[campo]).filter((x) => x != null && x !== ""))].sort((a, b) => String(a).localeCompare(String(b), "es"));
   const divisiones = todas("DIVISION_UNINORTE");
-  const colDiv = A.asignarColores(divisiones);
+  const colDiv = A.asignarColores(C.catalogos.divisiones);   // color fijo por división, igual en todas las páginas
   const modalidades = C.catalogos.grupos_modalidad;
   const colMod = A.asignarColores(modalidades);
-  const programas = A.opcionesProgramas(versiones, (v) => v._R[v._R.length - 1][1]);   // nombre más reciente de cada programa
+  // Fuentes de los filtros: las versiones de programas activos y las tres tablas de novedades
+  const fuentes = [versiones, ...TIPOS.map((t) => nov[t])];
+  // Programas: una opción por programa y universidad, con el nombre más reciente de cada código SNIES
+  const programas = A.opcionesProgramas(fuentes, (r) => (r._R ? fechasActivos[r._R[r._R.length - 1][1]] : r.FECHA_DE_OBTENCION) || "");
 
   const filtros = new A.Filtros($("filtros"), {
     buscar: "Buscar por Código de Programa o Institución",
-    claves: ["universidades", "programas", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"],
-    registros: versiones,
+    claves: ["universidades", "programas", "departamentos", "municipios", "sectores", "modalidades", "cine", "divisiones", "fechas"],
+    fuentes,
     opciones: { modalidades, programas: programas.opciones },
-    etiquetas: { modalidades: A.etiquetasModalidad(modalidades), programas: programas.etiquetas },
-    camposBusqueda: ["CODIGO_SNIES_DEL_PROGRAMA", "CODIGO_INSTITUCION"],
-    fechas: C.fechas_ejecucion,
+    etiquetas: { modalidades: A.etiquetasModalidad(modalidades) },
+    valorDe: { programas: programas.valorDe },
+    camposBusqueda: ["CODIGO_INSTITUCION_PADRE", "CODIGO_SNIES_DEL_PROGRAMA"],
+    fechas: C.fechas_ejecucion, fechasActivos: C.fechas_activos,
     alCambiar: () => actualizar(),
   });
   const selectorCine = new A.SelectorCine($("cine-ctrl"), filtros);

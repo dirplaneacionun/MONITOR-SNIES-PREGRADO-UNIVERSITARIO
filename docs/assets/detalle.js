@@ -16,25 +16,28 @@
 
   const todas = (campo) => [...new Set(registros.map((v) => v[campo]).filter((x) => x != null && x !== ""))].sort((a, b) => String(a).localeCompare(String(b), "es"));
   const divisiones = todas("DIVISION_UNINORTE");
-  const colDiv = A.asignarColores(divisiones);
+  const colDiv = A.asignarColores(C.catalogos.divisiones);   // color fijo por división, igual en todas las páginas
   const modalidades = C.catalogos.grupos_modalidad;
   const colMod = A.asignarColores(modalidades);
   const colCambio = A.asignarColores(tiposCambio);
-  const programas = A.opcionesProgramas(registros);   // nombre más reciente de cada programa
+  // Programas: una opción por programa y universidad, con el nombre más reciente de cada código SNIES
+  const programas = A.opcionesProgramas([registros]);
 
   // Rango temporal: cada gráfica empieza en la primera ejecución con datos de su métrica (antes no hay información)
   const inicioPagina = A.primeraFecha(registros);
   const inicioDe = (cambio) => A.primeraFecha(registros.filter((r) => r.TIPO_CAMBIO_DETECTADO === cambio && numeros(r.CAMBIO_DETECTADO)));
 
-  const claves = ["universidades", "programas", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"];
+  const claves = ["universidades", "programas", "departamentos", "municipios", "sectores", "modalidades", "cine", "divisiones"];
   if (tipo === "modificados") claves.push("cambios");
+  claves.push("fechas");
   const filtros = new A.Filtros($("filtros"), {
     buscar: "Buscar por Código de Programa o Institución",
-    claves, registros,
+    claves, fuentes: [registros],
     opciones: { modalidades, cambios: tiposCambio, programas: programas.opciones },
-    etiquetas: { cambios: etqCambio, modalidades: A.etiquetasModalidad(modalidades), programas: programas.etiquetas },
-    camposBusqueda: ["CODIGO_SNIES_DEL_PROGRAMA", "CODIGO_INSTITUCION"],
-    fechas: C.fechas_ejecucion,
+    etiquetas: { cambios: etqCambio, modalidades: A.etiquetasModalidad(modalidades) },
+    valorDe: { programas: programas.valorDe },
+    camposBusqueda: ["CODIGO_INSTITUCION_PADRE", "CODIGO_SNIES_DEL_PROGRAMA"],
+    fechas: C.fechas_ejecucion, fechasActivos: [],
     alCambiar: () => actualizar(),
   });
   const selectorCine = new A.SelectorCine($("cine-ctrl"), filtros);

@@ -480,7 +480,7 @@ def _verificar_excel(fuente_path, salida_path):
             if x is None or y is None:
                 raise ErrorIntegridad(f"la salida tiene {'menos' if y is None else 'mas'} filas que la fuente (desde la fila {fila})")
             for j in range(n):
-                # Mismo valor y mismo tipo: '106341' (texto) no es 106341 (numero), ni 5 es 5.0
+                # Mismo valor y mismo tipo: '106341' (texto) no es 106341 (número), ni 5 es 5.0
                 if x[j] != y[j] or type(x[j]) is not type(y[j]):
                     distintas += 1
                     if len(ejemplos) < _MAX_EJEMPLOS:

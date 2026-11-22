@@ -40,6 +40,12 @@ def grupos_de_registros(registros):
     return registros[col].map(grupo_universidad)
 
 
+# ── Sector y paleta de series ─────────────────────────────────────────────────
+# El Dashboard dibuja la evolución por sector solo con estos dos valores.
+SECTORES = ("OFICIAL", "PRIVADO")
+# Colores de la paleta de series del Dashboard (CATEGORICA en docs/assets/app.js): con más categorías se repetirían.
+MAX_COLORES_SERIES = 15
+
 # ── Modalidades (solo para gráficas y filtros; las tablas conservan el valor original) ──
 MODALIDADES_GRUPO = {
     "A DISTANCIA": ("A DISTANCIA", "PRESENCIAL-A DISTANCIA", "PRESENCIAL-A DISTANCIA-DUAL"),

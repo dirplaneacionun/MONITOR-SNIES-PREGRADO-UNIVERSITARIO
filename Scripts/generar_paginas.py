@@ -126,11 +126,10 @@ def scripts(datos, js):
     return "\n".join(lineas)
 
 
-def _control_cine(defecto: int, maximo: int, ambito: str) -> tuple[str, str]:
+def _control_cine(maximo: int, ambito: str) -> tuple[str, str]:
     """Descripción y control (selector de campos) de la gráfica de evolución por campo de CINE específico."""
-    desc = (f"Muestra los campos de CINE específico del filtro superior, sincronizado con el desplegable de esta gráfica: con TODOS marcado, "
-            f"los {defecto} con más {ambito}; con una selección, esos campos (máximo {maximo}). Marque o desmarque campos en cualquiera de los dos "
-            "desplegables, o use la × de cada campo, para ajustar las líneas.")
+    desc = (f"Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con TODOS se muestran "
+            f"los {maximo} campos con más {ambito}; con una selección, los campos marcados (hasta {maximo}: los que tengan más {ambito}).")
     return desc, '\n        <div id="cine-ctrl"></div>'
 
 
@@ -145,7 +144,7 @@ def main() -> None:
           <a class="kpi k-inactivos" href="inactivos.html"><div class="kpi-et">INACTIVOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-inactivos">–</div><div class="kpi-s">Ejecución del <span data-fecha-ultima></span></div></a>
         </section>
     '''
-    desc_cine, extra_cine = _control_cine(10, 15, "registros activos")
+    desc_cine, extra_cine = _control_cine(10, "registros activos")
     tabs = "".join(
         f'<button type="button" role="tab" class="tab t-{t}" id="tab-{t}" data-tab="{t}" aria-controls="panel-{t}" '
         f'aria-selected="{"true" if t == "nuevos" else "false"}" tabindex="{0 if t == "nuevos" else -1}">'
@@ -169,8 +168,8 @@ def main() -> None:
                     "Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.")),
         par(tarjeta("PROGRAMAS ACADÉMICOS ACTIVOS POR SECTOR", "g-sector", "Distribución entre instituciones oficiales y privadas en la ejecución del <span data-fecha-corte></span>."),
             tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR SECTOR", "g-sector-evol", "Programas activos de instituciones oficiales y privadas en cada ejecución."), "tercio"),
-        par(tarjeta("DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-deptos", "Los 10 departamentos de oferta con más registros en la ejecución del <span data-fecha-corte></span>."),
-            tarjeta("UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-univ", "Las 10 instituciones con más registros en la ejecución del <span data-fecha-corte></span>.")),
+        par(tarjeta("DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-deptos", "Departamentos de oferta con mayor número de registros en la ejecución del <span data-fecha-corte></span>, de mayor a menor."),
+            tarjeta("UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-univ", "Instituciones con mayor número de registros en la ejecución del <span data-fecha-corte></span>, de mayor a menor.")),
         ancha("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR MODALIDAD", "g-modalidad",
               "Programas activos en cada ejecución según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual."),
         ancha("PROGRAMAS ACADÉMICOS ACTIVOS POR NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",
@@ -204,11 +203,11 @@ def main() -> None:
                                    "Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad."))]
         else:
             c = ['    <div class="fila">\n' + evol + "\n    </div>"]
-        desc_cine, extra_cine = _control_cine(10, 15, f"registros {n}")
+        desc_cine, extra_cine = _control_cine(10, f"registros {n}")
         c.append(par(tarjeta(f"PROGRAMAS ACADÉMICOS {N} POR SECTOR", "g-sector", "Distribución de los registros del periodo filtrado entre instituciones oficiales y privadas."),
                      tarjeta(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N} POR SECTOR", "g-sector-evol", f"Programas {n} acumulados de instituciones oficiales y privadas."), "tercio"))
-        c.append(par(tarjeta(f"DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS {N}", "g-deptos", "Los 10 departamentos de oferta con más registros en el periodo filtrado."),
-                     tarjeta(f"UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS {N}", "g-instituciones", "Las 10 instituciones con más registros en el periodo filtrado.")))
+        c.append(par(tarjeta(f"DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS {N}", "g-deptos", "Departamentos de oferta con mayor número de registros en el periodo filtrado, de mayor a menor."),
+                     tarjeta(f"UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS {N}", "g-instituciones", "Instituciones con mayor número de registros en el periodo filtrado, de mayor a menor.")))
         c.append(ancha(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N} POR MODALIDAD", "g-modalidad",
                        f"Programas {n} acumulados según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual."))
         c.append(ancha(f"PROGRAMAS ACADÉMICOS {N} POR NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",

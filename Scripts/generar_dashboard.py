@@ -52,22 +52,22 @@ COL_CINE_AMPLIO = "CINE_F_2013_AC_CAMPO_AMPLIO"
 # Atributos de las "versiones" de programa usadas en las gráficas de evolución de activos
 COLS_VERSION = [
     COL_SNIES, "NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_INSTITUCION", COL_PADRE, "SECTOR",
-    "DEPARTAMENTO_OFERTA_PROGRAMA", "MODALIDAD", COL_CINE, "DIVISION_UNINORTE", "NUMERO_PERIODOS_DE_DURACION",
+    "DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA", "MODALIDAD", COL_CINE, "DIVISION_UNINORTE",
+    "NUMERO_PERIODOS_DE_DURACION",
 ]
-# Columnas del histórico que usa el Dashboard: las de las versiones de programas, la fecha y el municipio (para
-# unificar sus variantes en las novedades). Leer solo estas columnas reduce a cerca de un tercio la memoria del
-# proceso, que crece con cada ejecución acumulada.
-COLS_HISTORICO = COLS_VERSION + [COL_FECHA, "MUNICIPIO_OFERTA_PROGRAMA", COL_CINE_AMPLIO]
+# Columnas del histórico que usa el Dashboard: las de las versiones de programas, la fecha y el campo amplio de CINE.
+# Leer solo estas columnas reduce a cerca de un tercio la memoria del proceso, que crece con cada ejecución acumulada.
+COLS_HISTORICO = COLS_VERSION + [COL_FECHA, COL_CINE_AMPLIO]
 
 # Orden de las primeras columnas de cada tabla; las demás conservan el orden del archivo del que provienen.
-_COLS_BASE = [COL_FECHA, "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA",
-              "MUNICIPIO_OFERTA_PROGRAMA", "MODALIDAD"]
+_COLS_BASE = ["NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA",
+              "MUNICIPIO_OFERTA_PROGRAMA", "SECTOR", "MODALIDAD"]
 _COLS_ACADEMICAS = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS",
                     "DIVISION_UNINORTE"]
 COLS_PRIMERO = {
-    "nuevos": _COLS_BASE + ["TIPO_NOVEDAD"] + _COLS_ACADEMICAS,
-    "modificados": _COLS_BASE + ["TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + _COLS_ACADEMICAS,
-    "inactivos": _COLS_BASE + _COLS_ACADEMICAS,
+    "nuevos": [COL_FECHA, "TIPO_NOVEDAD"] + _COLS_BASE + _COLS_ACADEMICAS,
+    "modificados": [COL_FECHA, "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + _COLS_BASE + _COLS_ACADEMICAS,
+    "inactivos": [COL_FECHA] + _COLS_BASE + _COLS_ACADEMICAS,
     "activos": [COL_FECHA],
 }
 
@@ -167,6 +167,13 @@ def jerarquia_cine(hist: pd.DataFrame, novedades: dict) -> list[list]:
     return [[amplio, sorted(grupo[COL_CINE].tolist())] for amplio, grupo in sorted(pares.groupby(COL_CINE_AMPLIO), key=lambda x: x[0])]
 
 
+def divisiones_uninorte(hist: pd.DataFrame, novedades: dict) -> list[str]:
+    """Divisiones de Uninorte presentes en el histórico y en las novedades, en orden alfabético (fijan el color de cada una)."""
+    col = "DIVISION_UNINORTE"
+    valores = pd.concat([hist[col]] + [d[col] for d in novedades.values() if col in d.columns]).dropna().astype(str)
+    return sorted({v for v in valores if v}, key=lambda v: (v.casefold(), v))
+
+
 # ── Generación ────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -236,6 +243,7 @@ def main() -> int:
             "mayor_interes": list(MAYOR_INTERES),
             "instituciones": instituciones(hist, novedades),
             "cine_jerarquia": jerarquia_cine(hist, novedades),
+            "divisiones": divisiones_uninorte(hist, novedades),
             "grupos_universidad": list(GRUPOS_UNIVERSIDAD),
             "modalidad_a_grupo": MODALIDAD_A_GRUPO,
             "grupos_modalidad": list(MODALIDADES_GRUPO),
@@ -258,7 +266,6 @@ def main() -> int:
         "rangos": versiones["_RANGOS"].tolist(),
     })
 
-    escribir_js("comun.js", "comun", comun)
     # Archivos que el Dashboard ya no publica (tabla de programas activos de Inicio y copias del histórico por
     # ejecución): se eliminan si existen para que no queden datos sin uso en docs/
     for obsoleto in ("activos_tabla.js", "historico.parquet"):

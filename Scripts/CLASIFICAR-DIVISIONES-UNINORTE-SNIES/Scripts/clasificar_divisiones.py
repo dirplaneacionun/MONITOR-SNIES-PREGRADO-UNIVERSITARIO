@@ -1910,7 +1910,7 @@ def limpiar_columnas_salida(df):
 
 
 def _escritura_atomica(salida_path, escribir_fn, logger, verificar=None):
-    """Escribe a un temporal y renombra atomicamente al finalizar.
+    """Escribe a un temporal y renombra atómicamente al finalizar.
     verificar(tmp_path), si se pasa, revisa el temporal antes de reemplazar la salida: si lanza una excepción, la salida
     anterior queda intacta."""
     base, ext = os.path.splitext(salida_path)

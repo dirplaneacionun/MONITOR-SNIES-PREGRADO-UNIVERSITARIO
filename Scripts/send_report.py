@@ -15,7 +15,7 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
 Variables de entorno:
-    SMTP_USER      cuenta remitente (dirplaneacionun@gmail.com)
+    SMTP_USER      cuenta remitente del correo institucional
     SMTP_PASS      contraseña de aplicación de la cuenta
     DESTINATARIOS  lista separada por comas
 """
@@ -54,6 +54,8 @@ DASHBOARD_URL = "https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVER
 # Paleta institucional (BRANDBOOK_UNINORTE, códigos HEX impresos), idéntica a la del Dashboard (estilos.css)
 NEGRO, ROJO, AMARILLO, GRIS, BORDE = "#151515", "#960A11", "#FFCC00", "#F5F5F5", "#E5E5E5"
 TEXTO2, TEXTO3 = "#3E4751", "#6B6B6B"   # textos secundarios del Dashboard (--texto-2 y --texto-3)
+# Neutros auxiliares del Dashboard (estilos.css): zebra de las tablas y colores sobre el encabezado negro
+ZEBRA, TEXTO_SOBRE_NEGRO, LINEA_SOBRE_NEGRO, FONDO_SOBRE_NEGRO = "#FAFAFA", "#D9D9D9", "#444444", "#232323"
 ESTADO = {"nuevos": "#1E8E5A", "modificados": "#FFCC00", "inactivos": "#960A11"}  # el correo no tiene líneas: solo rellenos
 FUENTE = "Montserrat, 'Segoe UI', Arial, sans-serif"
 
@@ -192,7 +194,7 @@ def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> st
     # filas, repetir los estilos en cada celda superaría los 102 KB a partir de los cuales Gmail recorta el mensaje.
     filas = []
     for i, (_, r) in enumerate(df.iterrows()):
-        fondo = "#FFFFFF" if i % 2 == 0 else "#FAFAFA"
+        fondo = "#FFFFFF" if i % 2 == 0 else ZEBRA
         total = negrita_ultima and i == len(df) - 1
         filas.append("<tr>" + "".join(
             f'<td class="c{" n" if c in numericas else ""}{" b" if total else ""}" bgcolor="{fondo}">'
@@ -393,12 +395,12 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td class="enc-titulo" valign="top">
         {logo}<div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
-        <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
+        <div style="font-family:{FUENTE};font-size:13px;color:{TEXTO_SOBRE_NEGRO};margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
         <a href="{DASHBOARD_URL}" style="display:inline-block;margin-top:14px;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:12px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:10px 22px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
       </td>
       <td class="enc-fecha" valign="top" align="right" width="150">
-        <div style="border:1px solid #333333;border-top:3px solid {AMARILLO};border-radius:10px;padding:8px 14px;text-align:right;">
-          <div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.08em;color:#D9D9D9;">EJECUCIÓN</div>
+        <div style="background:{FONDO_SOBRE_NEGRO};border:1px solid {LINEA_SOBRE_NEGRO};border-top:3px solid {AMARILLO};border-radius:10px;padding:8px 14px;text-align:right;">
+          <div style="font-family:{FUENTE};font-size:10px;font-weight:700;letter-spacing:.08em;color:{TEXTO_SOBRE_NEGRO};">EJECUCIÓN</div>
           <div style="font-family:{FUENTE};font-size:18px;font-weight:800;color:#FFFFFF;">{_fecha(fecha)}</div>
         </div>
       </td>
@@ -498,7 +500,7 @@ def enviar_alerta_falla(fecha: date, etapa: str, detalle: str, log_path: Path) -
 <table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;table-layout:fixed;">
   <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
     <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">ALERTA TÉCNICA · MONITOR SNIES PREGRADO</div>
-    <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Aviso para la cuenta remitente</div>
+    <div style="font-family:{FUENTE};font-size:13px;color:{TEXTO_SOBRE_NEGRO};margin-top:4px;">Aviso para la cuenta remitente</div>
   </td></tr>
   <tr><td style="padding:16px 0 0;">{_tarjeta(contenido, ROJO)}</td></tr>
 </table></td></tr></table>

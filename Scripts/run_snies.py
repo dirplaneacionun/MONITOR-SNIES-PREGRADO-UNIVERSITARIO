@@ -51,6 +51,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pyarrow.parquet as pq
 
+import catalogos
 import historico
 
 # ── Rutas ─────────────────────────────────────────────────────────────────────
@@ -132,8 +133,15 @@ def _rutas_privadas() -> list[tuple[str, str]]:
     return pares
 
 
+# Dirección de correo dentro de un texto (por ejemplo, la que incluye un error de SMTP al rechazar un destinatario).
+_PATRON_CORREO = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+
+
 class _FormatoSeguro(logging.Formatter):
-    """Formato de log que oculta rutas personales (carpeta del usuario y temporal) antes de escribir en consola o archivo."""
+    """
+    Formato de log que oculta datos privados antes de escribir en consola o archivo: rutas personales (carpeta del
+    usuario y temporal) y direcciones de correo. Los logs se publican en el repositorio, que es público.
+    """
 
     _pares = _rutas_privadas()
 
@@ -141,7 +149,7 @@ class _FormatoSeguro(logging.Formatter):
         texto = super().format(record)
         for ruta, marca in self._pares:
             texto = texto.replace(ruta, marca)
-        return texto
+        return _PATRON_CORREO.sub("<correo>", texto)
 
 
 def configurar_logging(ahora: dt.datetime, prefijo: str = "monitor") -> Path:
@@ -507,6 +515,39 @@ def validar_filtros(df: pd.DataFrame) -> None:
     log.info("  Filtros del portal verificados: " + " · ".join(f"{c}={v}" for c, v in FILTROS_PORTAL.items()))
 
 
+def categorias_desconocidas(df: pd.DataFrame) -> dict[str, list[str]]:
+    """
+    Valores del reporte que el Dashboard no contempla: sectores y modalidades fuera de los catálogos (el sector
+    quedaría fuera de su gráfica de evolución y la modalidad se agruparía como SIN INFORMACIÓN) y más divisiones que
+    colores en la paleta de series (los colores se repetirían). Retorna {campo: detalle}; vacío si todo está contemplado.
+    """
+    def distintos(col):
+        if col not in df.columns:
+            return set()
+        return {str(v).strip().upper() for v in df[col].dropna() if str(v).strip()}
+
+    hallazgos = {}
+    sectores = distintos("SECTOR") - set(catalogos.SECTORES)
+    if sectores:
+        hallazgos["SECTOR"] = sorted(sectores)
+    modalidades = distintos("MODALIDAD") - set(catalogos.MODALIDAD_A_GRUPO)
+    if modalidades:
+        hallazgos["MODALIDAD"] = sorted(modalidades)
+    divisiones = distintos("DIVISION_UNINORTE")
+    if len(divisiones) > catalogos.MAX_COLORES_SERIES:
+        hallazgos["DIVISION_UNINORTE"] = [f"{len(divisiones)} divisiones y {catalogos.MAX_COLORES_SERIES} colores en la paleta de series"]
+    return hallazgos
+
+
+def avisar_categorias(df: pd.DataFrame) -> dict[str, list[str]]:
+    """Registra una advertencia por cada campo con categorías no contempladas por el Dashboard; no detiene el flujo."""
+    hallazgos = categorias_desconocidas(df)
+    for campo, detalle in hallazgos.items():
+        log.warning(f"  {campo}: valores no contemplados por el Dashboard ({'; '.join(detalle)}). "
+                    "Revise los catálogos (Scripts/catalogos.py) y la paleta de series (docs/assets/app.js).")
+    return hallazgos
+
+
 def validar_continuidad(n_hoy: int, fecha: dt.date, forzar: bool = False) -> None:
     """
     Protección contra descargas incompletas: una descarga truncada del SNIES conserva el esquema y pasa las
@@ -679,6 +720,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     if hoy[COL_SNIES].duplicated().any():
         raise EtapaError("VALIDACION", "Hay códigos SNIES repetidos en el archivo procesado.")
     validar_filtros(hoy)
+    avisar_categorias(hoy)
     validar_continuidad(len(hoy), fecha, args.forzar)
     try:
         revision = len(pd.read_excel(REVISION_FILE, engine="calamine")) if REVISION_FILE.exists() else 0

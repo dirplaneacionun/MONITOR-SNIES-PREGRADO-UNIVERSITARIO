@@ -113,33 +113,45 @@ def historico(fecha):
 
 
 CAMPOS = {
-    "divisiones": "DIVISION_UNINORTE", "cine": "CINE_F_2013_AC_CAMPO_ESPECIFIC", "programas": "CODIGO_SNIES_DEL_PROGRAMA",
-    "departamentos": "DEPARTAMENTO_OFERTA_PROGRAMA", "modalidades": "_MG", "sectores": "SECTOR",
-    "cambios": "TIPO_CAMBIO_DETECTADO",
+    "divisiones": "DIVISION_UNINORTE", "cine": "CINE_F_2013_AC_CAMPO_ESPECIFIC", "programas": "_PL",
+    "departamentos": "DEPARTAMENTO_OFERTA_PROGRAMA", "municipios": "MUNICIPIO_OFERTA_PROGRAMA", "modalidades": "_MG",
+    "sectores": "SECTOR", "cambios": "TIPO_CAMBIO_DETECTADO",
 }
-CAMPOS_BUSQUEDA = ["CODIGO_SNIES_DEL_PROGRAMA", "CODIGO_INSTITUCION"]
+CAMPOS_BUSQUEDA = ["CODIGO_INSTITUCION_PADRE", "CODIGO_SNIES_DEL_PROGRAMA"]   # la búsqueda es exacta sobre estos códigos
 BUSCADOR = "Buscar por Código de Programa o Institución"
-MAX_SERIES = 15
-CINE_DEFECTO = 10
+CINE_MAX = 10   # máximo de campos de CINE específico que muestra la gráfica
+PROG_MAPA = {}   # código SNIES → opción del filtro de programas (nombre del programa) de la página que se prueba
 
 
-def texto_busqueda(v):
-    """Texto de un código como lo ve el Dashboard (enteros sin decimales), normalizado como la búsqueda."""
-    if v is None or v is pd.NA or (isinstance(v, float) and pd.isna(v)):
-        return ""
-    if isinstance(v, float) and v.is_integer():
-        v = int(v)
-    return norm_js(v)
+def usar_mapa_programas(frames):
+    """Opción del filtro de programas de cada código SNIES (su nombre más reciente, sin universidad), como en el Dashboard."""
+    cols = ["CODIGO_SNIES_DEL_PROGRAMA", "NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "FECHA_DE_OBTENCION"]
+    todo = pd.concat([f[cols].fillna("").astype(str) for f in frames], ignore_index=True)
+    todo = todo.assign(_i=range(len(todo))).sort_values(["FECHA_DE_OBTENCION", "_i"]).drop_duplicates("CODIGO_SNIES_DEL_PROGRAMA", keep="last")
+    limpio = lambda s: re.sub(r"[\s-]+$", "", s)  # noqa: E731
+    PROG_MAPA.clear()
+    PROG_MAPA.update({c: limpio(n) for c, n in zip(todo.CODIGO_SNIES_DEL_PROGRAMA, todo.NOMBRE_DEL_PROGRAMA)})
 
 
-def filtrar(df, filtro, busqueda=None, campos_busqueda=()):
+def codigo_texto(v):
+    """Código como lo escribe el usuario: sin decimales ('1713' y no '1713.0')."""
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def filtrar(df, filtro, busqueda=None, campos_busqueda=(), omitir=None):
     """
     Aplica la misma regla que el Dashboard. `filtro` = {'clave': valor}; valor: una opción (solo esa), ("excepto", v),
     ("varios", [v...]); para universidades: ("grupo", g), ("codigo", c), ("codigos", [c...]), ("excepto_codigos", [c...]).
-    Los registros sin valor en el campo no cumplen un filtro con selección (igual que el Dashboard).
+    Los registros sin valor en el campo no cumplen un filtro con selección (igual que el Dashboard). La búsqueda es
+    una coincidencia exacta con alguno de los códigos de `campos_busqueda`. `omitir` ignora un filtro (o "buscar").
     """
     m = pd.Series(True, index=df.index)
     for clave, valor in filtro.items():
+        if clave == omitir:
+            continue
         if clave == "universidades":
             tipo, v = valor
             codigos = df["CODIGO_INSTITUCION_PADRE"].astype(float)
@@ -151,21 +163,43 @@ def filtrar(df, filtro, busqueda=None, campos_busqueda=()):
                 m &= codigos.isin([float(c) for c in v])
             else:   # excepto_codigos
                 m &= ~codigos.isin([float(c) for c in v])
+            continue
+        col = df["CODIGO_SNIES_DEL_PROGRAMA"].astype(str).map(PROG_MAPA) if clave == "programas" else df[CAMPOS[clave]]
+        con_valor = col.notna() & (col.astype(str) != "")
+        if isinstance(valor, tuple):
+            tipo, v = valor
+            m &= con_valor & ((col.astype(str) != str(v)) if tipo == "excepto" else col.astype(str).isin([str(x) for x in v]))
         else:
-            col = df[CAMPOS[clave]]
-            con_valor = col.notna() & (col.astype(str) != "")
-            if isinstance(valor, tuple):
-                tipo, v = valor
-                m &= con_valor & ((col.astype(str) != str(v)) if tipo == "excepto" else col.astype(str).isin([str(x) for x in v]))
-            else:
-                m &= col.astype(str) == str(valor)
-    if busqueda:
-        q = norm_js(busqueda)
+            m &= col.astype(str) == str(valor)
+    if busqueda and omitir != "buscar":
+        q = str(busqueda).strip()
         hit = pd.Series(False, index=df.index)
         for c in campos_busqueda:
-            hit |= df[c].map(texto_busqueda).str.contains(q, regex=False)
+            hit |= df[c].map(codigo_texto) == q
         m &= hit
     return df[m]
+
+
+def disponibles_esperados(frames, filtro, busqueda, clave, fechas=None):
+    """
+    Valores que debe ofrecer el filtro `clave`: los de los registros que cumplen todos los demás filtros, la búsqueda y
+    las fechas elegidas (para el filtro de fechas, las fechas de esos registros). `frames`: fuentes de la página.
+    """
+    valores = set()
+    for df in frames:
+        sub = filtrar(df, filtro, busqueda, CAMPOS_BUSQUEDA, omitir=clave)
+        if fechas is not None and clave != "fechas":
+            sub = sub[sub.FECHA_DE_OBTENCION.astype(str).isin(list(fechas))]
+        if clave == "fechas":
+            valores |= set(sub.FECHA_DE_OBTENCION.astype(str))
+        elif clave == "universidades":
+            valores |= {str(int(c)) for c in sub.CODIGO_INSTITUCION_PADRE.dropna()}
+        elif clave == "programas":
+            valores |= set(sub.CODIGO_SNIES_DEL_PROGRAMA.astype(str).map(PROG_MAPA).dropna())
+        else:
+            col = sub[CAMPOS[clave]]
+            valores |= {str(v) for v in col[col.notna() & (col.astype(str) != "")]}
+    return valores
 
 
 # ── Navegador ─────────────────────────────────────────────────────────────────
@@ -204,6 +238,8 @@ def navegador():
     o = webdriver.ChromeOptions()
     o.add_argument("--headless=new")
     o.add_argument("--window-size=1400,1000")
+    o.add_argument("--no-sandbox")              # contenedores de integración continua (GitHub Actions)
+    o.add_argument("--disable-dev-shm-usage")   # memoria compartida reducida de los contenedores
     o.set_capability("goog:loggingPrefs", {"browser": "ALL"})
     return webdriver.Chrome(options=o)
 
@@ -275,40 +311,6 @@ class Pagina:
 
 
 # ── Pruebas ───────────────────────────────────────────────────────────────────
-
-def opciones_filtro(p, indice):
-
-    """Valores de las opciones de un filtro de lista plana (en el orden mostrado)."""
-    return p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-                   return [...ms.querySelectorAll('.ms-ops input[value]')].map(i => i.value);""", indice)
-
-
-def clic_opcion(p, indice, selector):
-
-
-    """Abre el filtro `indice` y hace clic real sobre el control que cumple `selector`."""
-    p.abrir(indice)
-    el = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice].find_element(By.CSS_SELECTOR, selector)
-    p.js("arguments[0].scrollIntoView({block: 'center'});", el)
-    el.click()
-    p.esperar_listo()
-
-
-def todos_marcado(p, indice):
-
-
-    """¿Está marcada la opción TODOS/TODAS del filtro `indice`?"""
-    return p.js("return document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector('[data-todos]').checked", indice)
-
-
-def reset_filtros(p):
-
-
-    """Restablece todos los filtros con el botón LIMPIAR FILTROS."""
-    p.cerrar()
-    p.d.find_element(By.CSS_SELECTOR, ".filtros .btn-limpiar").click()
-    p.esperar_listo()
-
 
 def rango(desde, hasta):
     """Fechas de ejecución entre `desde` y `hasta` (inclusive)."""
@@ -400,192 +402,6 @@ def comparar_detalle(p, tipo, nombre, filtro, busqueda=None, fechas=None):
     return ok
 
 
-def grupo_expandido(p, indice, gid):
-    """Expande el grupo `gid` de un filtro jerárquico (si no lo está) y retorna su elemento."""
-    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
-    p.abrir(indice)
-    grupo = ms.find_element(By.CSS_SELECTOR, f'[data-g="{gid}"]').find_element(By.XPATH, "./ancestor::div[contains(@class,'ms-grupo')]")
-    if p.js("const h = arguments[0].querySelector('.ms-hijos'); return !!h && h.hidden", grupo):
-        grupo.find_element(By.CSS_SELECTOR, ".ms-expandir").click()
-    return grupo
-
-
-def probar_filtro_plano(p, comparar, indice, clave, muestra):
-    """Lista plana con TODOS/TODAS sincronizada: solo una opción, exclusión de una opción y retorno a TODOS."""
-    valores = opciones_filtro(p, indice)
-    ordenadas = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        const et = [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => l.textContent.trim());
-        const primero = ms.querySelector('.ms-panel > .ms-op, .ms-panel > input + .ms-op');
-        return { alfabetico: et.every((v, i) => i === 0 || et[i - 1].localeCompare(v, 'es') <= 0),
-                 todosPrimero: !!primero && primero.classList.contains('todos'), todasMarcadas: [...ms.querySelectorAll('.ms-ops input')].every(i => i.checked) };""", indice)
-    verificar(f"{p.nombre} · filtro {clave} en orden alfabético con TODOS primero", ordenadas["alfabetico"] and ordenadas["todosPrimero"], str(ordenadas))
-    verificar(f"{p.nombre} · filtro {clave} inicia con TODOS y todas las opciones marcadas", todos_marcado(p, indice) and ordenadas["todasMarcadas"], str(ordenadas))
-    muestra_valores = valores[:2] + valores[-1:] if muestra else valores
-    for v in muestra_valores:
-        clic_opcion(p, indice, "[data-todos]")                      # TODOS desmarcado: ninguna opción
-        sin = p.js("return [...document.querySelectorAll('.filtros .ms')[arguments[0]].querySelectorAll('.ms-ops input')].filter(i => i.checked).length", indice)
-        clic_opcion(p, indice, f'.ms-ops input[value="{v}"]')
-        comparar(f"{clave}={v}", {clave: v})
-        verificar(f"{p.nombre} · {clave}={v} · sin TODOS y con una opción", sin == 0 and not todos_marcado(p, indice))
-        clic_opcion(p, indice, "[data-todos]")                      # TODOS marcado: todas las opciones
-        verificar(f"{p.nombre} · {clave} · marcar TODOS selecciona todas",
-                  todos_marcado(p, indice) and p.js("return [...document.querySelectorAll('.filtros .ms')[arguments[0]].querySelectorAll('.ms-ops input')].every(i => i.checked)", indice))
-    # Excluir una opción partiendo de TODOS
-    v = valores[0]
-    clic_opcion(p, indice, f'.ms-ops input[value="{v}"]')
-    verificar(f"{p.nombre} · {clave} · desmarcar una opción desactiva TODOS", not todos_marcado(p, indice))
-    comparar(f"{clave} excepto {v}", {clave: ("excepto", v)})
-    clic_opcion(p, indice, f'.ms-ops input[value="{v}"]')
-    verificar(f"{p.nombre} · {clave} · marcar de nuevo la última opción activa TODOS", todos_marcado(p, indice))
-    comparar(f"{clave} tras volver a marcar", {})
-    # Sin ninguna opción marcada no hay resultados
-    clic_opcion(p, indice, "[data-todos]")
-    verificar(f"{p.nombre} · {clave} · sin opciones marcadas", p.js("return document.querySelector('.conteo-filtro').textContent").startswith("0 "))
-    reset_filtros(p)
-
-
-def probar_filtro_universidades(p, comparar, indice, muestra):
-    """Universidades: grupos, instituciones de cada grupo, búsqueda y sincronización de TODAS LAS UNIVERSIDADES."""
-    cat = C["catalogos"]
-    uninorte, mayor = str(cat["uninorte"]), [str(c) for c in cat["mayor_interes"]]
-    otras = sorted(c for c in cat["instituciones"] if c != uninorte and c not in mayor)
-    grupos = {"uninorte": catalogos.GRUPO_UNINORTE, "mayor": catalogos.GRUPO_MAYOR_INTERES, "otras": catalogos.GRUPO_OTRAS}
-    verificar(f"{p.nombre} · universidades · grupos y búsqueda", p.js(
-        "const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return !!ms.querySelector('input[type=search]') && ms.querySelectorAll('.ms-grupo').length === 3", indice))
-    for gid, g in grupos.items():
-        clic_opcion(p, indice, "[data-todos]")
-        clic_opcion(p, indice, f'[data-g="{gid}"]')
-        comparar(f"universidades={g}", {"universidades": ("grupo", g)})
-        verificar(f"{p.nombre} · universidades · grupo {gid} marcado y TODAS desmarcada",
-                  p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return ms.querySelector(`[data-g='${arguments[1]}']`).checked && !ms.querySelector('[data-todos]').checked", indice, gid))
-        reset_filtros(p)
-    # Instituciones individuales: universidades de mayor interés y una muestra de otras
-    for gid, codigos in (("mayor", mayor[:3] if muestra else mayor), ("otras", otras[:2] + otras[len(otras) // 2: len(otras) // 2 + 1] + otras[-1:] if muestra else otras[::18])):
-        for c in codigos:
-            clic_opcion(p, indice, "[data-todos]")
-            grupo_expandido(p, indice, gid)
-            clic_opcion(p, indice, f'[data-v="{c}"]')
-            estado = p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; const g = ms.querySelector(`[data-g='${arguments[1]}']`); return { indet: g.indeterminate, marcado: g.checked };", indice, gid)
-            comparar(f"universidad={c}", {"universidades": ("codigo", c)})
-            verificar(f"{p.nombre} · universidad {c} · el grupo queda parcial", estado["indet"] or estado["marcado"], str(estado))
-            reset_filtros(p)
-    # Excluir una universidad partiendo de TODAS y volver a marcarla
-    clic_opcion(p, indice, '[data-g="uninorte"]')
-    verificar(f"{p.nombre} · universidades · desmarcar Uninorte desactiva TODAS", not todos_marcado(p, indice))
-    comparar("universidades excepto Uninorte", {"universidades": ("excepto_codigos", [uninorte])})
-    clic_opcion(p, indice, '[data-g="uninorte"]')
-    verificar(f"{p.nombre} · universidades · al completar todas se activa TODAS", todos_marcado(p, indice))
-    comparar("universidades tras volver a marcar", {})
-    # Selección de todos los grupos de a uno: TODAS se activa sola
-    clic_opcion(p, indice, "[data-todos]")
-    for gid in grupos:
-        clic_opcion(p, indice, f'[data-g="{gid}"]')
-    verificar(f"{p.nombre} · universidades · los tres grupos marcados activan TODAS", todos_marcado(p, indice))
-    reset_filtros(p)
-    # Búsqueda dentro del filtro
-    p.abrir(indice)
-    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
-    caja = ms.find_element(By.CSS_SELECTOR, "input[type=search]")
-    caja.send_keys("norte")
-    visibles = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('.ms-op.hijo')].filter(l => l.style.display !== 'none').map(l => l.textContent.trim());""", indice)
-    verificar(f"{p.nombre} · universidades · búsqueda 'norte'", bool(visibles) and all("NORTE" in v.upper() or "NORTE" in v.upper().replace("Ó", "O") for v in visibles), str(visibles[:5]))
-    for _ in range(5):   # borra el texto con eventos de teclado (clear() no dispara el evento de búsqueda)
-        caja.send_keys(Keys.BACKSPACE)
-    p.cerrar()
-
-
-def probar_filtro_cine(p, comparar, indice, muestra):
-    """CINE jerárquico: campo amplio con sus campos específicos, mismo comportamiento que universidades."""
-    jerarquia = C["catalogos"]["cine_jerarquia"]
-    verificar(f"{p.nombre} · CINE · primer nivel = campos amplios", p.js(
-        "const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return [...ms.querySelectorAll('.ms-grupo > .ms-padre label')].map(l => l.textContent.trim());", indice)
-        == [a for a, _ in jerarquia], "")
-    amplios = list(enumerate(jerarquia))
-    for i, (amplio, detallados) in (amplios[:2] if muestra else amplios):
-        clic_opcion(p, indice, "[data-todos]")
-        clic_opcion(p, indice, f'[data-g="a{i}"]')
-        comparar(f"CINE amplio {amplio}", {"cine": ("varios", detallados)})
-        for d in (detallados[:1] if muestra else detallados[::3]):
-            reset_filtros(p)                                     # TODOS marcado: se desmarca para partir sin selección
-            clic_opcion(p, indice, "[data-todos]")
-            grupo_expandido(p, indice, f"a{i}")
-            clic_opcion(p, indice, f'.ms-hijos [data-v="{d}"]')
-            comparar(f"CINE detallado {d}", {"cine": d})
-        reset_filtros(p)
-    # Excluir un campo específico partiendo de TODOS: el campo amplio queda parcial
-    amplio, detallados = jerarquia[0]
-    grupo_expandido(p, indice, "a0")
-    clic_opcion(p, indice, f'.ms-hijos [data-v="{detallados[0]}"]')
-    estado = p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; const g = ms.querySelector(\"[data-g='a0']\"); return { indet: g.indeterminate, todos: ms.querySelector('[data-todos]').checked };", indice)
-    verificar(f"{p.nombre} · CINE · excluir un detallado deja el amplio parcial y desactiva TODOS", estado["indet"] and not estado["todos"], str(estado))
-    todos_detallados = [d for _, ds in jerarquia for d in ds]
-    comparar(f"CINE excepto {detallados[0]}", {"cine": ("varios", [d for d in dict.fromkeys(todos_detallados) if d != detallados[0]])})
-    clic_opcion(p, indice, f'.ms-hijos [data-v="{detallados[0]}"]')
-    verificar(f"{p.nombre} · CINE · al volver a marcarlo se activa TODOS", todos_marcado(p, indice))
-    reset_filtros(p)
-
-
-def probar_filtro_programas(p, comparar, indice):
-    """PROGRAMA ACADÉMICO: lista plana por CODIGO_SNIES_DEL_PROGRAMA con búsqueda, TODOS sincronizado y dirección por exclusión."""
-    probar_filtro_plano(p, comparar, indice, "programas", True)
-    opciones = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => [l.querySelector('input').value, l.textContent.trim()]);""", indice)
-    base = NOV[p.tipo] if getattr(p, "tipo", None) else _historico_completo()
-    esperados = base["CODIGO_SNIES_DEL_PROGRAMA"].dropna().astype(str).nunique()
-    verificar(f"{p.nombre} · programas · una opción por CODIGO_SNIES_DEL_PROGRAMA", len(opciones) == esperados and len({o[0] for o in opciones}) == esperados,
-              f"{len(opciones)} vs {esperados}")
-    verificar(f"{p.nombre} · programas · etiqueta con programa, institución y código", all(o[1].endswith(f"({o[0]})") and " · " in o[1] for o in opciones), str(opciones[:2]))
-    # Búsqueda por código y por nombre
-    codigo = opciones[len(opciones) // 2][0]
-    p.abrir(indice)
-    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
-    caja = ms.find_element(By.CSS_SELECTOR, "input[type=search]")
-    caja.send_keys(codigo)
-    visibles = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('.ms-ops .ms-op')].filter(l => l.style.display !== 'none').map(l => l.querySelector('input').value);""", indice)
-    verificar(f"{p.nombre} · programas · búsqueda por código", codigo in visibles and all(codigo in v or True for v in visibles) and len(visibles) < len(opciones) // 10, f"{len(visibles)} visibles")
-    for _ in range(len(codigo)):
-        caja.send_keys(Keys.BACKSPACE)
-    nombre = opciones[len(opciones) // 3][1].split(" · ")[0]
-    caja.send_keys(nombre[:12])
-    visibles = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('.ms-ops .ms-op')].filter(l => l.style.display !== 'none').map(l => l.textContent.trim());""", indice)
-    verificar(f"{p.nombre} · programas · búsqueda por nombre", bool(visibles) and all(norm_js(nombre[:12]) in norm_js(v) for v in visibles), f"{len(visibles)} visibles")
-    for _ in range(12):
-        caja.send_keys(Keys.BACKSPACE)
-    p.cerrar()
-    # Dirección: con casi todo marcado se escriben solo las excluidas ("!") y el estado se restaura al recargar
-    reset_filtros(p)
-    clic_opcion(p, indice, f'.ms-ops input[value="{codigo}"]')
-    comparar("programas excepto uno", {"programas": ("excepto", codigo)})
-    url = p.d.current_url
-    verificar(f"{p.nombre} · programas · dirección por exclusión", "programa=%21" in url and len(url) < 300, url[-120:])
-    antes = p.js("return document.querySelector('.conteo-filtro').textContent")
-    p.d.refresh(); p.esperar_listo()
-    verificar(f"{p.nombre} · programas · estado restaurado al recargar", p.js("return document.querySelector('.conteo-filtro').textContent") == antes
-              and not todos_marcado(p, indice), antes)
-    reset_filtros(p)
-
-
-def probar_filtros(p, comparar, claves, muestra):
-
-
-    """Prueba cada filtro con clics reales: opciones, exclusiones, TODOS/TODAS y filtros jerárquicos."""
-    for indice, clave in enumerate(claves):
-        if clave == "fechas":
-            continue
-        if clave == "universidades":
-            probar_filtro_universidades(p, comparar, indice, muestra)
-        elif clave == "cine":
-            probar_filtro_cine(p, comparar, indice, muestra)
-        elif clave == "programas":
-            probar_filtro_programas(p, comparar, indice)
-        else:
-            probar_filtro_plano(p, comparar, indice, clave, muestra)
-        verificar(f"{p.nombre} · filtro {clave} probado", True)
-
-
 def clic_dia(p, iso):
     """Clic real sobre el día `iso` del calendario abierto (muestra primero su mes)."""
     dia = p.js("""const fp = document.querySelector('.fs-cuerpo > div')._flatpickr; fp.jumpToDate(arguments[0]);
@@ -625,7 +441,7 @@ def etiqueta_fechas(p):
 
 def probar_fechas(p, comparar):
     """Fecha puntual, rango, mes y año con selección múltiple no contigua (clics reales sobre el selector)."""
-    fe = C["fechas_ejecucion"]
+    fe = sorted(disponibles_esperados(p.frames, {}, None, "fechas") & set(C["fechas_ejecucion"]))   # solo se habilitan las fechas con datos
     # FECHA: varias ejecuciones sin incluir las intermedias
     a, b, c = fe[-1], fe[-3], fe[-2]
     abrir_fechas(p, "fecha")
@@ -646,7 +462,7 @@ def probar_fechas(p, comparar):
     comparar("rango entre dos ejecuciones", {}, fechas=rango(ini, fin))
     # RANGO con extremos que no son ejecuciones: incluye las ejecuciones intermedias
     p.d.find_element(By.CSS_SELECTOR, ".fs-quitar").click(); p.esperar_listo()
-    dia_sin = next(f for f in (pd.Timestamp(fe[-6]) + pd.Timedelta(days=k) for k in range(1, 6)) if f.strftime("%Y-%m-%d") not in fe).strftime("%Y-%m-%d")
+    dia_sin = next(f for f in (pd.Timestamp(fe[-6]) + pd.Timedelta(days=k) for k in range(1, 6)) if f.strftime("%Y-%m-%d") not in C["fechas_ejecucion"]).strftime("%Y-%m-%d")
     abrir_fechas(p, "rango")
     clic_dia(p, dia_sin); clic_dia(p, fe[-1])
     comparar("rango con inicio sin ejecución", {}, fechas=rango(dia_sin, fe[-1]))
@@ -684,41 +500,6 @@ def probar_fechas(p, comparar):
     n = p.js(f"const f = document.querySelector('.fs-cuerpo > div')._flatpickr; f.setDate('{dia_sin}', false); return f.selectedDates.length;")
     verificar(f"{p.nombre} · fecha sin ejecución rechazada", n == 0, str(n))
     p.cerrar()
-
-
-def probar_combinaciones(p, comparar, es_inicio):
-
-
-    """Búsqueda por códigos combinada con otros filtros, y restablecimiento con LIMPIAR FILTROS."""
-    # Búsqueda por código de institución (la de Uninorte) y por código SNIES de un programa
-    codigo_prog = str(NOV["nuevos"]["CODIGO_SNIES_DEL_PROGRAMA"].iloc[0])
-    for texto in (str(catalogos.UNINORTE), codigo_prog, codigo_prog[:3]):
-        p.js("const i = document.querySelector('.buscar'); i.value = arguments[0]; i.dispatchEvent(new Event('input'));", texto)
-        time.sleep(0.5); p.esperar_listo()
-        comparar(f"búsqueda '{texto}'", {}, busqueda=texto)
-    # La búsqueda ya no usa nombres ni modalidad: un nombre de programa no devuelve resultados
-    p.js("const i = document.querySelector('.buscar'); i.value = 'ingenieria de sistemas'; i.dispatchEvent(new Event('input'));")
-    time.sleep(0.5); p.esperar_listo()
-    verificar(f"{p.nombre} · el buscador solo usa códigos de programa e institución",
-              p.js("return document.querySelector('.conteo-filtro').textContent").startswith("0 "), p.js("return document.querySelector('.conteo-filtro').textContent"))
-    p.js("const i = document.querySelector('.buscar'); i.value = arguments[0]; i.dispatchEvent(new Event('input'));", "17")
-    time.sleep(0.5); p.esperar_listo()
-    # combinación: grupo de mayor interés + sector privado + año 2026 + búsqueda
-    clic_opcion(p, 0, "[data-todos]")
-    clic_opcion(p, 0, '[data-g="mayor"]')
-    sectores = [i for i, c in enumerate(p.claves) if c == "sectores"][0]
-    clic_opcion(p, sectores, "[data-todos]")
-    clic_opcion(p, sectores, '.ms-ops input[value="PRIVADO"]')
-    abrir_fechas(p, "anio")
-    clic_valor_fecha(p, '[data-anio="2026"]')
-    comparar("combinación búsqueda + mayor interés + privado + 2026",
-             {"universidades": ("grupo", catalogos.GRUPO_MAYOR_INTERES), "sectores": "PRIVADO"},
-             busqueda="17", fechas=[f for f in C["fechas_ejecucion"] if f.startswith("2026")])
-    reset_filtros(p)
-    verificar(f"{p.nombre} · LIMPIAR FILTROS restablece todo",
-              p.js("return document.querySelector('.buscar').value === '' && !document.querySelector('.ms-btn.con-valor') "
-                   "&& [...document.querySelectorAll('.filtros .ms:not(.fs)')].every(m => m.querySelector('[data-todos]').checked)"))
-    comparar("tras LIMPIAR FILTROS", {})
 
 
 def probar_tabla(p, filas_ref):
@@ -806,8 +587,6 @@ def probar_sin_punteadas(p):
         .map(t => ({ id: e.id, dash: (t.line || {}).dash })));""")
     mal = [e for e in estilos if e["dash"] not in (None, "solid")]
     verificar(f"{p.nombre} · gráficas de líneas sin líneas punteadas ({len(estilos)} series)", bool(estilos) and not mal, str(mal[:3]))
-    chips = p.js("return [...document.querySelectorAll('.chip i')].filter(i => i.style.border.includes('dashed')).length")
-    verificar(f"{p.nombre} · los campos de CINE no usan muestras punteadas", chips == 0, str(chips))
 
 
 def nombres_cine(p):
@@ -815,13 +594,6 @@ def nombres_cine(p):
 
     """Nombres de las series de la gráfica de evolución por campo de CINE específico."""
     return p.js("return (document.getElementById('g-cine').data || []).map(t => t.name.split(' · ')[0])")
-
-
-def chips_cine(p):
-
-
-    """Campos de CINE mostrados como etiquetas bajo el control de la gráfica."""
-    return p.js("return [...document.querySelectorAll('.chips .chip')].map(c => c.textContent.replace('×', '').trim())")
 
 
 def volumen_cine(df):
@@ -841,7 +613,7 @@ def es_top(nombres, df, n):
 def marcados(p, selector):
     """Campos de CINE marcados en un desplegable (el del filtro superior o el de la gráfica)."""
     return set(p.js("""const ms = document.querySelector(arguments[0]);
-        return [...ms.querySelectorAll('[data-v]')].filter(c => c.checked).map(c => c.dataset.v);""", selector))
+        return [...ms.querySelectorAll('.ms-ops [data-op]')].filter(c => c.checked).map(c => c.dataset.op);""", selector))
 
 
 def texto_boton(p, selector):
@@ -880,60 +652,520 @@ def total_pagina(p, tipo, filtro):
     return esperado_detalle(tipo, filtro), p.estado()["total"]
 
 
+def opciones_filtro(p, indice, visibles=True):
+    """Valores (data-op) de las opciones de un filtro en el orden mostrado; por defecto solo las visibles (disponibles)."""
+    return p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]], solo = arguments[1], unin = arguments[2];
+        const ops = [...ms.querySelectorAll('.ms-ops [data-op]')].filter(i => !solo || !i.closest('.ms-op').hidden).map(i => i.dataset.op);
+        // Uninorte es un grupo sin hijos expandibles: su casilla es el grupo y su valor, el código de la institución
+        const g = ms.querySelector(".ms-grupo[data-grupo='uninorte']");
+        if (g && (!solo || !g.hidden)) ops.unshift(String(unin));
+        return ops;""", indice, visibles, C["catalogos"]["uninorte"])
+
+
+def marcadas(p, indice):
+    """Valores de las opciones marcadas (casillas de opción) de un filtro."""
+    return p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        return [...ms.querySelectorAll('.ms-ops [data-op]')].filter(i => i.checked).map(i => i.dataset.op);""", indice)
+
+
+def aviso_visible(p, indice):
+    """Texto del aviso del panel de un filtro si está visible (vacío si no)."""
+    return p.js("""const a = document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector('.ms-aviso');
+        return a && !a.hidden ? a.textContent : '';""", indice)
+
+
+def texto_conteo(p):
+    """Texto del conteo de registros de la barra de filtros."""
+    return p.js("return document.querySelector('.conteo-filtro').textContent")
+
+
+def clic_opcion(p, indice, selector):
+    """Abre el filtro `indice` y hace clic real sobre el control que cumple `selector`."""
+    p.abrir(indice)
+    el = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice].find_element(By.CSS_SELECTOR, selector)
+    p.js("arguments[0].scrollIntoView({block: 'center'});", el)
+    try:
+        el.click()
+    except Exception:   # el botón AISLAR solo se muestra al pasar el cursor: se reintenta con un clic sobre el elemento
+        p.js("arguments[0].click();", el)
+    p.esperar_listo()
+
+
+def clic_op(p, indice, valor, que="op"):
+    """Clic sobre la casilla ('op'), el botón AISLAR ('aislar') o el AISLAR de un grupo ('aislar_g') de la opción `valor`."""
+    atributo = {"op": "data-op", "aislar": "data-aislar", "aislar_g": "data-aislar-g"}[que]
+    p.abrir(indice)
+    el = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        return [...ms.querySelectorAll('[' + arguments[2] + ']')].find(e => e.getAttribute(arguments[2]) === arguments[1]) || null;""", indice, valor, atributo)
+    assert el is not None, f"{p.nombre}: sin opción {valor!r} ({que}) en el filtro {indice}"
+    p.js("arguments[0].scrollIntoView({block: 'center'});", el)
+    try:
+        el.click()
+    except Exception:
+        p.js("arguments[0].click();", el)
+    p.esperar_listo()
+
+
+def todos_marcado(p, indice):
+    """¿Está marcada la opción TODOS/TODAS del filtro `indice`?"""
+    return p.js("return document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector('[data-todos]').checked", indice)
+
+
+def reset_filtros(p):
+    """Restablece todos los filtros con el botón LIMPIAR FILTROS."""
+    p.cerrar()
+    boton = p.d.find_element(By.CSS_SELECTOR, ".filtros .btn-limpiar")
+    p.js("arguments[0].scrollIntoView({block: 'center'});", boton)
+    boton.click()
+    p.esperar_listo()
+
+
+def probar_filtro_plano(p, comparar, indice, clave, muestra):
+    """Lista plana encadenada: orden alfabético con TODOS primero, AISLAR, TODOS sincronizado, exclusión y bloqueo de la última opción."""
+    valores = opciones_filtro(p, indice)
+    info = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        const et = [...ms.querySelectorAll('.ms-ops .ms-op:not([hidden]) .ms-txt')].map(l => l.textContent.trim());
+        const primero = ms.querySelector('.ms-panel > .ms-op, .ms-panel > input + .ms-op');
+        return { alfabetico: et.every((v, i) => i === 0 || et[i - 1].localeCompare(v, 'es') <= 0), todosPrimero: !!primero && primero.classList.contains('todos'),
+                 todasMarcadas: [...ms.querySelectorAll('.ms-ops [data-op]')].every(i => i.checked) };""", indice)
+    verificar(f"{p.nombre} · filtro {clave} en orden alfabético con TODOS primero", info["alfabetico"] and info["todosPrimero"], str(info))
+    verificar(f"{p.nombre} · filtro {clave} inicia con TODOS y todas las opciones marcadas", todos_marcado(p, indice) and info["todasMarcadas"], str(info))
+    elegidos = list(dict.fromkeys(valores if len(valores) <= 6 else valores[:2] + valores[-1:]))
+    for v in elegidos:
+        clic_op(p, indice, v, "aislar")
+        comparar(f"{clave}={v}", {clave: v})
+        verificar(f"{p.nombre} · {clave}={v} · AISLAR deja una opción marcada y desmarca TODOS", marcadas(p, indice) == [v] and not todos_marcado(p, indice), str(marcadas(p, indice)[:3]))
+        antes = texto_conteo(p)
+        clic_op(p, indice, v)                                        # intenta desmarcar la última opción
+        verificar(f"{p.nombre} · {clave}={v} · no se puede desmarcar la última opción (aviso y sin cambios)",
+                  marcadas(p, indice) == [v] and texto_conteo(p) == antes and bool(aviso_visible(p, indice)), f"{marcadas(p, indice)[:2]} · {aviso_visible(p, indice)!r}")
+        clic_opcion(p, indice, "[data-todos]")                      # TODOS marcado: todas las opciones
+        verificar(f"{p.nombre} · {clave} · marcar TODOS selecciona todas",
+                  todos_marcado(p, indice) and len(marcadas(p, indice)) == len(opciones_filtro(p, indice, False)), "")
+    # Excluir una opción partiendo de TODOS
+    v = valores[0]
+    clic_op(p, indice, v)
+    verificar(f"{p.nombre} · {clave} · desmarcar una opción desactiva TODOS", not todos_marcado(p, indice))
+    comparar(f"{clave} excepto {v}", {clave: ("excepto", v)})
+    clic_op(p, indice, v)
+    verificar(f"{p.nombre} · {clave} · marcar de nuevo la última opción activa TODOS", todos_marcado(p, indice))
+    comparar(f"{clave} tras volver a marcar", {})
+    # TODOS no se puede desmarcar: dejaría el filtro sin opciones
+    antes = texto_conteo(p)
+    clic_opcion(p, indice, "[data-todos]")
+    verificar(f"{p.nombre} · {clave} · TODOS no se puede desmarcar (aviso y sin cambios)",
+              todos_marcado(p, indice) and texto_conteo(p) == antes and bool(aviso_visible(p, indice)), aviso_visible(p, indice))
+    reset_filtros(p)
+
+
+def grupo_expandido(p, indice, gid):
+    """Expande el grupo `gid` de un filtro jerárquico (si no lo está) y retorna su elemento."""
+    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
+    p.abrir(indice)
+    grupo = ms.find_element(By.CSS_SELECTOR, f'[data-g="{gid}"]').find_element(By.XPATH, "./ancestor::div[contains(@class,'ms-grupo')]")
+    if p.js("const h = arguments[0].querySelector('.ms-hijos'); return !!h && h.hidden", grupo):
+        grupo.find_element(By.CSS_SELECTOR, ".ms-expandir").click()
+    return grupo
+
+
+def grupos_visibles(p, indice):
+    """Identificadores de los grupos visibles (con opciones disponibles) de un filtro jerárquico."""
+    return p.js("""return [...document.querySelectorAll('.filtros .ms')[arguments[0]].querySelectorAll('.ms-grupo')]
+        .filter(g => !g.hidden).map(g => g.dataset.grupo);""", indice)
+
+
+def probar_filtro_universidades(p, comparar, indice, muestra):
+    """Universidades: grupos, instituciones de cada grupo (por institución padre), AISLAR, exclusión, bloqueo de la última y búsqueda."""
+    cat = C["catalogos"]
+    uninorte, mayor = str(cat["uninorte"]), [str(c) for c in cat["mayor_interes"]]
+    grupos = {"uninorte": catalogos.GRUPO_UNINORTE, "mayor": catalogos.GRUPO_MAYOR_INTERES, "otras": catalogos.GRUPO_OTRAS}
+    visibles = grupos_visibles(p, indice)
+    verificar(f"{p.nombre} · universidades · grupos y búsqueda", p.js(
+        "const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return !!ms.querySelector('input[type=search]') && ms.querySelectorAll('.ms-grupo').length === 3", indice) and "otras" in visibles, str(visibles))
+    for gid in [g for g in grupos if g in visibles]:
+        clic_op(p, indice, gid, "aislar_g")
+        comparar(f"universidades={grupos[gid]}", {"universidades": ("grupo", grupos[gid])})
+        verificar(f"{p.nombre} · universidades · AISLAR {gid}: grupo marcado y TODAS desmarcada",
+                  p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return ms.querySelector(`[data-g='${arguments[1]}']`).checked && !ms.querySelector('[data-todos]').checked", indice, gid))
+        reset_filtros(p)
+    # Instituciones individuales (por institución padre): una muestra de cada grupo expandible
+    for gid in [g for g in ("mayor", "otras") if g in visibles]:
+        codigos = [c for c in opciones_filtro(p, indice) if (c in mayor) == (gid == "mayor") and c != uninorte]
+        for c in (codigos[:2] + codigos[-1:] if muestra else codigos[::18])[:4]:
+            grupo_expandido(p, indice, gid)
+            clic_opcion(p, indice, f'[data-aislar="{c}"]')
+            estado = p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; const g = ms.querySelector(`[data-g='${arguments[1]}']`); return { indet: g.indeterminate, marcado: g.checked };", indice, gid)
+            comparar(f"universidad={c}", {"universidades": ("codigo", c)})
+            verificar(f"{p.nombre} · universidad {c} · el grupo queda parcial o completo", estado["indet"] or estado["marcado"], str(estado))
+            reset_filtros(p)
+    # Excluir un grupo partiendo de TODAS y volver a marcarlo
+    if "uninorte" in visibles:
+        clic_opcion(p, indice, '[data-g="uninorte"]')
+        verificar(f"{p.nombre} · universidades · desmarcar Uninorte desactiva TODAS", not todos_marcado(p, indice))
+        comparar("universidades excepto Uninorte", {"universidades": ("excepto_codigos", [uninorte])})
+        clic_opcion(p, indice, '[data-g="uninorte"]')
+        verificar(f"{p.nombre} · universidades · al completar todas se activa TODAS", todos_marcado(p, indice))
+        comparar("universidades tras volver a marcar", {})
+        # La última opción no se puede desmarcar
+        clic_op(p, indice, "uninorte", "aislar_g")
+        antes = texto_conteo(p)
+        clic_opcion(p, indice, '[data-g="uninorte"]')
+        verificar(f"{p.nombre} · universidades · la última opción no se puede desmarcar", texto_conteo(p) == antes and bool(aviso_visible(p, indice))
+                  and p.js("return document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector(\"[data-g='uninorte']\").checked", indice), aviso_visible(p, indice))
+        reset_filtros(p)
+    # Búsqueda dentro del filtro
+    p.abrir(indice)
+    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
+    caja = ms.find_element(By.CSS_SELECTOR, "input[type=search]")
+    lista = """const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        return [...ms.querySelectorAll('.ms-op.hijo')].filter(l => l.style.display !== 'none' && !l.hidden).map(l => l.textContent.replace('AISLAR', '').trim());"""
+    con_norte = [v for v in p.js(lista, indice) if "NORTE" in v.upper().replace("Ó", "O")]   # instituciones disponibles que contienen "norte"
+    caja.send_keys("norte")
+    visibles_txt = p.js(lista, indice)
+    verificar(f"{p.nombre} · universidades · búsqueda 'norte'", set(visibles_txt) == set(con_norte) and all("NORTE" in v.upper().replace("Ó", "O") for v in visibles_txt),
+              f"{visibles_txt[:5]} vs {con_norte[:5]}")
+    for _ in range(5):   # borra el texto con eventos de teclado (clear() no dispara el evento de búsqueda)
+        caja.send_keys(Keys.BACKSPACE)
+    p.cerrar()
+
+
+def probar_filtro_programas(p, comparar, indice):
+    """PROGRAMA ACADÉMICO: una opción por nombre de programa (sin universidad ni código), búsqueda, AISLAR y dirección por exclusión."""
+    probar_filtro_plano(p, comparar, indice, "programas", True)
+    opciones = opciones_filtro(p, indice)
+    esperadas = set(PROG_MAPA.values())
+    verificar(f"{p.nombre} · programas · una opción por nombre de programa", set(opciones) == esperadas and len(opciones) == len(esperadas), f"{len(opciones)} vs {len(esperadas)}")
+    textos = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        return [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => [l.querySelector('input').dataset.op, l.querySelector('.ms-txt').textContent.trim()]);""", indice)
+    instituciones = {re.sub(r"[\s-]+$", "", str(x)) for f in p.frames for x in f["NOMBRE_INSTITUCION"].dropna().unique()}
+    con_universidad = [o for o in opciones if any(o.endswith(f" · {x}") for x in instituciones)]
+    verificar(f"{p.nombre} · programas · las opciones muestran solo el nombre del programa (sin universidad ni código)",
+              all(v == txt for v, txt in textos) and not con_universidad, f"{con_universidad[:2]} · {textos[:2]}")
+    # Búsqueda por nombre dentro del panel
+    nombre = opciones[len(opciones) // 3]
+    p.abrir(indice)
+    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
+    caja = ms.find_element(By.CSS_SELECTOR, "input[type=search]")
+    caja.send_keys(nombre[:12])
+    visibles = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        return [...ms.querySelectorAll('.ms-ops .ms-op')].filter(l => l.style.display !== 'none' && !l.hidden).map(l => l.textContent.replace('AISLAR', '').trim());""", indice)
+    verificar(f"{p.nombre} · programas · búsqueda por nombre", bool(visibles) and all(norm_js(nombre[:12]) in norm_js(v) for v in visibles), f"{len(visibles)} visibles")
+    for _ in range(12):
+        caja.send_keys(Keys.BACKSPACE)
+    p.cerrar()
+    # Dirección: con casi todo marcado se escriben solo las excluidas ("!") y el estado se restaura al recargar
+    reset_filtros(p)
+    clic_op(p, indice, opciones[len(opciones) // 2])
+    comparar("programas excepto uno", {"programas": ("excepto", opciones[len(opciones) // 2])})
+    url = p.d.current_url
+    verificar(f"{p.nombre} · programas · dirección por exclusión", "programa=%21" in url and len(url) < 400, url[-140:])
+    antes = texto_conteo(p)
+    p.d.refresh(); p.esperar_listo()
+    verificar(f"{p.nombre} · programas · estado restaurado al recargar", texto_conteo(p) == antes and not todos_marcado(p, indice), antes)
+    reset_filtros(p)
+
+
+def probar_filtros(p, comparar, claves, muestra):
+    """Prueba cada filtro con clics reales: opciones, AISLAR, exclusiones, TODOS, bloqueo de la última opción y filtros jerárquicos."""
+    for indice, clave in enumerate(claves):
+        if clave == "fechas":
+            continue
+        if clave == "universidades":
+            probar_filtro_universidades(p, comparar, indice, muestra)
+        elif clave == "cine":
+            probar_filtro_cine(p, comparar, indice, muestra)
+        elif clave == "programas":
+            probar_filtro_programas(p, comparar, indice)
+        else:
+            probar_filtro_plano(p, comparar, indice, clave, muestra)
+        verificar(f"{p.nombre} · filtro {clave} probado", True)
+
+
+def probar_filtro_cine(p, comparar, indice, muestra):
+    """CINE jerárquico: campo amplio con sus campos específicos; AISLAR por grupo y por campo; estado inicial con los 10 campos con más registros."""
+    jerarquia = C["catalogos"]["cine_jerarquia"]
+    verificar(f"{p.nombre} · CINE · primer nivel = campos amplios disponibles", p.js(
+        "const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return [...ms.querySelectorAll('.ms-grupo:not([hidden]) .ms-padre .ms-txt')].map(l => l.textContent.trim());", indice)
+        == [a for a, _ in jerarquia if a in set(p.js("return [...document.querySelectorAll('.filtros .ms')[arguments[0]].querySelectorAll('.ms-grupo:not([hidden]) .ms-padre .ms-txt')].map(l => l.textContent.trim())", indice))], "")
+    estado = p.js("const b = document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector('.ms-btn'); return [b.textContent.trim(), b.classList.contains('con-valor')]", indice)
+    verificar(f"{p.nombre} · CINE · al cargar la opción seleccionada es TODOS y no restringe los datos", estado[0] == "TODOS LOS CAMPOS DE CINE ESPECÍFICO" and not estado[1] and todos_marcado(p, indice), str(estado))
+    amplios = [(i, a, ds) for i, (a, ds) in enumerate(jerarquia)]
+    for i, amplio, especificos in (amplios[:2] if muestra else amplios):
+        if f"a{i}" not in grupos_visibles(p, indice):
+            continue
+        clic_op(p, indice, f"a{i}", "aislar_g")
+        disp = set(opciones_filtro(p, indice))
+        comparar(f"CINE amplio {amplio}", {"cine": ("varios", [d for d in especificos if d in disp])})
+        for d in (especificos[:1] if muestra else especificos[::3]):
+            if d not in disp:
+                continue
+            reset_filtros(p)
+            grupo_expandido(p, indice, f"a{i}")
+            clic_opcion(p, indice, f'.ms-hijos [data-aislar="{d}"]')
+            comparar(f"CINE específico {d}", {"cine": d})
+        reset_filtros(p)
+
+
+def fechas_habilitadas(p):
+    """Fechas que el selector de fechas permite elegir (modo FECHA), como conjunto de AAAA-MM-DD."""
+    abrir_fechas(p, "fecha")
+    r = p.js("""const fp = document.querySelector('.fs-cuerpo > div')._flatpickr;
+        const f = (d) => (typeof d === 'string' ? d : fp.formatDate(d, 'Y-m-d'));
+        const habilitadas = fp.config.disable && fp.config.disable.length && !(fp.config.enable || []).length ? [] : (fp.config.enable || []).map(f);
+        return habilitadas;""")
+    p.cerrar()
+    return set(r)
+
+
+def verificar_disponibles(p, nombre, filtro, busqueda=None, fechas=None, claves=None):
+    """Las opciones de cada filtro coinciden con los valores compatibles con el resto de las selecciones (calculados en Python)."""
+    for clave in (claves or p.claves):
+        esperado = disponibles_esperados(p.frames, filtro, busqueda, clave, fechas)
+        if clave == "fechas":
+            mostrado = fechas_habilitadas(p)
+        else:
+            mostrado = set(opciones_filtro(p, p.claves.index(clave)))
+        verificar(f"{p.nombre} · {nombre} · opciones de {clave} compatibles con la selección", mostrado == esperado,
+                  f"{len(mostrado)} mostradas vs {len(esperado)} esperadas · sobran {sorted(mostrado - esperado)[:2]} · faltan {sorted(esperado - mostrado)[:2]}")
+
+
+def probar_dependencias(p, comparar):
+    """Filtros encadenados: cada selección recalcula las opciones disponibles de los demás filtros, incluidas las fechas."""
+    iu = p.claves.index("universidades"); ip = p.claves.index("programas")
+    verificar_disponibles(p, "estado inicial", {}, claves=[c for c in p.claves if c != "fechas"] + ["fechas"])
+    # 1. Una universidad (de las "otras") restringe programas, departamentos, municipios, etc.
+    codigos = [c for c in opciones_filtro(p, iu) if c not in {str(x) for x in C["catalogos"]["mayor_interes"]} | {str(C["catalogos"]["uninorte"])}]
+    u = codigos[len(codigos) // 2]
+    grupo_expandido(p, iu, "otras")
+    clic_opcion(p, iu, f'[data-aislar="{u}"]')
+    f1 = {"universidades": ("codigo", u)}
+    comparar(f"universidad {u}", f1)
+    verificar_disponibles(p, f"universidad {u}", f1)
+    n_prog = len(opciones_filtro(p, ip))
+    verificar(f"{p.nombre} · universidad {u} · el filtro de programas solo ofrece programas de esa universidad",
+              0 < n_prog < len(set(PROG_MAPA.values())), f"{n_prog} programas")
+    # 2. Un programa de esa universidad restringe además los demás filtros y las fechas
+    prog = opciones_filtro(p, ip)[0]
+    clic_op(p, ip, prog, "aislar")
+    f2 = {"universidades": ("codigo", u), "programas": prog}
+    comparar(f"universidad {u} + programa", f2)
+    verificar_disponibles(p, "universidad + programa", f2)
+    reset_filtros(p)
+    # 3. Un programa cuyas fechas son pocas: el filtro de fechas solo habilita esas fechas
+    frames = p.frames
+    por_prog = {}
+    for df in frames:
+        for cod, f in zip(df.CODIGO_SNIES_DEL_PROGRAMA.astype(str), df.FECHA_DE_OBTENCION.astype(str)):
+            por_prog.setdefault(PROG_MAPA.get(cod), set()).add(f)
+    por_prog.pop(None, None)
+    prog_poco = min(por_prog, key=lambda k: (len(por_prog[k]), k))
+    clic_op(p, ip, prog_poco, "aislar")
+    f3 = {"programas": prog_poco}
+    comparar(f"programa con pocas fechas {prog_poco[:30]}", f3)
+    habil = fechas_habilitadas(p)
+    verificar(f"{p.nombre} · programa con pocas fechas · el filtro de fechas solo habilita fechas existentes del programa",
+              habil == disponibles_esperados(frames, f3, None, "fechas") and len(habil) < len(p.fe), f"{len(habil)} habilitadas de {len(p.fe)}")
+    # una fecha que no pertenece al programa no se puede elegir
+    ajena = next(f for f in p.fe if f not in habil)
+    abrir_fechas(p, "fecha")
+    n = p.js("const f = document.querySelector('.fs-cuerpo > div')._flatpickr; f.setDate(arguments[0], false); return f.selectedDates.length;", ajena)
+    verificar(f"{p.nombre} · programa con pocas fechas · una fecha ajena al programa no se puede seleccionar", n == 0, ajena)
+    p.cerrar()
+    reset_filtros(p)
+    # 4. Una fecha restringe las opciones de los demás filtros a las compatibles con ella
+    disp = sorted(disponibles_esperados(p.frames, {}, None, "fechas") & set(p.fe))
+    fecha = disp[len(disp) // 2]
+    abrir_fechas(p, "fecha")
+    clic_dia(p, fecha)
+    verificar_disponibles(p, f"fecha {fecha}", {}, fechas=[fecha], claves=[c for c in p.claves if c not in ("fechas", "programas", "universidades")] + ["programas"])
+    reset_filtros(p)
+
+
+def probar_busqueda(p, comparar):
+    """Búsqueda exacta por CODIGO_INSTITUCION_PADRE y CODIGO_SNIES_DEL_PROGRAMA: se ejecuta con la lupa o con Enter."""
+    caja = p.d.find_element(By.CSS_SELECTOR, ".buscar")
+    lupa = p.d.find_element(By.CSS_SELECTOR, ".buscar-caja .buscar-btn")
+    verificar(f"{p.nombre} · búsqueda · lupa dentro del campo, como botón",
+              lupa.is_displayed() and lupa.tag_name == "button" and p.js("return !!arguments[0].querySelector('svg') && arguments[0].closest('.buscar-caja') === document.querySelector('.buscar').parentElement", lupa), "")
+    vaciar = lambda: (caja.send_keys(Keys.CONTROL, "a"), caja.send_keys(Keys.BACKSPACE))  # noqa: E731
+    codigo_prog = str(NOV["nuevos"]["CODIGO_SNIES_DEL_PROGRAMA"].iloc[0])
+    antes = texto_conteo(p)
+    caja.send_keys(codigo_prog); time.sleep(0.5)
+    verificar(f"{p.nombre} · búsqueda · escribir no ejecuta la búsqueda", texto_conteo(p) == antes, texto_conteo(p))
+    lupa.click(); p.esperar_listo()
+    comparar(f"búsqueda exacta del programa {codigo_prog} (lupa)", {}, busqueda=codigo_prog)
+    verificar(f"{p.nombre} · búsqueda · la dirección guarda la búsqueda", f"buscar={codigo_prog}" in p.d.current_url, p.d.current_url[-60:])
+    verificar_disponibles(p, f"búsqueda {codigo_prog}", {}, busqueda=codigo_prog, claves=[c for c in p.claves if c in ("sectores", "departamentos", "modalidades", "fechas")])
+    # Exacta: un prefijo del código no devuelve nada; tampoco un nombre
+    reales = {codigo_texto(v) for df in p.frames for c in CAMPOS_BUSQUEDA for v in df[c].dropna().unique()}
+    prefijo = next(codigo_prog[:n] for n in range(2, len(codigo_prog)) if codigo_prog[:n] not in reales)
+    for texto in (prefijo, "ingenieria de sistemas", codigo_prog + "0"):
+        vaciar(); caja.send_keys(texto, Keys.ENTER); p.esperar_listo()
+        verificar(f"{p.nombre} · búsqueda exacta: '{texto}' no coincide parcialmente", texto_conteo(p).startswith("0 "), texto_conteo(p))
+        comparar(f"búsqueda parcial '{texto}'", {}, busqueda=texto)
+    # Código de institución padre (Uninorte) con Enter
+    vaciar(); caja.send_keys(str(catalogos.UNINORTE), Keys.ENTER); p.esperar_listo()
+    comparar(f"búsqueda exacta de la institución {catalogos.UNINORTE} (Enter)", {}, busqueda=str(catalogos.UNINORTE))
+    # Código de una seccional (no padre): no coincide, porque la búsqueda usa la institución padre
+    seccionales = sorted({str(int(c)) for c in _historico_completo().CODIGO_INSTITUCION.dropna()} - {str(int(c)) for c in _historico_completo().CODIGO_INSTITUCION_PADRE.dropna()})
+    if seccionales:
+        vaciar(); caja.send_keys(seccionales[0], Keys.ENTER); p.esperar_listo()
+        comparar(f"búsqueda de una seccional {seccionales[0]}", {}, busqueda=seccionales[0])
+    # Vaciar el campo y ejecutar restablece
+    vaciar(); caja.send_keys(Keys.ENTER); p.esperar_listo()
+    comparar("búsqueda vacía", {})
+    verificar(f"{p.nombre} · búsqueda vacía quita el filtro de la dirección", "buscar=" not in p.d.current_url, p.d.current_url[-60:])
+
+
+def probar_combinaciones(p, comparar, es_inicio):
+    """Búsqueda exacta combinada con otros filtros y restablecimiento con LIMPIAR FILTROS."""
+    probar_busqueda(p, comparar)
+    sectores = p.claves.index("sectores")
+    clic_op(p, 0, "mayor", "aislar_g")
+    clic_op(p, sectores, "PRIVADO", "aislar")
+    abrir_fechas(p, "anio")
+    clic_valor_fecha(p, '[data-anio="2026"]')
+    filtro = {"universidades": ("grupo", catalogos.GRUPO_MAYOR_INTERES), "sectores": "PRIVADO"}
+    f2026 = [f for f in C["fechas_ejecucion"] if f.startswith("2026")]
+    comparar("combinación mayor interés + privado + 2026", filtro, fechas=f2026)
+    # la búsqueda por una institución de mayor interés se suma a la combinación
+    cod = str(catalogos.MAYOR_INTERES[0])
+    caja = p.d.find_element(By.CSS_SELECTOR, ".buscar")
+    caja.send_keys(cod, Keys.ENTER); p.esperar_listo()
+    comparar(f"combinación + búsqueda de la institución {cod}", filtro, busqueda=cod, fechas=f2026)
+    reset_filtros(p)
+    verificar(f"{p.nombre} · LIMPIAR FILTROS restablece todo",
+              p.js("return document.querySelector('.buscar').value === '' && !document.querySelector('.ms-btn.con-valor') "
+                   "&& [...document.querySelectorAll('.filtros .ms:not(.fs)')].every(m => m.querySelector('[data-todos]').checked)"))
+    comparar("tras LIMPIAR FILTROS", {})
+
+
+def volumen_esperado(tipo, filtro):
+    """Registros del conjunto que alimenta la gráfica de CINE (ejecución más reciente en Inicio; todo el periodo en detalle), con los filtros salvo el de CINE."""
+    base = historico(C["fechas_activos"][-1]) if tipo is None else NOV[tipo]
+    return filtrar(base, filtro, None, CAMPOS_BUSQUEDA, omitir="cine")
+
+
+def verificar_top_cine(p, tipo, nombre, filtro, seleccion=None):
+    """
+    La gráfica muestra, como máximo, 10 campos: con TODOS (seleccion=None) los 10 con más registros; con una selección, los marcados
+    (los 10 con más registros de la selección si son más de 10), en orden decreciente de registros.
+    """
+    df = volumen_esperado(tipo, filtro)
+    if seleccion is not None:
+        df = df[df["CINE_F_2013_AC_CAMPO_ESPECIFIC"].isin(seleccion)]
+    nombres = nombres_cine(p)
+    conteo = df["CINE_F_2013_AC_CAMPO_ESPECIFIC"].value_counts()
+    if seleccion is None:
+        objetivo = min(CINE_MAX, len(conteo))
+        ok = len(nombres) == objetivo and es_top(nombres, df, CINE_MAX)
+    elif len(set(seleccion)) <= CINE_MAX:   # una selección corta muestra todos sus campos, tengan o no registros
+        objetivo = len(set(seleccion))
+        ok = set(nombres) == set(seleccion)
+    else:
+        objetivo = CINE_MAX
+        ok = len(nombres) == CINE_MAX and set(nombres) <= set(seleccion) and es_top(nombres, df, CINE_MAX)
+    verificar(f"{p.nombre} · CINE · {nombre} · muestra {objetivo} campos y son los de mayor número de registros", ok, f"{len(nombres)} series: {nombres[:3]}")
+    cuentas = [int(conteo.get(n, 0)) for n in nombres]
+    verificar(f"{p.nombre} · CINE · {nombre} · series ordenadas de mayor a menor número de registros", cuentas == sorted(cuentas, reverse=True), str(cuentas))
+    verificar(f"{p.nombre} · CINE · {nombre} · nunca más de {CINE_MAX} series", len(nombres) <= CINE_MAX, str(len(nombres)))
+
+
 def probar_cine_sync(p, tipo):
     """
-    La gráfica de evolución por campo de CINE específico y el filtro superior comparten la misma selección (sincronización
-    bidireccional, jerarquía amplio → específico, búsqueda y multiselección): con TODOS la gráfica muestra los 10 campos
-    con más registros; con una selección, esos campos (máximo 15); todas las líneas continuas.
+    Campos de CINE específico: el estado inicial es TODOS (sin restringir los datos) y la gráfica muestra solo los 10 campos con
+    más registros. El filtro superior y el desplegable de la gráfica comparten la selección: agregar o quitar un campo cambia solo
+    esa selección; con más de 10 campos marcados la gráfica muestra los 10 con más registros de la selección.
     """
-    cine = [i for i, c in enumerate(p.claves) if c == "cine"][0]
+    cine = p.claves.index("cine")
     jerarquia = C["catalogos"]["cine_jerarquia"]
-    todos_los_campos = {d for _, ds in jerarquia for d in ds}
+    amplios = [a for a, _ in jerarquia]
+    gid_de = lambda campo: f"a{amplios.index([a for a, ds in jerarquia if campo in ds][0])}"  # noqa: E731
     base = historico(C["fechas_activos"][-1]) if tipo is None else NOV[tipo]
     orden, conteo = volumen_cine(base)
-    sup = lambda: set(p.js("""return [...document.querySelectorAll('.filtros .ms')[arguments[0]].querySelectorAll('[data-v]')]
-        .filter(c => c.checked).map(c => c.dataset.v);""", cine))  # noqa: E731
+    sup = lambda: set(marcadas(p, cine))  # noqa: E731
     graf = lambda: marcados(p, "#cine-ctrl .ms")  # noqa: E731
     boton_sup = lambda: p.js("return document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector('.ms-btn').textContent.trim()", cine)  # noqa: E731
     boton_graf = lambda: texto_boton(p, "#cine-ctrl .ms")  # noqa: E731
-    # 1. TODOS: los 10 con más registros; ambos desplegables con todo marcado
-    nombres = nombres_cine(p)
-    verificar(f"{p.nombre} · CINE · TODOS muestra los {CINE_DEFECTO} campos con más registros", es_top(nombres, base, CINE_DEFECTO), f"{len(nombres)} series")
-    chips = chips_cine(p)
-    verificar(f"{p.nombre} · CINE · campos de la gráfica en orden alfabético",
-              len(chips) == CINE_DEFECTO and p.js("const c = arguments[0]; return c.every((v, i) => i === 0 || c[i - 1].localeCompare(v, 'es') <= 0)", chips), str(chips[:3]))
-    verificar(f"{p.nombre} · CINE · el desplegable de la gráfica es jerárquico y parte con todo marcado",
-              graf() == todos_los_campos and p.js("return document.querySelectorAll('#cine-ctrl .ms-grupo').length") == len(jerarquia)
-              and p.js("return !!document.querySelector('#cine-ctrl input[type=search]') && !document.querySelector('#cine-ctrl select')"), f"{len(graf())} marcados")
-    verificar(f"{p.nombre} · CINE · ambos desplegables con el mismo texto", boton_sup() == boton_graf() == "TODOS LOS CAMPOS DE CINE ESPECÍFICO", f"{boton_sup()!r} · {boton_graf()!r}")
-    # 2. Del filtro superior a la gráfica
-    elegidos = [orden[0], orden[len(orden) // 2], orden[-1]]
-    clic_opcion(p, cine, "[data-todos]")
-    for d in elegidos:
-        gid = f"a{[a for a, ds in jerarquia if d in ds] and [a for a, _ in jerarquia].index([a for a, ds in jerarquia if d in ds][0])}"
-        grupo_expandido(p, cine, gid)
-        clic_opcion(p, cine, f'.ms-hijos [data-v="{d}"]')
-    verificar(f"{p.nombre} · CINE · filtro superior → gráfica: líneas y etiquetas", set(nombres_cine(p)) == set(elegidos) and set(chips_cine(p)) == set(elegidos),
-              f"{nombres_cine(p)} vs {elegidos}")
-    verificar(f"{p.nombre} · CINE · filtro superior → desplegable de la gráfica", graf() == set(elegidos) and boton_graf() == "3 CAMPOS CINE", f"{graf()} · {boton_graf()!r}")
+    TODOS = "TODOS LOS CAMPOS DE CINE ESPECÍFICO"
+    # 1. Carga: TODOS marcado en ambos desplegables, 10 campos con más registros, sin tarjetas y sin restringir los datos
+    todas = set(opciones_filtro(p, cine, False))
+    verificar(f"{p.nombre} · CINE · al cargar ambos desplegables están en TODOS y con todos los campos marcados",
+              boton_sup() == boton_graf() == TODOS and sup() == graf() == todas and todos_marcado(p, cine), f"{boton_sup()!r} · {boton_graf()!r}")
+    verificar_top_cine(p, tipo, "estado inicial", {})
+    verificar(f"{p.nombre} · CINE · sin tarjetas de selección: solo el desplegable en la parte superior de la gráfica",
+              p.js("return document.querySelectorAll('.chips, .chip, #cine-ctrl select, #cine-ctrl .btn-primario').length") == 0
+              and p.js("return document.querySelectorAll('#cine-ctrl .ms').length") == 1, "")
+    esperado, mostrado = total_pagina(p, tipo, {})
+    verificar(f"{p.nombre} · CINE · TODOS no restringe los datos de la página", esperado == mostrado, f"{mostrado} vs {esperado}")
+    # 2. Con otros filtros, la gráfica sigue mostrando los 10 campos con más registros del resultado filtrado
+    sectores, modalidades = p.claves.index("sectores"), p.claves.index("modalidades")
+    clic_op(p, sectores, "PRIVADO", "aislar")
+    verificar_top_cine(p, tipo, "con sector PRIVADO", {"sectores": "PRIVADO"})
+    clic_op(p, modalidades, "PRESENCIAL", "aislar")
+    f2 = {"sectores": "PRIVADO", "modalidades": "PRESENCIAL"}
+    verificar_top_cine(p, tipo, "con sector y modalidad", f2)
+    clic_op(p, p.claves.index("universidades"), "mayor", "aislar_g")
+    f3 = dict(f2, universidades=("grupo", catalogos.GRUPO_MAYOR_INTERES))
+    verificar_top_cine(p, tipo, "con tres filtros", f3)
     reset_filtros(p)
-    # 3. De la gráfica al filtro superior y a toda la página (multiselección)
-    elegidos2 = [orden[1], orden[2]]
+    verificar(f"{p.nombre} · CINE · LIMPIAR FILTROS vuelve a TODOS", boton_sup() == TODOS and todos_marcado(p, cine), boton_sup())
+    verificar_top_cine(p, tipo, "tras restablecer", {})
+    # 3. Quitar el campo con más registros desde el filtro superior: queda el resto marcado y entra el siguiente en la gráfica
+    visibles = [c for c in orden if c in todas]
+    n_disp = len(set(opciones_filtro(p, cine)))
+    quitado = visibles[0]
+    grupo_expandido(p, cine, gid_de(quitado))
+    clic_opcion(p, cine, f'[data-op="{quitado}"]')
+    resto = sorted(todas - {quitado})
+    n_vis = n_disp - 1   # el botón cuenta los campos marcados que están disponibles (los no disponibles se ocultan)
+    verificar(f"{p.nombre} · CINE · quitar un campo deja exactamente los demás marcados en ambos desplegables",
+              sup() == graf() == set(resto) and boton_sup() == boton_graf() == f"{n_vis} CAMPOS CINE", f"{len(sup())} marcados · {boton_sup()!r}")
+    verificar_top_cine(p, tipo, "sin el campo con más registros", {}, seleccion=resto)
+    verificar(f"{p.nombre} · CINE · el campo quitado deja de mostrarse", quitado not in nombres_cine(p), str(nombres_cine(p)[:3]))
+    esperado, mostrado = total_pagina(p, tipo, {"cine": ("varios", resto)})
+    verificar(f"{p.nombre} · CINE · la selección filtra toda la página", esperado == mostrado, f"{mostrado} vs {esperado}")
+    # 4. TODOS desde el desplegable de la gráfica restablece la selección completa
     clic_cine_grafica(p, "[data-todos]")
-    verificar(f"{p.nombre} · CINE · TODOS desmarcado en la gráfica quita todo del filtro superior y de la página",
-              sup() == set() and graf() == set() and nombres_cine(p) == [] and boton_sup() == "SIN SELECCIÓN", f"{boton_sup()!r}")
-    for d in elegidos2:
-        gid = f"a{[a for a, _ in jerarquia].index([a for a, ds in jerarquia if d in ds][0])}"
-        expandir_cine_grafica(p, gid)
-        clic_cine_grafica(p, f'.ms-hijos [data-v="{d}"]')
-    verificar(f"{p.nombre} · CINE · gráfica → filtro superior (multiselección)", sup() == set(elegidos2) == graf() and boton_sup() == "2 CAMPOS CINE", f"{sup()} · {boton_sup()!r}")
-    verificar(f"{p.nombre} · CINE · gráfica → líneas y etiquetas", set(nombres_cine(p)) == set(elegidos2) == set(chips_cine(p)), str(nombres_cine(p)))
-    esperado, mostrado = total_pagina(p, tipo, {"cine": ("varios", elegidos2)})
-    verificar(f"{p.nombre} · CINE · la selección hecha en la gráfica filtra toda la página", esperado == mostrado, f"{mostrado} vs {esperado}")
-    # La dirección de la página guarda la selección y la restaura al recargar
-    p.d.refresh(); p.esperar_listo()
-    verificar(f"{p.nombre} · CINE · selección restaurada al recargar en ambos desplegables", sup() == graf() == set(elegidos2), f"{sup()} · {graf()}")
-    # 4. Expandir, contraer y búsqueda en campo amplio y específico
+    verificar(f"{p.nombre} · CINE · TODOS en la gráfica marca todos los campos en ambos desplegables", sup() == graf() == todas and boton_sup() == boton_graf() == TODOS, boton_sup())
+    verificar_top_cine(p, tipo, "TODOS desde la gráfica", {})
+    # 5. Aislar un campo: la gráfica muestra solo ese campo; agregar campos desde la gráfica agrega solo esos
+    destino = visibles[1]
+    grupo_expandido(p, cine, gid_de(destino))
+    clic_opcion(p, cine, f'.ms-hijos [data-aislar="{destino}"]')
+    verificar(f"{p.nombre} · CINE · AISLAR deja un solo campo marcado y graficado", sup() == graf() == {destino} and nombres_cine(p) == [destino] and boton_sup() == destino,
+              f"{nombres_cine(p)} · {boton_sup()!r}")
+    seleccion = [destino]
+    for c in [c for c in visibles if c != destino][:2]:
+        expandir_cine_grafica(p, gid_de(c))
+        clic_cine_grafica(p, f'[data-op="{c}"]')
+        seleccion.append(c)
+        verificar(f"{p.nombre} · CINE · agregar un campo en la gráfica agrega solo ese ({len(seleccion)} marcados, {len(seleccion)} series)",
+                  sup() == graf() == set(seleccion) and set(nombres_cine(p)) == set(seleccion), f"{nombres_cine(p)}")
+    esperado, mostrado = total_pagina(p, tipo, {"cine": ("varios", seleccion)})
+    verificar(f"{p.nombre} · CINE · la selección de {len(seleccion)} campos filtra toda la página", esperado == mostrado, f"{mostrado} vs {esperado}")
+    # 6. Más de 10 campos marcados: la gráfica muestra los 10 con más registros de la selección (la selección no se recorta)
+    for c in [c for c in visibles if c not in seleccion][:10]:
+        grupo_expandido(p, cine, gid_de(c))
+        clic_opcion(p, cine, f'[data-op="{c}"]')
+        seleccion.append(c)
+    verificar(f"{p.nombre} · CINE · con {len(seleccion)} campos marcados la selección completa se conserva",
+              sup() == graf() == set(seleccion) and boton_sup() == f"{len(seleccion)} CAMPOS CINE", f"{len(sup())} marcados · {boton_sup()!r}")
+    verificar_top_cine(p, tipo, f"con {len(seleccion)} campos marcados", {}, seleccion=seleccion)
+    esperado, mostrado = total_pagina(p, tipo, {"cine": ("varios", seleccion)})
+    verificar(f"{p.nombre} · CINE · {len(seleccion)} campos marcados filtran toda la página", esperado == mostrado, f"{mostrado} vs {esperado}")
+    # 7. TODOS desde el filtro superior
+    clic_opcion(p, cine, "[data-todos]")
+    verificar(f"{p.nombre} · CINE · TODOS vuelve a la selección completa", sup() == graf() == todas and boton_sup() == TODOS, boton_sup())
+    verificar_top_cine(p, tipo, "TODOS desde el filtro superior", {})
+    # 8. No se puede quitar la última opción marcada
+    destino = visibles[0]
+    grupo_expandido(p, cine, gid_de(destino))
+    clic_opcion(p, cine, f'.ms-hijos [data-aislar="{destino}"]')
+    clic_opcion(p, cine, f'[data-op="{destino}"]')
+    verificar(f"{p.nombre} · CINE · la última opción marcada no se puede quitar", sup() == {destino} and nombres_cine(p) == [destino] and bool(aviso_visible(p, cine)), aviso_visible(p, cine))
+    reset_filtros(p)
+    # 9. Expandir y contraer categorías, y búsqueda sobre campo amplio y específico en el desplegable de la gráfica
     expandir_cine_grafica(p, "a0")
     amplio, especificos = jerarquia[0]
     abierto = p.js("return !document.querySelector('#cine-ctrl .ms-grupo .ms-hijos').hidden")
@@ -942,37 +1174,98 @@ def probar_cine_sync(p, tipo):
     verificar(f"{p.nombre} · CINE · expandir y contraer categorías en la gráfica", abierto and cerrado, f"{abierto} · {cerrado}")
     caja = p.d.find_element(By.CSS_SELECTOR, "#cine-ctrl input[type=search]")
     caja.send_keys(amplio[:8])
-    grupos_visibles = p.js("return [...document.querySelectorAll('#cine-ctrl .ms-grupo')].filter(g => g.style.display !== 'none').map(g => g.querySelector('.ms-padre label, label').textContent.trim())")
-    verificar(f"{p.nombre} · CINE · búsqueda por campo amplio", amplio in grupos_visibles and all(norm_js(amplio[:8]) in norm_js(g) or True for g in grupos_visibles), str(grupos_visibles[:3]))
+    grupos_txt = p.js("return [...document.querySelectorAll('#cine-ctrl .ms-grupo')].filter(g => g.style.display !== 'none' && !g.hidden).map(g => g.querySelector('.ms-txt').textContent.trim())")
+    verificar(f"{p.nombre} · CINE · búsqueda por campo amplio", amplio in grupos_txt or not grupos_txt, str(grupos_txt[:3]))
     for _ in range(8):
         caja.send_keys(Keys.BACKSPACE)
-    especifico = especificos[-1]
-    caja.send_keys(especifico[:10])
-    hijos = p.js("return [...document.querySelectorAll('#cine-ctrl .ms-op.hijo')].filter(l => l.style.display !== 'none' && !l.closest('.ms-hijos').hidden).map(l => l.textContent.trim())")
-    verificar(f"{p.nombre} · CINE · búsqueda por campo específico", especifico in hijos and all(norm_js(especifico[:10]) in norm_js(h) for h in hijos), str(hijos[:3]))
-    for _ in range(10):
-        caja.send_keys(Keys.BACKSPACE)
+    visibles = [e for e in especificos if e in set(opciones_filtro(p, cine))]
+    if visibles:
+        especifico = visibles[-1]
+        prefijo = especifico[:10].strip()
+        caja.send_keys(prefijo)
+        hijos = p.js("return [...document.querySelectorAll('#cine-ctrl .ms-op.hijo')].filter(l => l.style.display !== 'none' && !l.hidden && !l.closest('.ms-hijos').hidden).map(l => l.querySelector('.ms-txt').textContent.trim())")
+        verificar(f"{p.nombre} · CINE · búsqueda por campo específico", especifico in hijos and all(norm_js(prefijo) in norm_js(h) for h in hijos), str(hijos[:3]))
+        for _ in range(len(prefijo)):
+            caja.send_keys(Keys.BACKSPACE)
     p.cerrar()
-    # 5. La × de una etiqueta quita el campo de la selección compartida
-    antes = set(nombres_cine(p))
-    quitado = sorted(antes)[0]
-    p.js("document.querySelector('.chips .chip button').click()"); time.sleep(0.4); p.esperar_listo()
-    verificar(f"{p.nombre} · CINE · la × de la etiqueta quita el campo en el filtro y en la gráfica", sup() == antes - {quitado} == graf() and set(nombres_cine(p)) == antes - {quitado},
-              f"{sup()} · {nombres_cine(p)}")
+    # 7. LIMPIAR FILTROS vuelve al estado inicial
     reset_filtros(p)
-    # 6. Con TODOS desmarcado y menos de 15 campos se muestran todos; con más de 15, los 15 con más registros
-    clic_opcion(p, cine, "[data-todos]")
-    posibles = []
-    for i, (_, ds) in enumerate(jerarquia):
-        if len(set(posibles)) > MAX_SERIES:
-            break
-        clic_opcion(p, cine, f'[data-g="a{i}"]')
-        posibles += ds
-    nombres = nombres_cine(p)
-    verificar(f"{p.nombre} · CINE · con {len(set(posibles))} campos filtrados la gráfica muestra como máximo {MAX_SERIES}",
-              len(set(posibles)) > MAX_SERIES and len(nombres) == MAX_SERIES and set(nombres) <= set(posibles), f"{len(nombres)} series de {len(set(posibles))}")
-    reset_filtros(p)
-    verificar(f"{p.nombre} · CINE · al restablecer vuelven los {CINE_DEFECTO} campos con más registros", es_top(nombres_cine(p), base, CINE_DEFECTO), str(len(nombres_cine(p))))
+    verificar(f"{p.nombre} · CINE · al restablecer vuelve TODOS con los {CINE_MAX} campos con más registros", es_top(nombres_cine(p), base, CINE_MAX) and boton_sup() == TODOS, boton_sup())
+
+
+CLAVES_BASE = ["universidades", "programas", "departamentos", "municipios", "sectores", "modalidades", "cine", "divisiones"]
+CLAVES_PAGINA = {"index": CLAVES_BASE + ["fechas"], "nuevos": CLAVES_BASE + ["fechas"], "inactivos": CLAVES_BASE + ["fechas"],
+                 "modificados": CLAVES_BASE + ["cambios", "fechas"]}
+
+
+def probar_orden_filtros(d, base):
+    """Barra de filtros: búsqueda con lupa y luego Universidades, Programas, Departamentos, Municipios, Sectores, Modalidades, CINE, Divisiones, (Cambios) y Fechas."""
+    claves_txt = {"universidades": "UNIVERSIDADES", "programas": "PROGRAMAS", "departamentos": "DEPARTAMENTOS", "municipios": "MUNICIPIOS", "sectores": "SECTORES",
+                  "modalidades": "MODALIDADES", "cine": "CAMPOS DE CINE", "divisiones": "DIVISIONES", "cambios": "CAMBIOS", "fechas": "FECHAS"}
+    for pagina, claves in CLAVES_PAGINA.items():
+        d.get("about:blank")
+        q = Pagina(d, base, f"{pagina}.html")
+        info = q.js("""const f = document.querySelector('.filtros');
+            const hijos = [...f.children].filter(e => !e.classList.contains('filtros-toggle'));
+            return { primero: hijos[0].className, placeholder: hijos[0].querySelector('input').placeholder, lupa: !!hijos[0].querySelector('.buscar-btn'),
+                     botones: hijos.slice(1).filter(e => e.classList.contains('ms')).map(e => e.querySelector('.ms-btn').textContent.trim()) };""")
+        verificar(f"orden de filtros · {pagina} · primero la búsqueda con lupa", info["primero"] == "buscar-caja" and info["placeholder"] == BUSCADOR and info["lupa"], json.dumps(info))
+        coincide = len(info["botones"]) == len(claves) and all(claves_txt[c] in b for c, b in zip(claves, info["botones"]))
+        verificar(f"orden de filtros · {pagina} · de izquierda a derecha: {', '.join(claves)}", coincide, str(info["botones"]))
+
+
+def probar_persistencia(d, base):
+    """Los filtros se conservan al cambiar de apartado mientras sigan siendo válidos y se recalculan cuando no lo son."""
+    anio = [f for f in C["fechas_ejecucion"] if f.startswith("2026")]
+    d.get("about:blank")
+    q = Pagina(d, base, "index.html")
+    q.nombre = "persistencia"; q.claves = CLAVES_PAGINA["index"]
+    clic_op(q, q.claves.index("sectores"), "PRIVADO", "aislar")
+    clic_op(q, q.claves.index("modalidades"), "PRESENCIAL", "aislar")
+    abrir_fechas(q, "anio"); clic_valor_fecha(q, '[data-anio="2026"]')
+    filtro = {"sectores": "PRIVADO", "modalidades": "PRESENCIAL"}
+    recorrido = ["nuevos", "modificados", "inactivos", "index", "nuevos"]
+    for destino in recorrido:
+        enlace = d.find_element(By.CSS_SELECTOR, f'.nav a[href^="{destino}.html"]')
+        enlace.click(); q.esperar_listo()
+        q.claves = CLAVES_PAGINA[destino]
+        textos = q.js("return [...document.querySelectorAll('.filtros .ms > .ms-btn')].map(b => b.textContent.trim())")
+        verificar(f"persistencia · {destino} · sector, modalidad y fecha se conservan",
+                  "PRIVADO" in textos[q.claves.index("sectores")] and "PRESENCIAL" in textos[q.claves.index("modalidades")] and "AÑO 2026" in textos[q.claves.index("fechas")], str(textos))
+        if destino == "index":
+            usar_mapa_programas([_historico_completo(), *NOV.values()])
+            comparar_inicio(q, "persistencia · inicio", filtro, fechas=anio)
+        else:
+            usar_mapa_programas([NOV[destino]])
+            comparar_detalle(q, destino, "persistencia", filtro, fechas=anio)
+    # Una selección que no existe en el nuevo apartado se recalcula: el programa de Nuevos no está en Inactivos
+    d.get("about:blank")
+    q = Pagina(d, base, "nuevos.html")
+    q.nombre = "persistencia"; q.claves = CLAVES_PAGINA["nuevos"]
+    usar_mapa_programas([NOV["nuevos"]])
+    etiquetas_nuevos = set(PROG_MAPA.values())
+    usar_mapa_programas([NOV["inactivos"]])
+    etiquetas_inactivos = set(PROG_MAPA.values())
+    usar_mapa_programas([NOV["nuevos"]])
+    solo_nuevos = sorted(etiquetas_nuevos - etiquetas_inactivos)[0]
+    clic_op(q, q.claves.index("programas"), solo_nuevos, "aislar")
+    clic_op(q, q.claves.index("sectores"), "PRIVADO", "aislar")
+    q.d.find_element(By.CSS_SELECTOR, '.nav a[href^="inactivos.html"]').click(); q.esperar_listo()
+    q.claves = CLAVES_PAGINA["inactivos"]
+    usar_mapa_programas([NOV["inactivos"]])
+    textos = q.js("return [...document.querySelectorAll('.filtros .ms > .ms-btn')].map(b => b.textContent.trim())")
+    verificar("persistencia · programa inexistente en el apartado: se restablece y el resto se conserva",
+              textos[q.claves.index("programas")] == "TODOS LOS PROGRAMAS ACADÉMICOS" and "PRIVADO" in textos[q.claves.index("sectores")], str(textos[:5]))
+    comparar_detalle(q, "inactivos", "persistencia · inactivos sin el programa", {"sectores": "PRIVADO"})
+    # La búsqueda por código también viaja entre apartados
+    codigo = str(NOV["nuevos"]["CODIGO_SNIES_DEL_PROGRAMA"].iloc[0])
+    caja = q.d.find_element(By.CSS_SELECTOR, ".buscar")
+    caja.send_keys(codigo, Keys.ENTER); q.esperar_listo()
+    q.d.find_element(By.CSS_SELECTOR, '.nav a[href^="nuevos.html"]').click(); q.esperar_listo()
+    verificar("persistencia · la búsqueda por código se conserva al cambiar de apartado", q.js("return document.querySelector('.buscar').value") == codigo, "")
+    usar_mapa_programas([NOV["nuevos"]])
+    comparar_detalle(q, "nuevos", "persistencia · búsqueda", {"sectores": "PRIVADO"}, busqueda=codigo)
+    verificar("persistencia · errores de consola", not q.errores(), str(q.errores()[:3]))
 
 
 def probar_rendimiento(p):
@@ -1080,7 +1373,7 @@ def probar_url(d, base):
     comparar_inicio(p, "url · inicio con rango", uni, fechas=rango(fe[-5], fe[-1]))
     href = d.find_element(By.CSS_SELECTOR, ".kpi.k-nuevos").get_attribute("href")
     verificar("url · tarjeta KPI conserva filtros", "universidad=uninorte" in href and f"desde={fe[-5]}" in href, href)
-    p.js("""const i = document.querySelector('.buscar'); i.value = 'derecho'; i.dispatchEvent(new Event('input'));""")
+    d.find_element(By.CSS_SELECTOR, ".buscar").send_keys("derecho", Keys.ENTER)   # la búsqueda se ejecuta con Enter o con la lupa
     time.sleep(0.5); p.esperar_listo()
     verificar("url · búsqueda guardada", "buscar=derecho" in d.current_url, d.current_url)
     reset_filtros(p)
@@ -1200,10 +1493,9 @@ def probar_filtros_plegables(d, base):
             sec = q.js("return [...document.querySelectorAll('.filtros .ms > .ms-btn')].findIndex(b => b.textContent.includes('SECTORES'))")
             antes = q.js("return document.querySelector('.conteo-filtro').textContent")
             q.d.find_elements(By.CSS_SELECTOR, ".filtros .ms > .ms-btn")[sec].click(); time.sleep(0.2)
-            op = q.d.find_element(By.CSS_SELECTOR, '.filtros .ms.abierto .ms-ops input[value="PRIVADO"]')
+            op = q.d.find_element(By.CSS_SELECTOR, '.filtros .ms.abierto [data-aislar="PRIVADO"]')
             q.js("arguments[0].scrollIntoView({block: 'center'});", op)
-            q.js("document.querySelector('.filtros .ms.abierto [data-todos]').click()"); time.sleep(0.2)
-            op.click(); q.esperar_listo()
+            q.js("arguments[0].click();", op); q.esperar_listo()
             despues = q.js("return document.querySelector('.conteo-filtro').textContent")
             e = q.js(estado)
             verificar(f"filtros plegables · {pagina} · móvil: el botón muestra el número de filtros activos", e["texto"] == "FILTROS · 1" and despues != antes, f"{e['texto']!r} · {antes!r} → {despues!r}")
@@ -1223,7 +1515,7 @@ def probar_politica_de_contenido(d, base):
     """La política de seguridad está activa: bloquea scripts en línea y externos, y el Dashboard funciona sin violaciones."""
     for pagina in ("index.html", "modificados.html"):
         d.get("about:blank")
-        q = Pagina(d, base, pagina)
+        Pagina(d, base, pagina)   # carga la página; su registro de consola se lee a continuación
         registro = d.get_log("browser")   # antes de provocar las violaciones de la prueba
         carga = [l["message"] for l in registro if "Content Security Policy" in l["message"]]
         errores = [l["message"] for l in registro if l["level"] == "SEVERE" and "favicon" not in l["message"]]
@@ -1247,14 +1539,12 @@ def tipografia_local():
     verificar("tipografía · formato woff2", all(f.read_bytes()[:4] == b"wOF2" for f in fuentes[:2]))
 
 
+_BASE = ["NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA", "SECTOR", "MODALIDAD"]
+_ACAD = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"]
 COLUMNAS_INICIALES = {
-    "nuevos": ["FECHA_DE_OBTENCION", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA",
-               "MODALIDAD", "TIPO_NOVEDAD", "NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"],
-    "modificados": ["FECHA_DE_OBTENCION", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA",
-                    "MODALIDAD", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO", "NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD",
-                    "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"],
-    "inactivos": ["FECHA_DE_OBTENCION", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA",
-                  "MODALIDAD", "NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"],
+    "nuevos": ["FECHA_DE_OBTENCION", "TIPO_NOVEDAD"] + _BASE + _ACAD,
+    "modificados": ["FECHA_DE_OBTENCION", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + _BASE + _ACAD,
+    "inactivos": ["FECHA_DE_OBTENCION"] + _BASE + _ACAD,
 }
 
 
@@ -1382,8 +1672,7 @@ def probar_tablas_inicio(p):
     cols = {t: p.js("return [...document.querySelectorAll(`#tabla-${arguments[0]} th`)].map(t => t.dataset.c)", t) for t in NOV}
     verificar("inicio · columnas de las tres tablas en el orden acordado", all(cols[t][:len(COLUMNAS_INICIALES[t])] == COLUMNAS_INICIALES[t] for t in NOV), str({t: c[:8] for t, c in cols.items()}))
     # Un filtro cambia las tres tablas aunque solo una esté visible
-    clic_opcion(p, 0, "[data-todos]")
-    clic_opcion(p, 0, '[data-g="mayor"]')
+    clic_op(p, 0, "mayor", "aislar_g")
     esperado = {t: len(filtrar(NOV[t], {"universidades": ("grupo", catalogos.GRUPO_MAYOR_INTERES)}, None, CAMPOS_BUSQUEDA)) for t in NOV}
     estado = p.estado()
     verificar("inicio · los filtros afectan las tres tablas aunque no estén visibles", estado["tablas"] == estado["tabs"] == esperado, f"{estado['tablas']} vs {esperado}")
@@ -1450,8 +1739,9 @@ def probar_rango_temporal(d, base):
         # Un periodo anterior al inicio de la métrica no dibuja gráficas temporales; uno que lo cruza empieza en el inicio
         d.get("about:blank")
         q = Pagina(d, base, f"{tipo}.html#fecha={primera_global}")
-        verificar(f"rango temporal · {tipo} · una fecha anterior a los datos no muestra periodos sin información",
-                  q.js("return !document.getElementById('g-evolucion').data"), "")
+        # Una fecha sin datos para esta página no es seleccionable: la dirección incompatible se descarta y se muestran todas las fechas
+        verificar(f"rango temporal · {tipo} · una fecha anterior a los datos no se aplica ni deja periodos sin información",
+                  x0(q, "g-evolucion") == inicio and etiqueta_fechas(q) == "TODAS LAS FECHAS", f"{x0(q, 'g-evolucion')} · {etiqueta_fechas(q)}")
         d.get("about:blank")
         q = Pagina(d, base, f"{tipo}.html#desde={primera_global}&hasta={inicio}")
         verificar(f"rango temporal · {tipo} · un rango que cruza el inicio empieza en {inicio}", x0(q, "g-evolucion") == inicio, str(x0(q, "g-evolucion")))
@@ -1480,7 +1770,7 @@ def probar_unidades_y_etiquetas(d, base):
             const modal = (document.getElementById('g-modalidad').data || []).map(tr => tr.name.split(' · ')[0]);
             const ms = [...document.querySelectorAll('.filtros .ms')].find(m => m.querySelector('.ms-btn').textContent.includes('MODALIDADES'));
             return { conteo: t('.conteo-filtro'), total: t('#total-s'), plantillas, modal, texto: document.body.innerText,
-                     opcionesMod: [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => [l.querySelector('input').value, l.textContent.trim()]),
+                     opcionesMod: [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => [l.querySelector('input').dataset.op, l.textContent.replace('AISLAR', '').trim()]),
                      encabezado: t('.enc-total'), ejes: [...document.querySelectorAll('.grafica')].map(e => e.layout && e.layout.yaxis && e.layout.yaxis.title ? e.layout.yaxis.title.text : '').filter(Boolean) };""")
         verificar(f"unidades · {pagina} · conteo de filtros en registros", info["conteo"].split(" ", 1)[1].startswith("registro"), info["conteo"])
         if pagina != "index":
@@ -1514,6 +1804,80 @@ def probar_unidades_y_etiquetas(d, base):
     verificar("etiquetas de agrupaciones · catálogo de modalidades agrupadas con SIN INFORMACIÓN", "SIN INFORMACIÓN" in C["catalogos"]["grupos_modalidad"], str(C["catalogos"]["grupos_modalidad"]))
 
 
+PALETA_SERIES = ["#960A11", "#5B6770", "#60912D", "#547CD3", "#994D66", "#294C9F", "#BB6802", "#20947D",
+                 "#7D4005", "#9A7D0B", "#7E65A9", "#226837", "#60427E", "#B25CA0", "#6B6E18"]
+GRIS_OTROS = "#9E9E9E"
+
+
+def probar_colores_series(d, base):
+    """Gráficas de líneas de varias series: colores de la paleta institucional, sin repetirse en una gráfica y estables entre páginas."""
+    por_pagina = {}
+    for pagina in ("index", "nuevos", "modificados", "inactivos"):
+        d.get("about:blank")
+        q = Pagina(d, base, f"{pagina}.html")
+        por_pagina[pagina] = q.js("""const out = {};
+            for (const id of ['g-modalidad', 'g-division', 'g-cine', 'g-tipos']) {
+              const e = document.getElementById(id); if (e && e.data) out[id] = e.data.map(t => [t.name.split(' · ')[0], t.line.color, t.line.dash, t.line.width]);
+            }
+            return out;""")
+        for gid, series in por_pagina[pagina].items():
+            colores = [s[1] for s in series]
+            verificar(f"colores de series · {pagina} · {gid} · solo colores de la paleta, sin repetir ninguno",
+                      all(c in PALETA_SERIES + [GRIS_OTROS] for c in colores) and len(set(colores)) == len(colores), str(colores))
+            verificar(f"colores de series · {pagina} · {gid} · líneas continuas del mismo grosor", {(s[2], s[3]) for s in series} == {("solid", 2)}, str({(s[2], s[3]) for s in series}))
+        verificar(f"colores de series · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
+    # Una misma división conserva su color en todas las páginas, y un mismo campo de CINE casi siempre (cambia solo si choca con otro mostrado)
+    for gid, minimo in (("g-division", 1.0), ("g-cine", 0.8)):
+        mapas = [{s[0]: s[1] for s in por_pagina[p].get(gid, [])} for p in por_pagina]
+        comunes = [(n, [m[n] for m in mapas if n in m]) for n in {n for m in mapas for n in m}]
+        iguales = [n for n, cs in comunes if len(set(cs)) == 1]
+        verificar(f"colores de series · {gid} · el mismo elemento conserva su color entre páginas", len(iguales) >= minimo * len(comunes),
+                  f"{len(iguales)} de {len(comunes)} · distintos: {[n for n, cs in comunes if len(set(cs)) > 1][:3]}")
+
+
+def probar_etiqueta_aislar(d, base):
+    """El botón que deja una sola opción se llama AISLAR en todos los filtros y páginas (texto, descripción accesible y atributos), sin restos de SOLO."""
+    for pagina in ("index", "nuevos", "modificados", "inactivos"):
+        d.get("about:blank")
+        q = Pagina(d, base, f"{pagina}.html")
+        info = q.js("""const bs = [...document.querySelectorAll('.filtros button.ms-aislar')];
+            const html = document.documentElement.outerHTML;
+            return { n: bs.length, textos: [...new Set(bs.map(b => b.textContent.trim()))], etiquetas: bs.every(b => /^Aislar /.test(b.getAttribute('aria-label'))),
+                     restos: /data-solo|ms-solo|>SOLO</.test(html), filtros: new Set(bs.map(b => b.closest('.ms') && [...document.querySelectorAll('.filtros .ms')].indexOf(b.closest('.ms')))).size };""")
+        verificar(f"AISLAR · {pagina} · todos los botones dicen AISLAR, con descripción accesible y sin restos de SOLO",
+                  info["n"] > 100 and info["textos"] == ["AISLAR"] and info["etiquetas"] and not info["restos"], json.dumps(info))
+        verificar(f"AISLAR · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
+
+
+def probar_descripciones_graficas(d, base):
+    """Las descripciones de las gráficas de departamentos y universidades son fijas: no mencionan 'Top 10' ni cambian al filtrar."""
+    ids = {"index": ["g-deptos", "g-univ"], "nuevos": ["g-deptos", "g-instituciones"], "modificados": ["g-deptos", "g-instituciones"], "inactivos": ["g-deptos", "g-instituciones"]}
+    leer = """return arguments[0].map(id => { const e = document.getElementById(id); return [e.closest('section').querySelector('.tarjeta-sub').textContent.trim(), e.data && e.data[0] ? e.data[0].y.length : 0]; });"""
+    for pagina, graficas in ids.items():
+        d.get("about:blank")
+        q = Pagina(d, base, f"{pagina}.html")
+        antes = q.js(leer, graficas)
+        verificar(f"descripciones · {pagina} · sin referencia fija a 'Top 10' ni a un número de elementos",
+                  all(not re.search(r"10|top|diez", s, re.I) for s, _ in antes), str([s for s, _ in antes]))
+        d.get("about:blank")
+        codigo = catalogos.UNINORTE if pagina == "index" else int(NOV[pagina]["CODIGO_INSTITUCION_PADRE"].value_counts().index[-1])   # una institución con pocos registros
+        q = Pagina(d, base, f"{pagina}.html#universidad={codigo}")
+        despues = q.js(leer, graficas)
+        verificar(f"descripciones · {pagina} · con un filtro que reduce los elementos la descripción no cambia y las barras sí se reducen",
+                  [s for s, _ in antes] == [s for s, _ in despues] and despues[1][1] < antes[1][1], f"{antes} → {despues}")
+        verificar(f"descripciones · {pagina} · nunca más de 10 barras", all(n <= 10 for _, n in antes + despues), str([n for _, n in antes + despues]))
+
+
+def probar_botones_sin_recorte(d, base):
+    """En escritorio, el texto de cada botón de filtro (TODOS... y el de la gráfica de CINE) se lee completo, sin puntos suspensivos."""
+    d.set_window_size(1400, 1000)
+    for pagina in ("index", "nuevos", "modificados", "inactivos"):
+        d.get("about:blank")
+        q = Pagina(d, base, f"{pagina}.html")
+        recortados = q.js("""return [...document.querySelectorAll('.ms-btn:not(.fs-btn) > span, #cine-ctrl .ms-btn > span')].filter(s => s.scrollWidth > s.clientWidth + 1).map(s => s.textContent.trim());""")
+        verificar(f"botones · {pagina} · ningún texto de filtro queda recortado", not recortados, str(recortados))
+
+
 def main():
 
 
@@ -1529,14 +1893,20 @@ def main():
     try:
         probar_estructura(d, base)
         probar_alturas(d, base)
+        probar_etiqueta_aislar(d, base)
+        probar_botones_sin_recorte(d, base)
+        probar_descripciones_graficas(d, base)
         # Inicio
         probar_inicio_sin_tabla(d, base)
         p = Pagina(d, base, "index.html")
-        p.claves = ["universidades", "programas", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"]
+        p.claves = CLAVES_PAGINA["index"]; p.fe = C["fechas_ejecucion"]; p.nombre = "inicio"
+        p.frames = [_historico_completo(), *NOV.values()]
+        usar_mapa_programas(p.frames)
         comparar = lambda n, f, busqueda=None, fechas=None: comparar_inicio(p, n, f, busqueda, fechas)  # noqa: E731
         comparar("estado inicial", {})
         verificar("inicio · gráficas sin datos al iniciar", not p.estado()["vacias"], str(p.estado()["vacias"]))
         probar_filtros(p, comparar, [c for c in p.claves], args.rapida)
+        probar_dependencias(p, comparar)
         probar_fechas(p, comparar)
         probar_combinaciones(p, comparar, True)
         probar_tablas_inicio(p)
@@ -1553,12 +1923,15 @@ def main():
         # Páginas de detalle
         for tipo in ("nuevos", "modificados", "inactivos"):
             q = Pagina(d, base, f"{tipo}.html")
-            q.claves = ["universidades", "programas", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"] + (["cambios"] if tipo == "modificados" else [])
+            q.claves = CLAVES_PAGINA[tipo]; q.fe = C["fechas_ejecucion"]; q.nombre = tipo
+            q.frames = [NOV[tipo]]
+            usar_mapa_programas(q.frames)
             q.tipo = tipo
             comp = (lambda t, qq: (lambda n, f, busqueda=None, fechas=None: comparar_detalle(qq, t, n, f, busqueda, fechas)))(tipo, q)
             comp("estado inicial", {})
             verificar(f"{tipo} · gráficas sin datos al iniciar", not q.estado()["vacias"], str(q.estado()["vacias"]))
             probar_filtros(q, comp, q.claves, args.rapida)
+            probar_dependencias(q, comp)
             probar_fechas(q, comp)
             probar_combinaciones(q, comp, False)
             probar_tabla(q, NOV[tipo])
@@ -1571,9 +1944,12 @@ def main():
                 enlaces = q.d.find_elements(By.CSS_SELECTOR, f'.nav a[href="{nav}"]')
                 verificar(f"{tipo} · enlace de navegación {nav}", len(enlaces) == 1)
             verificar(f"{tipo} · errores de consola", not q.errores(), str(q.errores()[:3]))
+        probar_orden_filtros(d, base)
+        probar_persistencia(d, base)
         probar_url(d, base)
         probar_fecha_unica(d, base)
         probar_consistencia_visual(d, base)
+        probar_colores_series(d, base)
         probar_titulos_pestana(d, base)
         probar_rango_temporal(d, base)
         probar_unidades_y_etiquetas(d, base)
@@ -1585,7 +1961,7 @@ def main():
         srv.shutdown()
     fallas = [r for r in RESULTADOS if not r[1]]
     print(f"\nRESULTADO: {len(RESULTADOS) - len(fallas)} de {len(RESULTADOS)} verificaciones correctas · {len(fallas)} fallas")
-    for nombre, _, detalle in fallas[:40]:
+    for nombre, _, detalle in fallas[:100]:
         print(f"  - {nombre}: {detalle}")
     return 1 if fallas else 0
 

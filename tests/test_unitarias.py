@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import smtplib
 import ssl
 import sys
 import tempfile
@@ -509,6 +510,39 @@ class TestCorreo(unittest.TestCase):
         for nombre in ("rojo", "amarillo", "negro", "texto-2", "gris-sep", "nuevos", "modificados", "inactivos", "modificados-linea"):
             self.assertIn(f'"{variables[nombre]}"', js, f"--{nombre} ({variables[nombre]}) no se usa igual en app.js")
 
+    def test_neutros_declarados_en_una_sola_lista(self):
+        """Ningún color del Dashboard, de las gráficas ni del correo queda fuera de las variables de estilos.css."""
+        raiz = Path(__file__).resolve().parent.parent
+        css = (raiz / "docs" / "assets" / "estilos.css").read_text(encoding="utf-8")
+        inicio = css.index(":root {")
+        fin = css.index("\n}\n", inicio)
+        variables = {k: v.upper() for k, v in re.findall(r"--([\w-]+):\s*(#[0-9A-Fa-f]{6})", css[inicio:fin])}
+        declarados = set(variables.values())
+        hexes = lambda texto: {c.upper() for c in re.findall(r"#[0-9A-Fa-f]{6}\b", texto)}  # noqa: E731
+        self.assertLessEqual(hexes(css[fin:]), declarados, "estilos.css usa colores sin declarar como variable")
+        js = (raiz / "docs" / "assets" / "app.js").read_text(encoding="utf-8")
+        paleta = hexes(re.search(r"const CATEGORICA = \[(.*?)\];", js, re.S).group(1))
+        self.assertLessEqual(hexes(js) - paleta, declarados, "app.js usa colores que no están en estilos.css")
+        correo = (raiz / "Scripts" / "send_report.py").read_text(encoding="utf-8")
+        self.assertLessEqual(hexes(correo), declarados, "send_report.py usa colores que no están en estilos.css")
+        # Los neutros del correo y de las gráficas son los de las variables
+        self.assertEqual((send_report.ZEBRA, send_report.TEXTO_SOBRE_NEGRO), (variables["gris-zebra"], variables["texto-sobre-negro"]))
+        self.assertEqual((send_report.LINEA_SOBRE_NEGRO, send_report.FONDO_SOBRE_NEGRO), (variables["linea-sobre-negro"], variables["fondo-sobre-negro"]))
+        self.assertIn(f'const GRIS = "{variables["gris-serie-otros"]}"', js.upper().replace("CONST GRIS", "const GRIS"))
+        self.assertIn(f'zerolinecolor: "{variables["gris-eje-cero"]}"', js.upper().replace("ZEROLINECOLOR", "zerolinecolor"))
+
+    def test_cuadro_de_ejecucion_del_correo_equivale_al_del_dashboard(self):
+        """Borde y fondo opacos del correo = rgba(255,255,255,alfa) del Dashboard mezclado con el negro del encabezado."""
+        raiz = Path(__file__).resolve().parent.parent
+        css = (raiz / "docs" / "assets" / "estilos.css").read_text(encoding="utf-8")
+        regla = re.search(r"\.enc-total \{[^}]*\}", css).group(0)
+        fondo = float(re.search(r"background: rgba\(255, 255, 255, ([.\d]+)\)", regla).group(1))
+        borde = float(re.search(r"border: 1px solid rgba\(255, 255, 255, ([.\d]+)\)", regla).group(1))
+        negro = int(send_report.NEGRO[1:3], 16)
+        mezcla = lambda alfa: round(alfa * 255 + (1 - alfa) * negro)  # noqa: E731
+        for alfa, color in ((borde, send_report.LINEA_SOBRE_NEGRO), (fondo, send_report.FONDO_SOBRE_NEGRO)):
+            self.assertAlmostEqual(int(color[1:3], 16), mezcla(alfa), delta=1)
+
     def test_colores_del_brandbook_en_dashboard_y_correo(self):
         """Los HEX impresos en BRANDBOOK_UNINORTE: rojo Pantone 7427 C, negro Pantone Black 6 C, amarillo 116 C, ocre 7556 C, gris K70."""
         css = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "estilos.css").read_text(encoding="utf-8")
@@ -559,8 +593,52 @@ class TestCorreo(unittest.TestCase):
         self.assertNotIn("Logs/pruebas_unitarias.log", cuerpo)
 
 
+class TestCategoriasDesconocidas(unittest.TestCase):
+    """Aviso de valores del reporte que el Dashboard no contempla (sectores, modalidades y divisiones)."""
+    def test_sin_hallazgos_con_valores_conocidos(self):
+        df = pd.DataFrame({"SECTOR": ["OFICIAL", "PRIVADO", " privado "], "MODALIDAD": ["PRESENCIAL", "HIBRIDA (DUAL-VIRTUAL)", None],
+                           "DIVISION_UNINORTE": ["SALUD", "DERECHO", "SALUD"]})
+        self.assertEqual(run_snies.categorias_desconocidas(df), {})
+
+    def test_detecta_sector_y_modalidad_nuevos(self):
+        df = pd.DataFrame({"SECTOR": ["OFICIAL", "MIXTO"], "MODALIDAD": ["PRESENCIAL", "Nueva Modalidad"], "DIVISION_UNINORTE": ["SALUD", "SALUD"]})
+        self.assertEqual(run_snies.categorias_desconocidas(df), {"SECTOR": ["MIXTO"], "MODALIDAD": ["NUEVA MODALIDAD"]})
+
+    def test_detecta_mas_divisiones_que_colores(self):
+        df = pd.DataFrame({"DIVISION_UNINORTE": [f"DIVISION {i}" for i in range(catalogos.MAX_COLORES_SERIES + 1)]})
+        self.assertEqual(list(run_snies.categorias_desconocidas(df)), ["DIVISION_UNINORTE"])
+        self.assertEqual(run_snies.categorias_desconocidas(df.iloc[:catalogos.MAX_COLORES_SERIES]), {})
+
+    def test_columnas_ausentes_no_fallan_y_el_aviso_no_detiene_el_flujo(self):
+        self.assertEqual(run_snies.categorias_desconocidas(pd.DataFrame({"OTRA": [1]})), {})
+        with self.assertLogs("snies_monitor", level="WARNING") as capturado:
+            hallazgos = run_snies.avisar_categorias(pd.DataFrame({"SECTOR": ["MIXTO"]}))
+        self.assertEqual(hallazgos, {"SECTOR": ["MIXTO"]})
+        self.assertIn("MIXTO", capturado.output[0])
+
+    def test_catalogos_coinciden_con_los_del_dashboard(self):
+        """Los sectores y el número de colores del catálogo son los que usa app.js."""
+        js = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "app.js").read_text(encoding="utf-8")
+        paleta = re.findall(r"#[0-9A-Fa-f]{6}", re.search(r"const CATEGORICA = \[(.*?)\];", js, re.S).group(1))
+        self.assertEqual(len(paleta), catalogos.MAX_COLORES_SERIES)
+        self.assertEqual(set(re.findall(r"(PRIVADO|OFICIAL)", re.search(r"const colorSector = .*", js).group(0))), set(catalogos.SECTORES))
+
+
 class TestRegistroSeguro(unittest.TestCase):
-    """El registro de ejecución no expone rutas personales."""
+    """El registro de ejecución no expone rutas personales ni direcciones de correo."""
+    def test_oculta_direcciones_de_correo(self):
+        formato = run_snies._FormatoSeguro("%(message)s")
+        try:
+            raise smtplib.SMTPRecipientsRefused({"persona.ejemplo+a@uninorte.edu.co": (550, b"5.1.1 usuario desconocido"), "otra@correo.com.co": (550, b"x")})
+        except smtplib.SMTPRecipientsRefused as exc:
+            registro = logging.LogRecord("x", 40, "", 0, f"FALLA EN CORREO: {exc}", None, (type(exc), exc, exc.__traceback__))
+        texto = formato.format(registro)
+        for direccion in ("persona.ejemplo+a@uninorte.edu.co", "otra@correo.com.co", "uninorte.edu.co"):
+            self.assertNotIn(direccion, texto)
+        self.assertIn("<correo>", texto)
+        self.assertIn("5.1.1 usuario desconocido", texto)   # el resto del mensaje de error se conserva
+        self.assertEqual(formato.format(logging.LogRecord("x", 20, "", 0, "Alerta técnica enviada a remitente@gmail.com.", None, None)), "Alerta técnica enviada a <correo>.")
+
     def test_oculta_rutas_personales(self):
         formato = run_snies._FormatoSeguro("%(message)s")
         msg = f"{Path.home()}{os.sep}Desktop y {tempfile.gettempdir()}{os.sep}x.log"
@@ -640,6 +718,53 @@ class TestSeguridadDelSitio(unittest.TestCase):
         self.assertIn('package-ecosystem: "github-actions"', texto)
         self.assertIn('package-ecosystem: "pip"', texto)
         self.assertIn('interval: "monthly"', texto)
+        self.assertIn('package-ecosystem: "npm"', texto)
+        self.assertIn('directory: "/.github/librerias"', texto)
+
+    def test_registro_de_librerias_incluidas_coincide_con_los_archivos(self):
+        """El registro de versiones vigilado por Dependabot coincide con las librerías copiadas en docs/assets/vendor."""
+        raiz = Path(__file__).resolve().parent.parent
+        dependencias = json.loads((raiz / ".github" / "librerias" / "package.json").read_text(encoding="utf-8"))["dependencies"]
+        self.assertEqual(set(dependencias), {"plotly.js-dist-min", "flatpickr", "hyparquet", "hyparquet-writer"})
+        for nombre, version in dependencias.items():
+            self.assertRegex(version, r"^\d+\.\d+\.\d+$", f"{nombre}: la versión debe ser exacta (sin ^ ni ~)")
+        vendor = raiz / "docs" / "assets" / "vendor"
+        plotly = (vendor / "plotly" / "plotly.min.js").read_text(encoding="utf-8")[:300]
+        flatpickr = (vendor / "flatpickr" / "flatpickr.min.js").read_text(encoding="utf-8")[:300]
+        self.assertIn(f"plotly.js v{dependencias['plotly.js-dist-min']}", plotly)
+        self.assertIn(f"flatpickr v{dependencias['flatpickr']}", flatpickr)
+        for carpeta in ("hyparquet", "hyparquet-writer"):   # sin la versión en sus archivos: basta con que existan y tengan licencia
+            self.assertTrue((vendor / carpeta / "LICENSE").exists() and (vendor / carpeta / "src" / "index.js").exists())
+
+
+class TestFlujosDeTrabajo(unittest.TestCase):
+    """Configuración de los workflows de GitHub Actions: permisos mínimos, acciones fijadas y flujo de pruebas del Dashboard."""
+
+    RAIZ = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+
+    def test_acciones_fijadas_a_un_commit(self):
+        for ruta in self.RAIZ.glob("*.yml"):
+            for accion in re.findall(r"uses:\s*(\S+)", ruta.read_text(encoding="utf-8")):
+                self.assertRegex(accion, r"@[0-9a-f]{40}$", f"{ruta.name}: {accion} debe fijarse a un commit exacto")
+
+    def test_pruebas_del_dashboard_son_de_solo_lectura_y_corren_las_dos_suites(self):
+        texto = (self.RAIZ / "pruebas_dashboard.yml").read_text(encoding="utf-8")
+        self.assertRegex(texto, r"permissions:\s*\n\s+contents: read\b")
+        self.assertNotIn("contents: write", texto)
+        self.assertNotIn("secrets.", texto)                  # no necesita credenciales
+        self.assertNotIn("pull_request_target", texto)       # el código de una solicitud de cambios no corre con permisos del repositorio
+        self.assertIn("persist-credentials: false", texto)
+        self.assertIn("workflow_dispatch:", texto)
+        self.assertIn("python -m unittest discover -s tests", texto)
+        self.assertIn("python tests/e2e_dashboard.py", texto)
+        self.assertRegex(texto, r"timeout-minutes:\s*\d+")
+        # Ejecuta el Dashboard completo cuando cambia lo que lo genera o lo prueba
+        for ruta in ("docs/assets/**", "Scripts/generar_dashboard.py", "tests/**"):
+            self.assertEqual(texto.count(f'"{ruta}"'), 2, f"{ruta} debe disparar la prueba en pull_request y en push")
+
+    def test_el_flujo_semanal_no_depende_de_la_prueba_del_dashboard(self):
+        semanal = (self.RAIZ / "snies_daily.yml").read_text(encoding="utf-8")
+        self.assertNotIn("e2e_dashboard", semanal)           # la actualización semanal solo ejecuta las pruebas unitarias
 
 
 class TestFechaSinHora(unittest.TestCase):
@@ -716,19 +841,61 @@ class TestCatalogosDelDashboard(unittest.TestCase):
         self.assertEqual(generar_dashboard.jerarquia_cine(hist, nov),
                          [["EDUCACION", ["PEDAGOGIA"]], ["SALUD", ["ENFERMERIA", "MEDICINA"]]])
 
+    def test_divisiones_del_catalogo_unicas_y_ordenadas(self):
+        """El catálogo fija el color de cada división: sin repetidas, sin vacíos y en orden alfabético estable."""
+        hist = pd.DataFrame({"DIVISION_UNINORTE": ["SALUD", "ARTES", None, "SALUD", ""]})
+        nov = {"nuevos": pd.DataFrame({"DIVISION_UNINORTE": ["DERECHO", "ARTES"]}), "inactivos": pd.DataFrame({"X": [1]})}
+        self.assertEqual(generar_dashboard.divisiones_uninorte(hist, nov), ["ARTES", "DERECHO", "SALUD"])
+
+    def test_paleta_de_series_contraste_y_separacion(self):
+        """Paleta de las gráficas de varias series: 15 colores únicos, contraste ≥ 3:1 sobre blanco y series contiguas distinguibles."""
+        import math
+        js = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "app.js").read_text(encoding="utf-8")
+        paleta = re.findall(r'#[0-9A-Fa-f]{6}', re.search(r"const CATEGORICA = \[(.*?)\];", js, re.S).group(1))
+        self.assertEqual(len(paleta), 15)
+        self.assertEqual(len({c.upper() for c in paleta}), 15)
+        self.assertNotIn("#FFCC00", {c.upper() for c in paleta})   # el amarillo y el ocre quedan para Modificados
+        self.assertNotIn("#B78B1E", {c.upper() for c in paleta})
+        lineal = lambda c: [((v / 255) / 12.92 if v / 255 <= 0.04045 else (((v / 255) + 0.055) / 1.055) ** 2.4) for v in (int(c[i:i + 2], 16) for i in (1, 3, 5))]  # noqa: E731
+        luz = lambda rgb: 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]  # noqa: E731
+
+        def oklab(rgb):
+            l, m, s = (x ** (1 / 3) for x in (0.4122214708 * rgb[0] + 0.5363325363 * rgb[1] + 0.0514459929 * rgb[2],
+                                              0.2119034982 * rgb[0] + 0.6806995451 * rgb[1] + 0.1073969566 * rgb[2],
+                                              0.0883024619 * rgb[0] + 0.2817188376 * rgb[1] + 0.6299787005 * rgb[2]))
+            return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+                    0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+
+        sim = {"protan": [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+               "deutan": [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]]}
+        de = lambda a, b: 100 * math.dist(oklab(a), oklab(b))  # noqa: E731
+        con = lambda rgb, k: [sum(sim[k][i][j] * rgb[j] for j in range(3)) for i in range(3)]  # noqa: E731
+        for c in paleta:
+            self.assertGreaterEqual(1.05 / (luz(lineal(c)) + 0.05), 3.0, f"{c} tiene menos de 3:1 de contraste sobre blanco")
+        for a, b in zip(paleta, paleta[1:]):
+            self.assertGreaterEqual(de(lineal(a), lineal(b)), 15, f"{a} y {b} se parecen con visión normal")
+            for k in sim:
+                self.assertGreaterEqual(de(con(lineal(a), k), con(lineal(b), k)), 6, f"{a} y {b} se confunden en {k}")
+
     def test_orden_de_columnas_de_las_tablas(self):
         primeras = generar_dashboard.COLS_PRIMERO
-        base = ["FECHA_DE_OBTENCION", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA",
-                "MUNICIPIO_OFERTA_PROGRAMA", "MODALIDAD"]
+        base = ["NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA", "MUNICIPIO_OFERTA_PROGRAMA",
+                "SECTOR", "MODALIDAD"]   # SECTOR inmediatamente después del municipio y antes de los créditos
         cola = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"]
-        self.assertEqual(primeras["nuevos"], base + ["TIPO_NOVEDAD"] + cola)
-        self.assertEqual(primeras["modificados"], base + ["TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + cola)
-        self.assertEqual(primeras["inactivos"], base + cola)
+        self.assertEqual(primeras["nuevos"], ["FECHA_DE_OBTENCION", "TIPO_NOVEDAD"] + base + cola)
+        self.assertEqual(primeras["modificados"], ["FECHA_DE_OBTENCION", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + base + cola)
+        self.assertEqual(primeras["inactivos"], ["FECHA_DE_OBTENCION"] + base + cola)
+        for tipo in ("nuevos", "modificados", "inactivos"):
+            cols = primeras[tipo]
+            self.assertEqual(cols.index("SECTOR"), cols.index("MUNICIPIO_OFERTA_PROGRAMA") + 1)
+            self.assertLess(cols.index("SECTOR"), cols.index("NUMERO_CREDITOS"))
         # Las demás columnas conservan su orden y no se agrega REACTIVADO_POSTERIORMENTE
-        df = pd.DataFrame(columns=["X1", *base[::-1], "X2", *cola, "TIPO_NOVEDAD", "X3"])
+        df = pd.DataFrame(columns=["X1", *base[::-1], "X2", *cola, "TIPO_NOVEDAD", "FECHA_DE_OBTENCION", "X3"])
         ordenado = generar_dashboard._ordenar_columnas(df, "nuevos")
-        self.assertEqual(list(ordenado.columns), base + ["TIPO_NOVEDAD"] + cola + ["X1", "X2", "X3"])
+        self.assertEqual(list(ordenado.columns), ["FECHA_DE_OBTENCION", "TIPO_NOVEDAD"] + base + cola + ["X1", "X2", "X3"])
         self.assertFalse(any("REACTIVADO" in c for tipo in primeras for c in primeras[tipo]))
+        # El municipio viaja con las versiones de programas activos (filtro de municipios)
+        self.assertIn("MUNICIPIO_OFERTA_PROGRAMA", generar_dashboard.COLS_VERSION)
 
 
 class TestReclasificacion(unittest.TestCase):

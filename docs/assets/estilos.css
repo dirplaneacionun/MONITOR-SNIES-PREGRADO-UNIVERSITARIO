@@ -35,6 +35,18 @@
   --blanco: #FFFFFF;
   --gris-claro: #F5F5F5;
   --gris-sep: #E5E5E5;
+  /* Neutros auxiliares: los únicos grises, además de los anteriores y del texto, que usan el Dashboard, las gráficas
+     (app.js) y el correo (send_report.py). Una prueba comprueba que ningún color quede fuera de esta lista. */
+  --gris-zebra: #FAFAFA;              /* filas alternas de las tablas */
+  --texto-sobre-negro: #D9D9D9;       /* texto secundario sobre el encabezado negro */
+  --negro-hover: #2B2B2B;             /* encabezado de tabla al pasar el cursor */
+  --gris-deshabilitado: #B5B5B5;      /* botones deshabilitados */
+  --gris-dia-deshabilitado: #CFCFCF;  /* días del calendario sin ejecución */
+  --gris-dia-secundario: #9A9A9A;     /* días del calendario fuera de las ejecuciones disponibles (modo rango) */
+  --gris-serie-otros: #9E9E9E;        /* gráficas: serie OTRO o SIN INFORMACIÓN */
+  --gris-eje-cero: #BDBDBD;           /* gráficas: línea del cero */
+  --linea-sobre-negro: #444444;       /* borde del cuadro de ejecución: rgba(255,255,255,.2) sobre el negro, en color opaco para el correo */
+  --fondo-sobre-negro: #232323;       /* fondo del cuadro de ejecución: rgba(255,255,255,.06) sobre el negro, en color opaco para el correo */
   /* Estados: el amarillo rellena (barras, tarjetas, pestañas); en líneas de gráficas Modificados usa el ocre */
   --nuevos: #1E8E5A;
   --modificados: #FFCC00;
@@ -63,14 +75,14 @@ a { color: inherit; }
 .enc-logo { display: block; height: 68px; width: auto; }
 .enc-textos { padding-left: 20px; border-left: 1px solid rgba(255, 255, 255, .25); }
 .enc-titulo { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-.enc-sub { margin: 4px 0 0; color: #D9D9D9; font-size: 13px; }
+.enc-sub { margin: 4px 0 0; color: var(--texto-sobre-negro); font-size: 13px; }
 /* Misma altura en todas las páginas (etiqueta, valor y detalle): al cambiar de apartado el encabezado no se desplaza */
 .enc-total { background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .2); border-top: 3px solid var(--amarillo); border-radius: var(--radio); padding: 8px 16px; text-align: right; min-width: 150px; height: 92px; display: flex; flex-direction: column; justify-content: center; }
-.enc-total .et { font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .08em; color: #D9D9D9; text-transform: uppercase; }
+.enc-total .et { font-size: 11px; line-height: 16px; font-weight: 700; letter-spacing: .08em; color: var(--texto-sobre-negro); text-transform: uppercase; }
 .enc-total .ev { font-size: 24px; line-height: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.enc-total .es { font-size: 11px; line-height: 16px; min-height: 16px; color: #D9D9D9; }
+.enc-total .es { font-size: 11px; line-height: 16px; min-height: 16px; color: var(--texto-sobre-negro); }
 .nav { display: flex; gap: 4px; margin-top: 16px; overflow-x: auto; }
-.nav a { text-decoration: none; padding: 10px 16px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: #D9D9D9; border-radius: 8px 8px 0 0; white-space: nowrap; border-top: 3px solid transparent; }
+.nav a { text-decoration: none; padding: 10px 16px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--texto-sobre-negro); border-radius: 8px 8px 0 0; white-space: nowrap; border-top: 3px solid transparent; }
 .nav a:hover { color: var(--blanco); background: rgba(255, 255, 255, .08); }
 .nav a.activa { background: var(--gris-claro); color: var(--negro); border-top-color: var(--rojo); }
 .nav a:focus-visible { outline: 2px solid var(--amarillo); outline-offset: -2px; }
@@ -80,14 +92,19 @@ a { color: inherit; }
 
 /* Barra de filtros */
 .filtros { position: sticky; top: 0; z-index: 20; background: var(--blanco); border: 1px solid var(--gris-sep); border-radius: var(--radio); box-shadow: var(--sombra); padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
-.buscar { flex: 1 1 320px; min-width: 220px; height: 36px; padding: 0 12px; border: 1px solid var(--gris-sep); border-radius: 8px; font: inherit; font-size: 13px; color: var(--texto); background: var(--blanco); }
+.buscar-caja { position: relative; flex: 1 1 320px; min-width: 220px; }
+.buscar { width: 100%; height: 36px; padding: 0 40px 0 12px; border: 1px solid var(--gris-sep); border-radius: 8px; font: inherit; font-size: 13px; color: var(--texto); background: var(--blanco); }
+.buscar::-webkit-search-cancel-button { margin-right: 4px; }
+.buscar-btn { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--texto-2); cursor: pointer; padding: 0; }
+.buscar-btn:hover { background: var(--gris-claro); color: var(--rojo); }
+.buscar-btn:focus-visible { outline: 2px solid var(--rojo); outline-offset: 1px; }
 /* Anillo de foco único (rojo) en todos los controles; sobre fondo negro (menú) se usa amarillo */
 .buscar:focus, .ms-btn:focus-visible, .btn:focus-visible, .fs-quitar:focus-visible, table.datos th:focus-visible,
-a.kpi:focus-visible, .fs-modos button:focus-visible, .chip button:focus-visible,
+a.kpi:focus-visible, .fs-modos button:focus-visible,
 .ms-panel input[type=search]:focus-visible, .tab:focus-visible { outline: 2px solid var(--rojo); outline-offset: 1px; }
 .ms { position: relative; display: inline-flex; align-items: center; }
 .ms-btn, .btn { height: 36px; padding: 0 12px; border: 1px solid var(--gris-sep); border-radius: 8px; background: var(--blanco); font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--texto); cursor: pointer; white-space: nowrap; text-transform: uppercase; }
-.ms-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 280px; }
+.ms-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 340px; }
 .ms-btn span { overflow: hidden; text-overflow: ellipsis; }
 .ms-btn::after { content: ""; border: 4px solid transparent; border-top-color: var(--texto-2); margin-top: 4px; }
 .ms-btn.con-valor { border-color: var(--rojo); background: var(--rojo-tenue); color: var(--rojo); }
@@ -99,9 +116,17 @@ a.kpi:focus-visible, .fs-modos button:focus-visible, .chip button:focus-visible,
 .ms-op { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; }
 .ms-op:hover { background: var(--gris-claro); }
 .ms-op input { margin: 2px 0 0; accent-color: var(--rojo); }
+.ms-txt { flex: 1; min-width: 0; }
+.ms-aislar { margin-left: auto; align-self: center; flex: none; border: 1px solid var(--gris-sep); background: var(--blanco); color: var(--texto-2); border-radius: 6px; font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 2px 6px; cursor: pointer; opacity: 0; }
+.ms-op:hover .ms-aislar, .ms-aislar:focus-visible { opacity: 1; }
+.ms-aislar:hover { background: var(--gris-claro); color: var(--negro); }
+.ms-aislar:focus-visible { outline: 2px solid var(--rojo); outline-offset: 1px; }
+@media (hover: none) { .ms-aislar { opacity: 1; } }
+.ms-aviso { margin: 4px 2px; padding: 6px 8px; border-radius: 6px; background: var(--rojo-tenue); color: var(--rojo); font-size: 11px; font-weight: 700; }
 .ms-op.todos { font-weight: 700; border-bottom: 1px solid var(--gris-sep); border-radius: 0; }
 .ms-padre { justify-content: space-between; align-items: center; }
 .ms-padre label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; flex: 1; }
+.ms-padre .ms-aislar { margin-right: 6px; }
 .ms-padre input { margin: 2px 0 0; accent-color: var(--rojo); }
 .ms-expandir { border: 1px solid var(--gris-sep); background: var(--blanco); border-radius: 6px; width: 26px; height: 24px; cursor: pointer; font: inherit; font-size: 12px; color: var(--negro); }
 .ms-expandir:hover { background: var(--gris-claro); }
@@ -110,7 +135,7 @@ a.kpi:focus-visible, .fs-modos button:focus-visible, .chip button:focus-visible,
 .ms-op.hijo { font-size: 11.5px; }
 .btn:hover:not(:disabled), .ms-btn:hover:not(.con-valor) { background: var(--gris-claro); }
 .ms-btn.con-valor:hover { border-color: var(--rojo-hover); color: var(--rojo-hover); }
-.btn:disabled { color: #B5B5B5; cursor: not-allowed; }
+.btn:disabled { color: var(--gris-deshabilitado); cursor: not-allowed; }
 .filtros-toggle { display: none; }
 .btn-primario { background: var(--rojo); border-color: var(--rojo); color: var(--blanco); }
 .btn-primario:hover:not(:disabled) { background: var(--rojo-hover); }
@@ -161,11 +186,6 @@ a.kpi:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
 .grafica.baja { height: 300px; }
 .vacio { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--texto-3); font-size: 13px; text-align: center; padding: 0 16px; }
 .cine-ctrl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 6px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--gris-sep); border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--blanco); }
-.chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.chip button { border: 0; background: var(--gris-claro); border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font: inherit; font-size: 11px; line-height: 18px; padding: 0; color: var(--texto-2); }
-.chip button:hover { background: var(--gris-sep); color: var(--negro); }
 .nota { font-size: 11px; color: var(--texto-3); margin: 0 0 4px; }
 
 /* Pestañas de las tablas de novedades (Inicio) */
@@ -182,13 +202,13 @@ a.kpi:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
 .tabla-env { overflow: auto; max-height: 640px; border: 1px solid var(--gris-sep); border-radius: 8px; }
 table.datos { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 12px; }
 table.datos th { position: sticky; top: 0; background: var(--negro); color: var(--blanco); text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 9px 10px; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; }
-table.datos th:hover { background: #2B2B2B; }
+table.datos th:hover { background: var(--negro-hover); }
 table.datos th:first-child, table.datos td:first-child { position: sticky; left: 0; }
 table.datos th:first-child { z-index: 2; }
 table.datos td:first-child { background: inherit; }
 table.datos th .ord { color: var(--amarillo); margin-left: 4px; }
 table.datos td { padding: 7px 10px; border-bottom: 1px solid var(--gris-sep); max-width: 340px; vertical-align: top; }
-table.datos tr:nth-child(even) td { background: #FAFAFA; }
+table.datos tr:nth-child(even) td { background: var(--gris-zebra); }
 table.datos tr:nth-child(odd) td { background: var(--blanco); }
 table.datos td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .paginacion { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--texto-2); }
@@ -205,9 +225,9 @@ table.datos td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange, .flatpickr-day.selected:hover { background: var(--rojo) !important; border-color: var(--rojo) !important; color: var(--blanco) !important; }
 .flatpickr-day.inRange { background: var(--rojo-tenue) !important; border-color: var(--rojo-tenue) !important; box-shadow: -5px 0 0 var(--rojo-tenue), 5px 0 0 var(--rojo-tenue) !important; }
 .flatpickr-day:not(.flatpickr-disabled):not(.selected):not(.inRange) { font-weight: 700; color: var(--negro); }
-.flatpickr-day.flatpickr-disabled { color: #CFCFCF !important; }
+.flatpickr-day.flatpickr-disabled { color: var(--gris-dia-deshabilitado) !important; }
 /* Calendario de rango: se puede elegir cualquier día; los días con ejecución se destacan en negrita */
-.fs-calendario-rango .flatpickr-day:not(.con-ejecucion):not(.selected):not(.startRange):not(.endRange):not(.inRange) { font-weight: 400; color: #9A9A9A; }
+.fs-calendario-rango .flatpickr-day:not(.con-ejecucion):not(.selected):not(.startRange):not(.endRange):not(.inRange) { font-weight: 400; color: var(--gris-dia-secundario); }
 .flatpickr-day.today { border-color: var(--amarillo); }
 /* Textos de flatpickr con el negro y el gris institucionales (usa negro puro y transparencias de negro) */
 .flatpickr-monthDropdown-months, .flatpickr-monthDropdown-month, .flatpickr-current-month input.cur-year { color: var(--texto) !important; }
