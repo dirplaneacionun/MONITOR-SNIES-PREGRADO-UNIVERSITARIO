@@ -80,5 +80,12 @@ jobs:
       # independiente sobre Historico/ y Novedades/ (unos 3.000 controles; tarda varios minutos).
       - name: Pruebas de punta a punta del Dashboard
         run: |
-          set -euo pipefail
-          python tests/e2e_dashboard.py
+          set -uo pipefail
+          python tests/e2e_dashboard.py 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          estado=${PIPESTATUS[0]}
+          if [ "$estado" -ne 0 ]; then
+            # El final del registro se muestra también como anotación de la ejecución, sin abrir el registro completo
+            resumen=$(tail -n 25 "$RUNNER_TEMP/e2e.log" | cut -c1-300 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Prueba de punta a punta del Dashboard::${resumen:0:3500}"
+          fi
+          exit "$estado"
