@@ -589,6 +589,33 @@ class TestSeguridadDelSitio(unittest.TestCase):
 
     PAGINAS = ("index", "nuevos", "modificados", "inactivos")
 
+    @staticmethod
+    def _scripts_en_linea(html: str) -> list[str]:
+        """Contenido de los scripts sin atributo src, analizado con el analizador HTML (no con expresiones regulares)."""
+        from html.parser import HTMLParser
+
+        class Recolector(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.actual, self.scripts = None, []
+
+            def handle_starttag(self, etiqueta, atributos):
+                if etiqueta == "script" and "src" not in dict(atributos):
+                    self.actual = []
+
+            def handle_data(self, datos):
+                if self.actual is not None:
+                    self.actual.append(datos)
+
+            def handle_endtag(self, etiqueta):
+                if etiqueta == "script" and self.actual is not None:
+                    self.scripts.append("".join(self.actual))
+                    self.actual = None
+
+        recolector = Recolector()
+        recolector.feed(html)
+        return recolector.scripts
+
     def test_politica_de_contenido_y_huella_del_mapa_de_importacion(self):
         import base64
         import hashlib
@@ -602,8 +629,7 @@ class TestSeguridadDelSitio(unittest.TestCase):
             self.assertNotIn("unsafe-eval", politica.group(1))
             self.assertNotIn("script-src 'self' 'unsafe-inline'", politica.group(1))
             # El único script en línea es el mapa de importación, autorizado por su huella SHA-256
-            # Sin distinguir mayúsculas y con cualquier espacio antes de ">" en la etiqueta de cierre
-            en_linea = re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script\s*>", html, re.S | re.I)
+            en_linea = self._scripts_en_linea(html)
             self.assertEqual(len(en_linea), 1)
             huella = "sha256-" + base64.b64encode(hashlib.sha256(en_linea[0].encode()).digest()).decode()
             self.assertIn(f"'{huella}'", politica.group(1))
