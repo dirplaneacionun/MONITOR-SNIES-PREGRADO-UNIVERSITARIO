@@ -1242,9 +1242,9 @@ def tipografia_local():
     paginas = [(DOCS / f"{n}.html").read_text(encoding="utf-8") for n in ("index", "nuevos", "modificados", "inactivos")]
     css = (DOCS / "assets" / "estilos.css").read_text(encoding="utf-8")
     verificar("tipografía · sin Google Fonts", not any("googleapis" in t or "gstatic" in t for t in paginas + [css]))
-    fuentes = [DOCS / "assets" / "fuentes" / n for n in ("montserrat-latin.woff2", "montserrat-latin-ext.woff2")]
-    verificar("tipografía · archivos presentes", all(f.exists() for f in fuentes))
-    verificar("tipografía · formato woff2", all(f.read_bytes()[:4] == b"wOF2" for f in fuentes))
+    fuentes = [DOCS / "assets" / "fuentes" / n for n in ("montserrat-latin.woff2", "montserrat-latin-ext.woff2", "OFL.txt")]
+    verificar("tipografía · archivos y licencia presentes", all(f.exists() for f in fuentes))
+    verificar("tipografía · formato woff2", all(f.read_bytes()[:4] == b"wOF2" for f in fuentes[:2]))
 
 
 COLUMNAS_INICIALES = {
