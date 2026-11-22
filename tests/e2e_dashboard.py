@@ -248,9 +248,10 @@ def navegador():
 
 def _servicio_chromedriver():
     """
-    Controlador de Chrome que coincide con el navegador instalado. En GitHub Actions el equipo trae otro chromedriver
-    en el PATH, de una versión distinta a la de Chrome, y Selenium lo prefiere: se usa el indicado en CHROMEDRIVER_PATH
-    (el que instala la acción de Chrome) o, si no, el que descarga webdriver-manager. Fuera de Actions, Selenium elige solo.
+    Controlador de Chrome que coincide con el navegador instalado. Selenium prefiere un chromedriver que encuentre en el
+    PATH aunque sea de otra versión (en GitHub Actions, la acción de Chrome dejó el 160 con Chrome 157): en integración
+    continua (CI) se usa el que descarga webdriver-manager para la versión del navegador, o el indicado en
+    CHROMEDRIVER_PATH. Fuera de Actions, Selenium elige solo.
     """
     ruta = os.environ.get("CHROMEDRIVER_PATH", "")
     if ruta and Path(ruta).exists():
