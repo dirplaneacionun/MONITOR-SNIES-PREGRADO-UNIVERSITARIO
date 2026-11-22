@@ -1,0 +1,8 @@
+Logotipos de la Universidad del Norte usados en el Dashboard y en el correo.
+
+Origen: carpeta "Recursos Uninorte" del proyecto (LOGO-UN-BLANCO.png, LOGO-UN-NEGRO.png y LOGO-UN-PRINCIPAL.png).
+Única modificación: se recortaron los márgenes transparentes del lienzo; el logotipo no se redimensionó ni se recoloreó.
+- logo-uninorte-blanco.png     encabezado negro del Dashboard y del correo
+- logo-uninorte-principal.png  pie del Dashboard (fondo claro)
+- favicon-uninorte.ico        icono de las pestañas del navegador (copia idéntica de FAVICON-UN.ico, sin cambios)
+- logo-uninorte-negro.png      versión de una tinta para fondos claros (sin uso por ahora)

@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Monitor SNIES Pregrado</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NIeJZsl6sLTTguZcrWSnS7DTicDxO0DSIh4Z3/OGgIE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>PROGRAMAS ACADÉMICOS ACTIVOS</title>
   <meta name="description" content="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="assets/img/favicon-uninorte.ico" sizes="32x32">
   <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/vendor/flatpickr/flatpickr.min.css?v=1b34a42552">
-  <link rel="stylesheet" href="assets/estilos.css?v=e8d12f9066">
+  <link rel="stylesheet" href="assets/estilos.css?v=966007aeb4">
   <script type="importmap">
     { "imports": {
       "hyparquet": "./assets/vendor/hyparquet/src/index.js",
@@ -22,11 +23,14 @@
   <header class="encabezado">
     <div class="encabezado-int">
       <div class="enc-fila">
-        <div>
-          <h1 class="enc-titulo">MONITOR SNIES PREGRADO · UNIVERSITARIO</h1>
+        <div class="enc-marca">
+          <img class="enc-logo" src="assets/img/logo-uninorte-blanco.png" width="198" height="68" alt="Universidad del Norte">
+          <div class="enc-textos">
+            <h1 class="enc-titulo">MONITOR SNIES PREGRADO · UNIVERSITARIO</h1>
           <p class="enc-sub">Programas Académicos Universitarios de Pregrado en Colombia</p>
+          </div>
         </div>
-        <div class="enc-total"><div class="et">ÚLTIMA EJECUCIÓN</div><div class="ev" id="ultima">–</div></div>
+        <div class="enc-total"><div class="et">ÚLTIMA EJECUCIÓN</div><div class="ev" id="ultima">–</div><div class="es"></div></div>
       </div>
       <nav class="nav" aria-label="Apartados">
         <a href="index.html" class="activa" aria-current="page">INICIO</a>
@@ -49,81 +53,90 @@
     
     <div class="fila dos">
       <section class="tarjeta" aria-labelledby="t-g-activos">
-        <h2 class="tarjeta-tit" id="t-g-activos">EVOLUCIÓN DE LOS PROGRAMAS ACADÉMICOS ACTIVOS</h2>
-        <p class="tarjeta-sub">Número de programas universitarios de pregrado activos en el SNIES en cada ejecución de la herramienta. Cada punto corresponde a una descarga.</p>
-        <div class="grafica " id="g-activos" role="img" aria-label="Evolución de los programas académicos activos"></div>
+        <h2 class="tarjeta-tit" id="t-g-activos">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS</h2>
+        <p class="tarjeta-sub">Número de programas universitarios de pregrado activos en el SNIES en cada ejecución de la herramienta. Cada punto corresponde a una ejecución.</p>
+        <div class="grafica " id="g-activos" role="img" aria-label="Evolución de programas académicos activos"></div>
       </section>
       <section class="tarjeta" aria-labelledby="t-g-novedades">
-        <h2 class="tarjeta-tit" id="t-g-novedades">EVOLUCIÓN ACUMULADA DE NUEVOS, MODIFICADOS E INACTIVOS</h2>
+        <h2 class="tarjeta-tit" id="t-g-novedades">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS NUEVOS, MODIFICADOS E INACTIVOS</h2>
         <p class="tarjeta-sub">Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.</p>
-        <div class="grafica " id="g-novedades" role="img" aria-label="Evolución acumulada de nuevos, modificados e inactivos"></div>
-      </section>
-    </div>
-    <div class="fila">
-      <section class="tarjeta" aria-labelledby="t-g-modalidad">
-        <h2 class="tarjeta-tit" id="t-g-modalidad">EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR MODALIDAD</h2>
-        <p class="tarjeta-sub">Programas activos en cada ejecución según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual.</p>
-        <div class="grafica " id="g-modalidad" role="img" aria-label="Evolución de los programas activos por modalidad"></div>
-      </section>
-    </div>
-    <div class="fila">
-      <section class="tarjeta" aria-labelledby="t-g-division">
-        <h2 class="tarjeta-tit" id="t-g-division">EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR DIVISIÓN DE UNINORTE</h2>
-        <p class="tarjeta-sub">Programas activos en cada ejecución según la división académica de la Universidad del Norte con la que se relacionan. Haga clic en la leyenda para ocultar o aislar divisiones.</p>
-        <div class="grafica alta" id="g-division" role="img" aria-label="Evolución de los programas activos por división de uninorte"></div>
-      </section>
-    </div>
-    <div class="fila">
-      <section class="tarjeta" aria-labelledby="t-g-cine">
-        <h2 class="tarjeta-tit" id="t-g-cine">EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR CAMPO DE CINE DETALLADO</h2>
-        <p class="tarjeta-sub">Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 10).</p>
-        <div id="cine-ctrl"></div>
-        <div class="grafica " id="g-cine" role="img" aria-label="Evolución de los programas activos por campo de cine detallado"></div>
+        <div class="grafica " id="g-novedades" role="img" aria-label="Evolución de programas académicos nuevos, modificados e inactivos"></div>
       </section>
     </div>
     <div class="fila tercio">
       <section class="tarjeta" aria-labelledby="t-g-sector">
-        <h2 class="tarjeta-tit" id="t-g-sector">PROGRAMAS ACTIVOS POR SECTOR</h2>
+        <h2 class="tarjeta-tit" id="t-g-sector">PROGRAMAS ACADÉMICOS ACTIVOS POR SECTOR</h2>
         <p class="tarjeta-sub">Distribución entre instituciones oficiales y privadas en la ejecución del <span data-fecha-corte></span>.</p>
-        <div class="grafica " id="g-sector" role="img" aria-label="Programas activos por sector"></div>
+        <div class="grafica " id="g-sector" role="img" aria-label="Programas académicos activos por sector"></div>
       </section>
       <section class="tarjeta" aria-labelledby="t-g-sector-evol">
-        <h2 class="tarjeta-tit" id="t-g-sector-evol">EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR SECTOR</h2>
+        <h2 class="tarjeta-tit" id="t-g-sector-evol">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR SECTOR</h2>
         <p class="tarjeta-sub">Programas activos de instituciones oficiales y privadas en cada ejecución.</p>
-        <div class="grafica " id="g-sector-evol" role="img" aria-label="Evolución de los programas activos por sector"></div>
+        <div class="grafica " id="g-sector-evol" role="img" aria-label="Evolución de programas académicos activos por sector"></div>
       </section>
     </div>
     <div class="fila dos">
       <section class="tarjeta" aria-labelledby="t-g-deptos">
-        <h2 class="tarjeta-tit" id="t-g-deptos">TOP 10 DEPARTAMENTOS CON MÁS PROGRAMAS ACTIVOS</h2>
-        <p class="tarjeta-sub">Departamentos de oferta con más programas activos en la ejecución del <span data-fecha-corte></span>.</p>
-        <div class="grafica " id="g-deptos" role="img" aria-label="Top 10 departamentos con más programas activos"></div>
+        <h2 class="tarjeta-tit" id="t-g-deptos">DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS</h2>
+        <p class="tarjeta-sub">Los 10 departamentos de oferta con más registros en la ejecución del <span data-fecha-corte></span>.</p>
+        <div class="grafica " id="g-deptos" role="img" aria-label="Departamentos con mayor número de programas académicos activos"></div>
       </section>
       <section class="tarjeta" aria-labelledby="t-g-univ">
-        <h2 class="tarjeta-tit" id="t-g-univ">TOP 10 UNIVERSIDADES CON MÁS PROGRAMAS ACTIVOS</h2>
-        <p class="tarjeta-sub">Instituciones con más programas activos en la ejecución del <span data-fecha-corte></span>.</p>
-        <div class="grafica " id="g-univ" role="img" aria-label="Top 10 universidades con más programas activos"></div>
+        <h2 class="tarjeta-tit" id="t-g-univ">UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS</h2>
+        <p class="tarjeta-sub">Las 10 instituciones con más registros en la ejecución del <span data-fecha-corte></span>.</p>
+        <div class="grafica " id="g-univ" role="img" aria-label="Universidades con mayor número de programas académicos activos"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta" aria-labelledby="t-g-modalidad">
+        <h2 class="tarjeta-tit" id="t-g-modalidad">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR MODALIDAD</h2>
+        <p class="tarjeta-sub">Programas activos en cada ejecución según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual.</p>
+        <div class="grafica " id="g-modalidad" role="img" aria-label="Evolución de programas académicos activos por modalidad"></div>
       </section>
     </div>
     <div class="fila">
       <section class="tarjeta" aria-labelledby="t-g-periodos">
-        <h2 class="tarjeta-tit" id="t-g-periodos">PROGRAMAS ACTIVOS SEGÚN NÚMERO DE PERIODOS DE DURACIÓN</h2>
-        <p class="tarjeta-sub">Cantidad de programas activos según su duración en periodos académicos (semestres o equivalentes) en la ejecución del <span data-fecha-corte></span>.</p>
-        <div class="grafica baja" id="g-periodos" role="img" aria-label="Programas activos según número de periodos de duración"></div>
+        <h2 class="tarjeta-tit" id="t-g-periodos">PROGRAMAS ACADÉMICOS ACTIVOS POR NÚMERO DE PERIODOS DE DURACIÓN</h2>
+        <p class="tarjeta-sub">Cantidad de registros según la duración del programa en periodos académicos (semestres o equivalentes) en la ejecución del <span data-fecha-corte></span>.</p>
+        <div class="grafica baja" id="g-periodos" role="img" aria-label="Programas académicos activos por número de periodos de duración"></div>
       </section>
     </div>
+    <div class="fila">
+      <section class="tarjeta" aria-labelledby="t-g-cine">
+        <h2 class="tarjeta-tit" id="t-g-cine">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR CAMPO DE CINE ESPECÍFICO</h2>
+        <p class="tarjeta-sub">Muestra los campos de CINE específico del filtro superior, sincronizado con el desplegable de esta gráfica: con TODOS marcado, los 10 con más registros activos; con una selección, esos campos (máximo 15). Marque o desmarque campos en cualquiera de los dos desplegables, o use la × de cada campo, para ajustar las líneas.</p>
+        <div id="cine-ctrl"></div>
+        <div class="grafica " id="g-cine" role="img" aria-label="Evolución de programas académicos activos por campo de cine específico"></div>
+      </section>
+    </div>
+    <div class="fila">
+      <section class="tarjeta" aria-labelledby="t-g-division">
+        <h2 class="tarjeta-tit" id="t-g-division">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR DIVISIÓN DE UNINORTE</h2>
+        <p class="tarjeta-sub">Programas activos en cada ejecución según la división académica de la Universidad del Norte con la que se relacionan. Haga clic en la leyenda para ocultar o aislar divisiones.</p>
+        <div class="grafica alta" id="g-division" role="img" aria-label="Evolución de programas académicos activos por división de uninorte"></div>
+      </section>
+    </div>
+    <section class="tarjeta" aria-labelledby="t-novedades">
+      <h2 class="tarjeta-tit" id="t-novedades">REGISTROS DE PROGRAMAS ACADÉMICOS NUEVOS, MODIFICADOS E INACTIVOS</h2>
+      <p class="tarjeta-sub">Novedades del periodo filtrado, con todas las columnas y ordenadas desde la fecha más reciente. Seleccione la pestaña de cada tipo de novedad: los filtros de esta página afectan siempre las tres tablas. Haga clic en un encabezado para ordenar; DESCARGAR exporta los registros filtrados de la tabla visible.</p>
+      <div class="tabs" role="tablist" aria-label="Tipo de novedad"><button type="button" role="tab" class="tab t-nuevos" id="tab-nuevos" data-tab="nuevos" aria-controls="panel-nuevos" aria-selected="true" tabindex="0">NUEVOS · <span data-n-tab="nuevos">–</span></button><button type="button" role="tab" class="tab t-modificados" id="tab-modificados" data-tab="modificados" aria-controls="panel-modificados" aria-selected="false" tabindex="-1">MODIFICADOS · <span data-n-tab="modificados">–</span></button><button type="button" role="tab" class="tab t-inactivos" id="tab-inactivos" data-tab="inactivos" aria-controls="panel-inactivos" aria-selected="false" tabindex="-1">INACTIVOS · <span data-n-tab="inactivos">–</span></button></div>
+      <div role="tabpanel" id="panel-nuevos" aria-labelledby="tab-nuevos"><div id="tabla-nuevos"></div></div>
+      <div role="tabpanel" id="panel-modificados" aria-labelledby="tab-modificados" hidden><div id="tabla-modificados"></div></div>
+      <div role="tabpanel" id="panel-inactivos" aria-labelledby="tab-inactivos" hidden><div id="tabla-inactivos"></div></div>
+    </section>
+    <img class="pie-logo" src="assets/img/logo-uninorte-principal.png" width="107" height="40" alt="Universidad del Norte">
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
   <script src="assets/vendor/plotly/plotly.min.js?v=6d21266ce1"></script>
   <script src="assets/vendor/flatpickr/flatpickr.min.js?v=1eeab1cb77"></script>
   <script src="assets/vendor/flatpickr/l10n/es.min.js?v=dac7fd9270"></script>
-  <script src="data/comun.js?v=fef85eceec"></script>
-  <script src="data/activos.js?v=b8818e67dc"></script>
-  <script src="data/nuevos.js?v=d4ea511bda"></script>
-  <script src="data/modificados.js?v=c303732ff1"></script>
-  <script src="data/inactivos.js?v=946e4b18f1"></script>
-  <script src="assets/app.js?v=fd28ed9f15"></script>
-  <script src="assets/inicio.js?v=6e7a070db2"></script>
+  <script src="data/comun.js?v=a24aa14331"></script>
+  <script src="data/activos.js?v=792e0394a9"></script>
+  <script src="data/nuevos.js?v=3eb7beebcf"></script>
+  <script src="data/modificados.js?v=640814f348"></script>
+  <script src="data/inactivos.js?v=1dc9befc9d"></script>
+  <script src="assets/app.js?v=c06fa74b21"></script>
+  <script src="assets/inicio.js?v=dc29381adb"></script>
 </body>
 </html>

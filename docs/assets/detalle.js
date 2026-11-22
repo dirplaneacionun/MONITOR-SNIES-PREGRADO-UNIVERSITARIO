@@ -5,9 +5,13 @@
   const $ = (id) => document.getElementById(id);
   const tipo = document.body.dataset.tipo;                 // nuevos | modificados | inactivos
   const NOMBRE = { nuevos: "NUEVOS", modificados: "MODIFICADOS", inactivos: "INACTIVOS" }[tipo];
+  const CAMPO_CINE = "CINE_F_2013_AC_CAMPO_ESPECIFIC";
+  // Color del apartado: verde (nuevos), amarillo (modificados; ocre en líneas) o rojo (inactivos). Es el de las series, el sector privado
+  // y las barras de las gráficas del apartado, incluidas las de universidades.
   const color = A.ESTADO[tipo];
+  const colorUniversidades = color;
+  const colorSector = A.colorSector(color);
   const registros = A.decodificar(S[tipo]);
-  const nuevosRef = tipo === "inactivos" ? A.decodificar(S.nuevos) : null;
   const tiposCambio = C.catalogos.tipos_cambio, etqCambio = C.catalogos.tipos_cambio_etiqueta;
 
   const todas = (campo) => [...new Set(registros.map((v) => v[campo]).filter((x) => x != null && x !== ""))].sort((a, b) => String(a).localeCompare(String(b), "es"));
@@ -16,23 +20,24 @@
   const modalidades = C.catalogos.grupos_modalidad;
   const colMod = A.asignarColores(modalidades);
   const colCambio = A.asignarColores(tiposCambio);
+  const programas = A.opcionesProgramas(registros);   // nombre más reciente de cada programa
 
-  const claves = ["universidades", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"];
+  // Rango temporal: cada gráfica empieza en la primera ejecución con datos de su métrica (antes no hay información)
+  const inicioPagina = A.primeraFecha(registros);
+  const inicioDe = (cambio) => A.primeraFecha(registros.filter((r) => r.TIPO_CAMBIO_DETECTADO === cambio && numeros(r.CAMBIO_DETECTADO)));
+
+  const claves = ["universidades", "programas", "divisiones", "cine", "fechas", "departamentos", "modalidades", "sectores"];
   if (tipo === "modificados") claves.push("cambios");
   const filtros = new A.Filtros($("filtros"), {
-    buscar: "BUSCAR POR NOMBRE, INSTITUCIÓN, CÓDIGO SNIES...",
+    buscar: "Buscar por Código de Programa o Institución",
     claves, registros,
-    opciones: {
-      universidades: C.catalogos.grupos_universidad, modalidades, cambios: tiposCambio,
-      cine: [...new Set([...C.cine_orden, ...todas("CINE_F_2013_AC_CAMPO_DETALLADO")])].sort((a, b) => a.localeCompare(b, "es")),
-    },
-    etiquetas: { cambios: etqCambio },
-    camposBusqueda: ["NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_SNIES_DEL_PROGRAMA"],
+    opciones: { modalidades, cambios: tiposCambio, programas: programas.opciones },
+    etiquetas: { cambios: etqCambio, modalidades: A.etiquetasModalidad(modalidades), programas: programas.etiquetas },
+    camposBusqueda: ["CODIGO_SNIES_DEL_PROGRAMA", "CODIGO_INSTITUCION"],
     fechas: C.fechas_ejecucion,
     alCambiar: () => actualizar(),
   });
-  const cineOrden = [...new Set([...C.cine_orden, ...todas("CINE_F_2013_AC_CAMPO_DETALLADO")])];
-  const selectorCine = new A.SelectorCine($("cine-ctrl"), cineOrden, C.cine_por_defecto, () => actualizar());
+  const selectorCine = new A.SelectorCine($("cine-ctrl"), filtros);
   const columnas = registros.columnas.filter((c) => !c.startsWith("_"));
   const tablaUI = new A.Tabla($("tabla"), { columnas, archivo: `Programas Academicos ${NOMBRE.charAt(0)}${NOMBRE.slice(1).toLowerCase()}` });
 
@@ -41,30 +46,31 @@
     return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
   };
 
-  function direccion(div, filas, tipoCambio, fechas, unidad) {
+  /** Programas que aumentaron (barras negras) o redujeron (barras del color del apartado) un valor numérico en cada ejecución. */
+  function direccion(div, filas, tipoCambio) {
+    // La gráfica empieza en el primer cambio válido de esta métrica, no en la primera ejecución del apartado
+    const fechas = filtros.enRango(A.desdeFecha(C.fechas_ejecucion, inicioDe(tipoCambio)));
     const sel = filas.filter((r) => r.TIPO_CAMBIO_DETECTADO === tipoCambio);
     const idx = new Map(fechas.map((f, i) => [f, i]));
     const sube = new Array(fechas.length).fill(0), baja = new Array(fechas.length).fill(0);
-    let difs = [];
+    let validos = 0;
     sel.forEach((r) => {
       const i = idx.get(r.FECHA_DE_OBTENCION), n = numeros(r.CAMBIO_DETECTADO);
       if (i == null || !n) return;
+      validos++;
       if (n[1] > n[0]) sube[i]++; else if (n[1] < n[0]) baja[i]--;
-      difs.push(n[1] - n[0]);
     });
     const tot = (v) => Math.abs(v.reduce((a, b) => a + b, 0));
-    if (!difs.length) return A.vacio(div);
-    const prom = difs.reduce((a, b) => a + b, 0) / difs.length;
-    $(div.id + "-nota").textContent = `Variación promedio: ${prom > 0 ? "+" : ""}${prom.toLocaleString("es-CO", { maximumFractionDigits: 1 })} ${unidad} por cambio`;
+    if (!validos) return A.vacio(div);
     A.plotly(div, [
-      { type: "bar", x: fechas, y: sube, name: `AUMENTOS · ${A.fmt(tot(sube))}`, marker: { color: A.NEGRO }, hovertemplate: "Aumentos: <b>%{y:,}</b><extra></extra>" },
-      { type: "bar", x: fechas, y: baja, name: `REDUCCIONES · ${A.fmt(tot(baja))}`, marker: { color: A.ROJO }, customdata: baja.map(Math.abs), hovertemplate: "Reducciones: <b>%{customdata:,}</b><extra></extra>" },
+      { type: "bar", x: fechas, y: sube, name: `AUMENTOS · ${A.fmt(tot(sube))}`, marker: { color: A.NEGRO }, hovertemplate: "Aumentos: <b>%{y:,}</b> registros<extra></extra>" },
+      { type: "bar", x: fechas, y: baja, name: `REDUCCIONES · ${A.fmt(tot(baja))}`, marker: A.marcador(A.ESTADO.modificados), customdata: baja.map(Math.abs), hovertemplate: "Reducciones: <b>%{customdata:,}</b> registros<extra></extra>" },
     ], {
       barmode: "relative", bargap: 0.15, hovermode: "x unified",
       xaxis: A.ejeMeses(fechas, div.clientWidth - 80),
-      yaxis: Object.assign({ gridcolor: "#E5E5E5", zeroline: true, zerolinecolor: "#4D4D4D", tickformat: ",d", title: { text: "PROGRAMAS", font: { size: 10 } } }, A.ejeEntero([...sube, ...baja])),
+      yaxis: Object.assign({ gridcolor: "#E5E5E5", zeroline: true, zerolinecolor: A.TINTA2, tickformat: ",d", title: { text: "REGISTROS", font: { size: 10 } } }, A.ejeEntero([...sube, ...baja])),
       showlegend: true, margin: { l: 56, r: 12, t: 36, b: 48 },
-      legend: { title: { text: "<b>TOTAL</b>" }, orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 10, color: "#000000" } },
+      legend: { title: { text: "<b>TOTAL</b>" }, orientation: "h", x: 1, xanchor: "right", y: 1.02, yanchor: "bottom", font: { size: 10, color: A.TINTA } },
     });
   }
 
@@ -79,64 +85,31 @@
       if (i >= 0 && j >= 0) z[i][j]++;
     });
     const filasUsadas = g.map((_, i) => i).filter((i) => z[i].some((v) => v) || z.some((f) => f[i]));
-    const etq = filasUsadas.map((i) => g[i]);
+    const etq = filasUsadas.map((i) => A.etqModalidad(g[i]));
     const zz = filasUsadas.map((i) => filasUsadas.map((j) => z[i][j]));
     A.plotly(div, [{
       type: "heatmap", x: etq, y: etq, z: zz, xgap: 2, ygap: 2,
-      colorscale: [[0, "#F5F5F5"], [0.0001, "#FDECEC"], [1, "#BE0000"]], showscale: false,
+      colorscale: [[0, "#F5F5F5"], [0.0001, "#FFF5CC"], [1, A.ESTADO.modificados]], showscale: false,
       text: zz.map((f) => f.map((v) => (v ? A.fmt(v) : ""))), texttemplate: "%{text}", textfont: { size: 12 },
-      hovertemplate: "DE %{y} A %{x}: <b>%{z:,}</b> cambios<extra></extra>",
+      hovertemplate: "DE %{y} A %{x}: <b>%{z:,}</b> registros<extra></extra>",
     }], {
       margin: { l: 110, r: 12, t: 12, b: 70 },
-      xaxis: { title: { text: "MODALIDAD NUEVA", font: { size: 10 } }, tickfont: { color: "#000000" }, side: "bottom" },
-      yaxis: { title: { text: "MODALIDAD ANTERIOR", font: { size: 10 } }, tickfont: { color: "#000000" }, autorange: "reversed" },
-    });
-  }
-
-  function antiguedad(div, filas) {
-    const tramos = ["0 A 2 AÑOS", "3 A 5 AÑOS", "6 A 10 AÑOS", "MÁS DE 10 AÑOS", "SIN FECHA DE REGISTRO"];
-    const c = new Array(tramos.length).fill(0);
-    filas.forEach((r) => {
-      const reg = r.FECHA_DE_REGISTRO_EN_SNIES, obt = r.FECHA_DE_OBTENCION;
-      if (!reg) { c[4]++; return; }
-      const anios = (new Date(obt) - new Date(reg)) / (365.25 * 864e5);
-      c[anios <= 2 ? 0 : anios <= 5 ? 1 : anios <= 10 ? 2 : 3]++;
-    });
-    const usados = tramos.map((t, i) => [t, c[i]]).filter(([t, v], i) => i < 4 || v > 0);
-    A.barrasV(div, usados.map((u) => u[0]), usados.map((u) => u[1]), color, { tituloX: "AÑOS ENTRE EL REGISTRO EN SNIES Y LA INACTIVACIÓN" });
-  }
-
-  function balance(div, filasIna) {
-    const nue = nuevosRef.filter((r) => filtros.pasa(r));
-    const m = {};
-    nue.forEach((r) => { const d = r.DIVISION_UNINORTE || "OTRO"; m[d] = (m[d] || 0) + 1; });
-    filasIna.forEach((r) => { const d = r.DIVISION_UNINORTE || "OTRO"; m[d] = (m[d] || 0) - 1; });
-    const orden = Object.entries(m).sort((a, b) => b[1] - a[1]);
-    if (!orden.length) return A.vacio(div);
-    const corta = (s) => (s.length > 34 ? s.slice(0, 33) + "…" : s);
-    A.plotly(div, [{
-      type: "bar", orientation: "h", y: orden.map((o) => corta(o[0])).reverse(), x: orden.map((o) => o[1]).reverse(),
-      customdata: orden.map((o) => o[0]).reverse(),
-      marker: { color: orden.map((o) => (o[1] >= 0 ? A.ESTADO.nuevos : A.ESTADO.inactivos)).reverse() },
-      text: orden.map((o) => (o[1] > 0 ? "+" : "") + A.fmt(o[1])).reverse(), textposition: "outside", cliponaxis: false,
-      textfont: { color: "#000000", size: 10 },
-      hovertemplate: "%{customdata}: <b>%{x:+,}</b> (nuevos − inactivos)<extra></extra>",
-    }], {
-      margin: { l: 10, r: 40, t: 8, b: 30 }, bargap: 0.35,
-      xaxis: Object.assign({ gridcolor: "#E5E5E5", zeroline: true, zerolinecolor: "#4D4D4D", tickformat: "+,d" }, A.ejeEntero(orden.map((o) => o[1]))),
-      yaxis: { automargin: true, tickfont: { size: 10, color: "#000000" } },
+      xaxis: { title: { text: "MODALIDAD NUEVA", font: { size: 10 } }, tickfont: { color: A.TINTA }, side: "bottom" },
+      yaxis: { title: { text: "MODALIDAD ANTERIOR", font: { size: 10 } }, tickfont: { color: A.TINTA }, autorange: "reversed" },
     });
   }
 
   function actualizar() {
     const filas = registros.filter((r) => filtros.pasa(r));
-    const fechas = filtros.enRango(C.fechas_ejecucion);
+    // Las gráficas temporales empiezan en la primera ejecución con registros del apartado
+    const fechas = filtros.enRango(A.desdeFecha(C.fechas_ejecucion, inicioPagina));
 
-    // Total del encabezado y conteo
-    const programas = new Set(filas.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size;
+    // Total del encabezado y conteo: una sola unidad, "registros"
     $("total").textContent = A.fmt(filas.length);
-    $("total-s").textContent = tipo === "modificados" ? A.plural(programas, "programa", "programas") : (filas.length === 1 ? "registro" : "registros");
-    filtros.conteo.textContent = tipo === "modificados" ? `${A.plural(filas.length, "cambio", "cambios")} en ${A.plural(programas, "programa", "programas")}` : A.plural(filas.length, "programa", "programas");
+    $("total-s").textContent = filas.length === 1 ? "registro" : "registros";
+    // En Modificados un programa puede tener varios registros de cambio: se informa también el número de programas distintos
+    const distintos = new Set(filas.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size;
+    filtros.conteo.textContent = A.plural(filas.length, "registro", "registros") + (tipo === "modificados" ? ` · ${A.plural(distintos, "programa distinto", "programas distintos")}` : "");
 
     A.lineas($("g-evolucion"), fechas, [{ nombre: NOMBRE, valores: A.contarPorFecha(filas, fechas), color }], { modo: "acumulado" });
     if (tipo === "modificados") {
@@ -146,31 +119,29 @@
     const porDiv = A.contarPorFecha(filas, fechas, "DIVISION_UNINORTE");
     A.lineas($("g-division"), fechas, A.seriesPorCategoria(porDiv, divisiones, colDiv), { modo: "acumulado" });
     const porMod = A.contarPorFecha(filas, fechas, "_MG");
-    A.lineas($("g-modalidad"), fechas, A.seriesPorCategoria(porMod, modalidades, colMod), { modo: "acumulado" });
+    A.lineas($("g-modalidad"), fechas, A.seriesPorCategoria(porMod, modalidades, colMod, A.etiquetasModalidad(modalidades)), { modo: "acumulado" });
 
     const sec = A.contar(filas, "SECTOR");
-    A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => A.SECTOR_COLOR[s[0]] || A.GRIS));
+    A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => colorSector[s[0]] || A.GRIS));
     const porSec = A.contarPorFecha(filas, fechas, "SECTOR");
-    A.lineas($("g-sector-evol"), fechas, Object.keys(A.SECTOR_COLOR).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: porSec[s], color: A.SECTOR_COLOR[s] })), { modo: "acumulado" });
+    A.lineas($("g-sector-evol"), fechas, Object.keys(colorSector).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: porSec[s], color: colorSector[s] })), { modo: "acumulado" });
 
-    const porCine = A.contarPorFecha(filas, fechas, "CINE_F_2013_AC_CAMPO_DETALLADO");
-    A.lineas($("g-cine"), fechas, selectorCine.sel.map((c) => ({ nombre: c, valores: porCine[c] || new Array(fechas.length).fill(0), color: selectorCine.colores[c].color, dash: selectorCine.colores[c].dash })), { modo: "acumulado" });
+    // Campos de CINE de la gráfica: sincronizados con el filtro superior (TODOS: los 10 con más registros en este apartado)
+    selectorCine.fijar(new Map(A.contar(filas, CAMPO_CINE)));
+    const porCine = A.contarPorFecha(filas, fechas, CAMPO_CINE);
+    A.lineas($("g-cine"), fechas, selectorCine.sel.map((c) => ({ nombre: c, valores: porCine[c] || new Array(fechas.length).fill(0), color: selectorCine.colorDe(c) })), { modo: "acumulado" });
 
     const dep = A.contar(filas, "DEPARTAMENTO_OFERTA_PROGRAMA").slice(0, 10);
-    A.barrasH($("g-deptos"), dep.map((d) => d[0]), dep.map((d) => d[1]), color, { unidad: "registros" });
+    A.barrasH($("g-deptos"), dep.map((d) => d[0]), dep.map((d) => d[1]), color);
     const ins = A.contar(filas, "NOMBRE_INSTITUCION").slice(0, 10);
-    A.barrasH($("g-instituciones"), ins.map((d) => d[0]), ins.map((d) => d[1]), "#000000", { unidad: "registros" });
+    A.barrasH($("g-instituciones"), ins.map((d) => d[0]), ins.map((d) => d[1]), colorUniversidades);
     const per = A.contar(filas, "NUMERO_PERIODOS_DE_DURACION").sort((a, b) => a[0] - b[0]);
     A.barrasV($("g-periodos"), per.map((p) => p[0]), per.map((p) => p[1]), color, { tituloX: "NÚMERO DE PERIODOS", sufijo: " periodos" });
 
     if (tipo === "modificados") {
-      direccion($("g-creditos"), filas, "NUMERO DE CREDITOS", fechas, "créditos");
-      direccion($("g-periodos-dir"), filas, "NUMERO DE PERIODOS", fechas, "periodos");
+      direccion($("g-creditos"), filas, "NUMERO DE CREDITOS");
+      direccion($("g-periodos-dir"), filas, "NUMERO DE PERIODOS");
       transiciones($("g-transiciones"), filas);
-    }
-    if (tipo === "inactivos") {
-      antiguedad($("g-antiguedad"), filas);
-      balance($("g-balance"), filas);
     }
     tablaUI.actualizar(filas);
   }

@@ -45,23 +45,29 @@ NOVEDADES_DIR = ROOT / "Novedades"
 
 COL_SNIES = "CODIGO_SNIES_DEL_PROGRAMA"
 COL_FECHA = "FECHA_DE_OBTENCION"
-COL_CINE = "CINE_F_2013_AC_CAMPO_DETALLADO"
-CINE_POR_DEFECTO = 5
+COL_CINE = "CINE_F_2013_AC_CAMPO_ESPECIFIC"
+COL_PADRE = "CODIGO_INSTITUCION_PADRE"
+COL_CINE_AMPLIO = "CINE_F_2013_AC_CAMPO_AMPLIO"
 
 # Atributos de las "versiones" de programa usadas en las gráficas de evolución de activos
 COLS_VERSION = [
-    COL_SNIES, "NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_INSTITUCION", "SECTOR",
+    COL_SNIES, "NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_INSTITUCION", COL_PADRE, "SECTOR",
     "DEPARTAMENTO_OFERTA_PROGRAMA", "MODALIDAD", COL_CINE, "DIVISION_UNINORTE", "NUMERO_PERIODOS_DE_DURACION",
 ]
 # Columnas del histórico que usa el Dashboard: las de las versiones de programas, la fecha y el municipio (para
 # unificar sus variantes en las novedades). Leer solo estas columnas reduce a cerca de un tercio la memoria del
 # proceso, que crece con cada ejecución acumulada.
-COLS_HISTORICO = COLS_VERSION + [COL_FECHA, "MUNICIPIO_OFERTA_PROGRAMA"]
+COLS_HISTORICO = COLS_VERSION + [COL_FECHA, "MUNICIPIO_OFERTA_PROGRAMA", COL_CINE_AMPLIO]
 
+# Orden de las primeras columnas de cada tabla; las demás conservan el orden del archivo del que provienen.
+_COLS_BASE = [COL_FECHA, "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA",
+              "MUNICIPIO_OFERTA_PROGRAMA", "MODALIDAD"]
+_COLS_ACADEMICAS = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS",
+                    "DIVISION_UNINORTE"]
 COLS_PRIMERO = {
-    "nuevos": [COL_FECHA, "TIPO_NOVEDAD"],
-    "modificados": [COL_FECHA, "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"],
-    "inactivos": [COL_FECHA, "REACTIVADO_POSTERIORMENTE"],
+    "nuevos": _COLS_BASE + ["TIPO_NOVEDAD"] + _COLS_ACADEMICAS,
+    "modificados": _COLS_BASE + ["TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + _COLS_ACADEMICAS,
+    "inactivos": _COLS_BASE + _COLS_ACADEMICAS,
     "activos": [COL_FECHA],
 }
 
@@ -133,12 +139,32 @@ def _rangos(indices: list[int]) -> list[list[int]]:
     return rangos
 
 
-def nombres_mayor_interes(hist: pd.DataFrame, novedades: dict) -> dict[str, str]:
-    """Nombre vigente (el más reciente registrado) de cada universidad de mayor interés, para el filtro."""
-    cols = ["CODIGO_INSTITUCION", "NOMBRE_INSTITUCION", COL_FECHA]
+def instituciones(hist: pd.DataFrame, novedades: dict) -> dict[str, str]:
+    """
+    Nombre vigente (el más reciente registrado) de cada institución PADRE con programas en el histórico o en las
+    novedades, por CODIGO_INSTITUCION_PADRE, para el filtro de universidades. Las universidades de mayor interés
+    siempre figuran. El nombre es el de la propia institución padre cuando tiene registros y, si no, el de sus sedes.
+    """
+    cols = ["CODIGO_INSTITUCION", COL_PADRE, "NOMBRE_INSTITUCION", COL_FECHA]
     todo = pd.concat([hist[cols]] + [d[cols] for d in novedades.values() if set(cols) <= set(d.columns)])
-    ultimo = todo.sort_values(COL_FECHA).groupby("CODIGO_INSTITUCION")["NOMBRE_INSTITUCION"].last()
-    return {str(c): str(ultimo.get(c, f"INSTITUCIÓN {c}")).rstrip("- ").strip() for c in MAYOR_INTERES}
+    todo = todo.dropna(subset=[COL_PADRE])
+    propios = todo[todo["CODIGO_INSTITUCION"] == todo[COL_PADRE]]
+    ultimo = todo.sort_values(COL_FECHA).groupby(COL_PADRE)["NOMBRE_INSTITUCION"].last()
+    ultimo.update(propios.sort_values(COL_FECHA).groupby(COL_PADRE)["NOMBRE_INSTITUCION"].last())
+    codigos = sorted(set(int(c) for c in ultimo.index) | set(MAYOR_INTERES) | {UNINORTE})
+    limpio = lambda c: str(ultimo.get(c, f"INSTITUCIÓN {c}")).rstrip("- ").strip()  # noqa: E731
+    return {str(c): limpio(c) for c in codigos}
+
+
+def jerarquia_cine(hist: pd.DataFrame, novedades: dict) -> list[list]:
+    """
+    Campos de CINE específico agrupados por campo amplio, para el filtro jerárquico: [[amplio, [específicos]], ...],
+    ambos niveles en orden alfabético. Un campo específico figura bajo cada campo amplio con el que aparece.
+    """
+    cols = [COL_CINE_AMPLIO, COL_CINE]
+    pares = pd.concat([hist[cols]] + [d[cols] for d in novedades.values() if set(cols) <= set(d.columns)])
+    pares = pares.dropna().drop_duplicates()
+    return [[amplio, sorted(grupo[COL_CINE].tolist())] for amplio, grupo in sorted(pares.groupby(COL_CINE_AMPLIO), key=lambda x: x[0])]
 
 
 # ── Generación ────────────────────────────────────────────────────────────────
@@ -183,13 +209,7 @@ def main() -> int:
     ultima = max(fechas_ejecucion)
     iso = lambda f: pd.Timestamp(f).strftime("%Y-%m-%d")  # noqa: E731
 
-    # Inactivos que luego se reactivaron
     nue, ina = novedades["nuevos"], novedades["inactivos"]
-    reactivados = nue[nue.get("TIPO_NOVEDAD", pd.Series(dtype=str)) == "REACTIVADO"][[COL_SNIES, COL_FECHA]]
-    def _reactivado(row):
-        f = reactivados.loc[(reactivados[COL_SNIES] == row[COL_SNIES]) & (reactivados[COL_FECHA] > row[COL_FECHA]), COL_FECHA]
-        return f.min() if not f.empty else pd.NaT
-    ina["REACTIVADO_POSTERIORMENTE"] = ina.apply(_reactivado, axis=1) if not ina.empty else pd.NaT
 
     # KPIs de la última ejecución
     def _en_ultima(df):
@@ -205,22 +225,17 @@ def main() -> int:
         "inactivos": int(len(_en_ultima(ina))),
     }
 
-    # Campos CINE con mayor presencia en los programas activos (selección por defecto)
-    cine_top = ult_activos[COL_CINE].value_counts().head(CINE_POR_DEFECTO).index.tolist()
-    cine_orden = ult_activos[COL_CINE].value_counts().index.tolist()
-
     comun = {
         "generado": dt.datetime.now(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d %H:%M"),
         "ultima_ejecucion": iso(ultima),
         "fechas_ejecucion": [iso(f) for f in fechas_ejecucion],
         "fechas_activos": [iso(f) for f in fechas_activos],
         "kpis": kpis,
-        "cine_por_defecto": cine_top,
-        "cine_orden": cine_orden,
         "catalogos": {
             "uninorte": UNINORTE,
             "mayor_interes": list(MAYOR_INTERES),
-            "mayor_interes_nombres": nombres_mayor_interes(hist, novedades),
+            "instituciones": instituciones(hist, novedades),
+            "cine_jerarquia": jerarquia_cine(hist, novedades),
             "grupos_universidad": list(GRUPOS_UNIVERSIDAD),
             "modalidad_a_grupo": MODALIDAD_A_GRUPO,
             "grupos_modalidad": list(MODALIDADES_GRUPO),

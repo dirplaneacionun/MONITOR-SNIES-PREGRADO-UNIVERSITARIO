@@ -6,6 +6,7 @@ Ejecución:
 """
 
 import datetime as dt
+import json
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 import pandas as pd
+import pyarrow as pa
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Scripts"))
 
@@ -32,6 +34,7 @@ F = run_snies.COL_FECHA
 
 
 def programa(snies, **valores):
+    """Registro de programa académico de prueba; `valores` reemplaza campos del registro base."""
     base = {
         S: snies, "NOMBRE_DEL_PROGRAMA": f"PROGRAMA {snies}", "NOMBRE_INSTITUCION": "UNIVERSIDAD X",
         "CODIGO_INSTITUCION": 9999, "NUMERO_CREDITOS": 160, "MUNICIPIO_OFERTA_PROGRAMA": "BARRANQUILLA",
@@ -42,6 +45,7 @@ def programa(snies, **valores):
 
 
 class TestCatalogos(unittest.TestCase):
+    """Agrupaciones de universidades y de modalidades, y tipos de cambio."""
     def test_grupos_universidad(self):
         self.assertEqual(catalogos.grupo_universidad(1713), catalogos.GRUPO_UNINORTE)
         for codigo in catalogos.MAYOR_INTERES:
@@ -49,6 +53,16 @@ class TestCatalogos(unittest.TestCase):
         self.assertEqual(catalogos.grupo_universidad("1701"), catalogos.GRUPO_MAYOR_INTERES)
         self.assertEqual(catalogos.grupo_universidad(9999), catalogos.GRUPO_OTRAS)
         self.assertEqual(catalogos.grupo_universidad(None), catalogos.GRUPO_OTRAS)
+
+    def test_grupos_por_institucion_padre(self):
+        """La clasificación usa CODIGO_INSTITUCION_PADRE: una seccional toma el grupo de su institución principal."""
+        df = pd.DataFrame({"CODIGO_INSTITUCION": [1702, 1807, 1713, 9999, 1701],
+                           "CODIGO_INSTITUCION_PADRE": [1701, 1806, 1713, 9999, 1701]})
+        self.assertEqual(catalogos.grupos_de_registros(df).tolist(),
+                         [catalogos.GRUPO_MAYOR_INTERES, catalogos.GRUPO_MAYOR_INTERES, catalogos.GRUPO_UNINORTE,
+                          catalogos.GRUPO_OTRAS, catalogos.GRUPO_MAYOR_INTERES])
+        # Sin la columna de padre (tablas antiguas) se usa el código de la institución
+        self.assertEqual(catalogos.grupos_de_registros(df[["CODIGO_INSTITUCION"]]).tolist()[:2], [catalogos.GRUPO_OTRAS] * 2)
 
     def test_modalidades_agrupadas(self):
         for grupo, valores in catalogos.MODALIDADES_GRUPO.items():
@@ -60,6 +74,7 @@ class TestCatalogos(unittest.TestCase):
 
 
 class TestDeteccion(unittest.TestCase):
+    """Detección de nuevos, modificados e inactivos entre dos ejecuciones."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
@@ -159,6 +174,7 @@ class TestDeteccion(unittest.TestCase):
 
 
 class TestAcumulacion(unittest.TestCase):
+    """Acumulación de novedades en Parquet: reemplazo de una fecha repetida y retiro de columnas obsoletas."""
     def test_reemplaza_la_fecha_y_retira_columnas_obsoletas(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "x.parquet"
@@ -286,6 +302,7 @@ class TestHistorico(unittest.TestCase):
 
 
 class TestTipos(unittest.TestCase):
+    """Tipos de datos estables al guardar (números como texto, fechas, columnas vacías)."""
     def test_tipos_estables(self):
         df = pd.DataFrame({"MIXTA": [31, "0031", None], "FECHAS": [dt.date(2026, 1, 1), dt.datetime(2026, 1, 2, 5), None]})
         out = run_snies._tipos_estables(df)
@@ -296,6 +313,7 @@ class TestTipos(unittest.TestCase):
 
 
 class TestRegresiones(unittest.TestCase):
+    """Regresiones: lectura de códigos largos y registro de una falla del correo."""
     def test_lectura_conserva_codigos_largos(self):
         # Regresión: pandas convertía a número los textos numéricos y truncaba CODIGO_ANTERIOR_ICFES (21 dígitos)
         with tempfile.TemporaryDirectory() as tmp:
@@ -327,32 +345,37 @@ class TestRegresiones(unittest.TestCase):
 
 
 class TestCorreo(unittest.TestCase):
+    """Contenido, tamaño y envío del correo y de la alerta técnica."""
     def _df(self, codigos):
         return pd.DataFrame([programa(i, CODIGO_INSTITUCION=c, NOMBRE_INSTITUCION=f"INST {c}") for i, c in enumerate(codigos)])
 
-    def test_prioridad_y_completa_hasta_diez(self):
-        # Regresión: con 2 registros prioritarios de 13, la tabla mostraba solo esos 2
+    def test_muestra_todos_los_registros_con_prioridad(self):
+        # Sin límite de filas: se muestran todos los registros, con Uninorte y Mayor Interés primero
         mostrar = send_report.seleccionar(self._df([9999] * 11 + [1711, 1711]))
-        self.assertEqual(len(mostrar), 10)
+        self.assertEqual(len(mostrar), 13)
         self.assertEqual(mostrar["CODIGO_INSTITUCION"].tolist()[:3], [1711, 1711, 9999])
         mostrar = send_report.seleccionar(self._df([9999] * 10 + [1701, 1713]))
         self.assertEqual(mostrar["CODIGO_INSTITUCION"].tolist()[:2], [1713, 1701])   # Uninorte primero
+        self.assertEqual(len(send_report.seleccionar(self._df([9999] * 150))), 150)
+        self.assertTrue(send_report.seleccionar(None).empty)
 
-    def test_sin_prioritarios_muestra_hasta_diez(self):
-        self.assertEqual(len(send_report.seleccionar(self._df([9999] * 15))), 10)
-        self.assertEqual(len(send_report.seleccionar(self._df([9999] * 3))), 3)
-
-    def test_maximo_diez_prioritarios(self):
-        mostrar = send_report.seleccionar(self._df([1701] * 14 + [1713]))
-        self.assertEqual(len(mostrar), 10)
-        self.assertEqual(mostrar["CODIGO_INSTITUCION"].iloc[0], 1713)
+    def test_el_html_con_muchos_registros_no_supera_el_limite_de_gmail(self):
+        # Gmail recorta los mensajes cuyo HTML supera ~102 KB: caso grande (35 nuevos y 61 cambios) con margen holgado
+        nuevos = self._df(list(range(1, 36))).assign(TIPO_NOVEDAD="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA",
+                                                     MODALIDAD="PRESENCIAL", DIVISION_UNINORTE="ESCUELA DE NEGOCIOS")
+        mod = self._df(list(range(1, 62))).assign(TIPO_CAMBIO_DETECTADO="NUMERO DE CREDITOS", CAMBIO_DETECTADO="160 → 144",
+                                                  MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA", MODALIDAD="PRESENCIAL",
+                                                  DIVISION_UNINORTE="INGENIERIAS")
+        html = send_report.construir_cuerpo({"pregrado": {"nuevos": nuevos, "modificados": mod, "total_activos": 5500}}, dt.date(2026, 7, 28))
+        self.assertEqual(html.count("160 → 144"), 61)   # todos los cambios, sin límite
+        self.assertLess(len(html.encode("utf-8")), 90_000)
 
     def test_columnas_de_las_tablas(self):
-        base = ["INSTITUCIÓN", "PROGRAMA", "MODALIDAD", "MUNICIPIO", "DIVISIÓN UNINORTE"]
         titulos = {t: [c[1] for c in send_report.SECCIONES[t]["columnas"]] for t in send_report.SECCIONES}
-        self.assertEqual(titulos["nuevos"], base)        # sin la columna TIPO
-        self.assertEqual(titulos["inactivos"], base)
-        self.assertEqual(titulos["modificados"], base + ["TIPO DE CAMBIO", "CAMBIO DETECTADO"])
+        self.assertEqual(titulos["nuevos"], ["INSTITUCIÓN", "PROGRAMA", "MUNICIPIO", "MODALIDAD", "TIPO DE NOVEDAD", "DIVISIÓN DE UNINORTE"])
+        self.assertEqual(titulos["modificados"], ["INSTITUCIÓN", "PROGRAMA", "MUNICIPIO", "MODALIDAD", "TIPO DE CAMBIO",
+                                                  "CAMBIO DETECTADO", "DIVISIÓN DE UNINORTE"])
+        self.assertEqual(titulos["inactivos"], ["INSTITUCIÓN", "PROGRAMA", "MUNICIPIO", "MODALIDAD", "DIVISIÓN DE UNINORTE"])
 
     def test_html_escapa_contenido(self):
         df = self._df([1713]).assign(NOMBRE_DEL_PROGRAMA="<script>alert(1)</script>", TIPO_NOVEDAD="NUEVO")
@@ -390,33 +413,47 @@ class TestCorreo(unittest.TestCase):
         self.assertLess(html.index("VER DASHBOARD COMPLETO"), html.index("PROGRAMAS ACTIVOS"))   # antes de los indicadores
         self.assertEqual(html.count("VER DASHBOARD COMPLETO"), 1)
         texto = re.sub(r"<[^>]+>", "", html)
-        self.assertIn("Universidad del Norte: 1 cambio · Universidades de Mayor Interés: 0 cambios.", texto)
+        self.assertIn("Universidad del Norte: 1 registro · Universidades de Mayor Interés: 0 registros.", texto)
         self.assertNotIn("La tabla presenta", texto)   # caben todos los registros: sin remisión al Dashboard
 
-    def test_nota_de_limite_remite_al_dashboard(self):
-        # Caso real del 17/11/2026: 13 cambios, 2 de una universidad de mayor interés
+    def test_todos_los_registros_y_nota_de_novedades_de_interes(self):
+        # Caso real del 17/11/2026: 13 cambios, 2 de una universidad de mayor interés; la tabla los muestra todos
         mod = self._df([9999] * 11 + [1711, 1711]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B")
         res = {"pregrado": {"modificados": mod, "total_activos": 13}}
         html = send_report.construir_cuerpo(res, dt.date(2026, 11, 17))
         texto = re.sub(r"<[^>]+>", "", html)
-        self.assertIn("Universidad del Norte: 0 cambios · Universidades de Mayor Interés: 2 cambios.", texto)
-        self.assertIn("La tabla presenta 10 de 13 registros", texto)
-        self.assertIn(f'href="{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17"', html)
+        self.assertIn("Universidad del Norte: 0 registros · Universidades de Mayor Interés: 2 registros.", texto)
+        self.assertEqual(html.count("A → B"), 13)
+        self.assertNotIn("La tabla presenta", texto)
         plano = send_report.construir_texto(res, dt.date(2026, 11, 17))
-        self.assertIn("La tabla presenta 10 de 13 registros", plano)
-        self.assertIn(f"{send_report.DASHBOARD_URL}modificados.html#fecha=2026-11-17", plano)
+        self.assertEqual(" ".join(plano.split()).count("CAMBIO DETECTADO: A → B"), 13)   # el texto plano ajusta las líneas
+        self.assertNotIn("La tabla presenta", plano)
+
+    def test_tabla_de_novedades_por_grupo(self):
+        res = {"nuevos": self._df([1713, 9999, 9999]).assign(TIPO_NOVEDAD="NUEVO"),
+               "modificados": self._df([1711, 9999]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B"),
+               "inactivos": self._df([9999]), "total_activos": 4}
+        columnas, filas = send_report._grupos(res)
+        self.assertEqual([c[1] for c in columnas], ["GRUPO DE UNIVERSIDADES", "NUEVOS", "MODIFICADOS", "INACTIVOS"])
+        self.assertEqual(filas["GRUPO"].tolist(), ["UNIVERSIDAD DEL NORTE", "UNIVERSIDADES DE MAYOR INTERÉS", "OTRAS UNIVERSIDADES", "TOTAL"])
+        self.assertEqual(filas["NUEVOS"].tolist(), ["1", "0", "2", "3"])
+        self.assertEqual(filas["MODIFICADOS"].tolist(), ["0", "1", "1", "2"])
+        self.assertEqual(filas["INACTIVOS"].tolist(), ["0", "0", "1", "1"])
+        html = send_report.construir_cuerpo({"pregrado": res}, dt.date(2026, 11, 17))
+        self.assertIn("NOVEDADES POR GRUPO DE UNIVERSIDADES", html)
+        for retirado in ("EJECUCIÓN ANTERIOR", "ESTA EJECUCIÓN", "VARIACIÓN"):
+            self.assertNotIn(retirado, html)
+        # Sin novedades: la tabla muestra ceros, no desaparece
+        _, vacia = send_report._grupos({"total_activos": 5})
+        self.assertEqual(vacia["NUEVOS"].tolist(), ["0", "0", "0", "0"])
 
     def test_resumen_descriptivo_con_variacion_y_grupos(self):
-        hoy = self._df([1713, 1701, 9999, 9999])
         res = {"nuevos": self._df([1713, 9999]).assign(TIPO_NOVEDAD="NUEVO"), "modificados": None, "inactivos": None,
-               "total_activos": 4, "total_anterior": 3, "fecha_anterior": dt.date(2026, 11, 10),
-               "activos_grupo": run_snies.activos_por_grupo(hoy),
-               "activos_grupo_anterior": run_snies.activos_por_grupo(self._df([1713, 1701, 9999]))}
+               "total_activos": 4, "total_anterior": 3, "fecha_anterior": dt.date(2026, 11, 10)}
         html = send_report.construir_cuerpo({"pregrado": res}, dt.date(2026, 11, 17))
         self.assertIn("1 más que en la ejecución anterior (10/11/2026: 3)", html)
-        self.assertIn("Novedades detectadas: 2 programas nuevos, 0 cambios en 0 programas modificados y 0 programas inactivos.", html)
+        self.assertIn("Novedades detectadas: 2 registros nuevos, 0 registros modificados y 0 registros inactivos.", html)
         self.assertIn("1 corresponde a la Universidad del Norte y 0 a las Universidades de Mayor Interés", html)
-        self.assertIn("EJECUCIÓN ANTERIOR (10/11/2026)", html)
         self.assertIn("+1 frente al 10/11/2026", html)
         self.assertNotIn("—", html)   # estilo institucional: sin raya
 
@@ -424,20 +461,25 @@ class TestCorreo(unittest.TestCase):
         html = send_report.construir_cuerpo({"pregrado": {"total_activos": 5}}, dt.date(2026, 11, 17))
         self.assertIn("No se detectaron programas nuevos, modificados ni inactivos.", html)
         self.assertIn("Programas activos al 17/11/2026", html)
-        self.assertNotIn("EJECUCIÓN ANTERIOR", html)
 
     def test_version_texto_plano(self):
         res = {"nuevos": self._df([1713, 9999]).assign(TIPO_NOVEDAD="NUEVO"), "total_activos": 4, "total_anterior": 3,
-               "fecha_anterior": dt.date(2026, 11, 10), "activos_grupo": {"UNIVERSIDAD DEL NORTE": 2},
-               "activos_grupo_anterior": {"UNIVERSIDAD DEL NORTE": 1}}
+               "fecha_anterior": dt.date(2026, 11, 10)}
         with mock.patch.dict(os.environ, {"SMTP_USER": "r@example.com", "SMTP_PASS": "x", "DESTINATARIOS": "a@example.com"}), \
                 mock.patch.object(send_report, "_enviar") as enviar:
             send_report.enviar_reporte({"pregrado": res}, dt.date(2026, 11, 17))
         partes = enviar.call_args.args[0].get_payload()
-        self.assertEqual([p.get_content_type() for p in partes], ["text/plain", "text/html"])   # HTML preferido
+        self.assertEqual([p.get_content_type() for p in partes], ["text/plain", "multipart/related"])   # HTML preferido
+        # El HTML lleva el logotipo institucional incrustado (Content-ID), sin imágenes remotas
+        self.assertEqual([p.get_content_type() for p in partes[1].get_payload()], ["text/html", "image/png"])
+        html = partes[1].get_payload()[0].get_payload(decode=True).decode("utf-8")
+        self.assertIn("cid:logo-uninorte", html)
+        self.assertEqual(partes[1].get_payload()[1]["Content-ID"], "<logo-uninorte>")
+        self.assertNotIn("http://", html.replace("http://www.w3.org", ""))
         texto = partes[0].get_payload(decode=True).decode("utf-8")
         self.assertIn("1 más que en la ejecución anterior (10/11/2026: 3)", texto)
-        self.assertIn("UNIVERSIDAD DEL NORTE: 2; ejecución anterior: 1; variación: +1", texto)
+        self.assertIn("UNIVERSIDAD DEL NORTE: nuevos 1; modificados 0; inactivos 0", texto)
+        self.assertIn("TOTAL: nuevos 2; modificados 0; inactivos 0", texto)
         self.assertIn("1. INSTITUCIÓN: INST 1713", texto)    # Uninorte primero
         self.assertIn(f"Dashboard completo: {send_report.DASHBOARD_URL}", texto.splitlines()[3])
         self.assertNotIn("Ver todos en el Dashboard", texto)
@@ -464,8 +506,42 @@ class TestCorreo(unittest.TestCase):
             self.assertEqual(variables.get(nombre), color.upper(), f"--{nombre} difiere entre el Dashboard y el correo")
         # Las gráficas (app.js) usan los mismos colores institucionales y de estado que la hoja de estilos
         js = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "app.js").read_text(encoding="utf-8").upper()
-        for nombre in ("rojo", "amarillo", "negro", "texto-2", "gris-sep", "nuevos", "modificados", "inactivos"):
+        for nombre in ("rojo", "amarillo", "negro", "texto-2", "gris-sep", "nuevos", "modificados", "inactivos", "modificados-linea"):
             self.assertIn(f'"{variables[nombre]}"', js, f"--{nombre} ({variables[nombre]}) no se usa igual en app.js")
+
+    def test_colores_del_brandbook_en_dashboard_y_correo(self):
+        """Los HEX impresos en BRANDBOOK_UNINORTE: rojo Pantone 7427 C, negro Pantone Black 6 C, amarillo 116 C, ocre 7556 C, gris K70."""
+        css = (Path(__file__).resolve().parent.parent / "docs" / "assets" / "estilos.css").read_text(encoding="utf-8")
+        variables = {k: v.upper() for k, v in re.findall(r"--([\w-]+):\s*(#[0-9A-Fa-f]{6})", css)}
+        marca = {"rojo": "#960A11", "negro": "#151515", "blanco": "#FFFFFF", "amarillo": "#FFCC00",
+                 "modificados": "#FFCC00", "modificados-linea": "#B78B1E", "inactivos": "#960A11", "texto": "#151515", "texto-2": "#3E4751"}
+        for nombre, hexa in marca.items():
+            self.assertEqual(variables[nombre], hexa, f"--{nombre} no coincide con el brandbook")
+        self.assertEqual((send_report.ROJO, send_report.NEGRO, send_report.AMARILLO, send_report.TEXTO2), ("#960A11", "#151515", "#FFCC00", "#3E4751"))
+        # Los colores anteriores (rojo #BE0000, naranja #F28C00, amarillo #FFB700, negro puro) ya no deben quedar en el código
+        raiz = Path(__file__).resolve().parent.parent
+        for ruta in ("docs/assets/estilos.css", "docs/assets/app.js", "docs/assets/detalle.js", "docs/assets/inicio.js", "Scripts/send_report.py"):
+            texto = (raiz / ruta).read_text(encoding="utf-8").upper()
+            for viejo in ("#BE0000", "#F28C00", "#FFB700", "#000000", "#4D4D4D"):
+                self.assertNotIn(viejo, texto, f"{ruta} conserva el color anterior {viejo}")
+
+    def test_logotipos_institucionales_disponibles(self):
+        """Los logotipos de docs/assets/img salen de 'Recursos Uninorte' (solo recorte de márgenes) y el correo usa el blanco."""
+        raiz = Path(__file__).resolve().parent.parent
+        self.assertTrue(send_report.LOGO.exists())
+        self.assertEqual(send_report.LOGO.name, "logo-uninorte-blanco.png")
+        for origen, derivado in (("BLANCO", "blanco"), ("NEGRO", "negro"), ("PRINCIPAL", "principal")):
+            original = raiz / "Recursos Uninorte" / f"LOGO-UN-{origen}.png"
+            copia = raiz / "docs" / "assets" / "img" / f"logo-uninorte-{derivado}.png"
+            self.assertTrue(copia.exists(), f"falta {copia.name}")
+            if original.exists():   # la carpeta de recursos no es indispensable para ejecutar el monitor
+                from PIL import Image
+                a, b = Image.open(original).convert("RGBA"), Image.open(copia).convert("RGBA")
+                recorte = a.crop(a.getchannel("A").point(lambda v: 255 if v > 20 else 0).getbbox())
+                self.assertEqual(list(recorte.getdata()), list(b.getdata()), f"{copia.name} difiere del original")
+        favicon = raiz / "Recursos Uninorte" / "FAVICON-UN.ico"
+        if favicon.exists():
+            self.assertEqual((raiz / "docs" / "assets" / "img" / "favicon-uninorte.ico").read_bytes(), favicon.read_bytes())
 
     def test_alerta_tecnica_solo_al_remitente(self):
         # Alerta del paso "Pruebas unitarias" del workflow: el log está fuera de Logs/ y no debe presentarse como tal
@@ -484,6 +560,7 @@ class TestCorreo(unittest.TestCase):
 
 
 class TestRegistroSeguro(unittest.TestCase):
+    """El registro de ejecución no expone rutas personales."""
     def test_oculta_rutas_personales(self):
         formato = run_snies._FormatoSeguro("%(message)s")
         msg = f"{Path.home()}{os.sep}Desktop y {tempfile.gettempdir()}{os.sep}x.log"
@@ -494,6 +571,7 @@ class TestRegistroSeguro(unittest.TestCase):
 
 
 class TestDatosDashboard(unittest.TestCase):
+    """Datos que el generador publica para el Dashboard."""
     def test_codificacion_columnar(self):
         df = pd.DataFrame({"A": ["X", "X", "Y", "X"], "B": [1.0, 2.5, None, 4.0], "C": pd.to_datetime(["2026-01-01", None, "2026-01-03", "2026-01-04"])})
         t = generar_dashboard.codificar(df)
@@ -506,7 +584,128 @@ class TestDatosDashboard(unittest.TestCase):
         self.assertEqual(generar_dashboard._rangos([0, 1, 2, 5, 7, 8]), [[0, 2], [5, 5], [7, 8]])
 
 
+class TestSeguridadDelSitio(unittest.TestCase):
+    """Política de seguridad de contenido de las páginas del Dashboard y configuración de Dependabot."""
+
+    PAGINAS = ("index", "nuevos", "modificados", "inactivos")
+
+    def test_politica_de_contenido_y_huella_del_mapa_de_importacion(self):
+        import base64
+        import hashlib
+        docs = Path(__file__).resolve().parent.parent / "docs"
+        for nombre in self.PAGINAS:
+            html = (docs / f"{nombre}.html").read_text(encoding="utf-8")
+            politica = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html)
+            self.assertIsNotNone(politica, f"{nombre}.html sin política de seguridad")
+            for directiva in ("default-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'none'", "connect-src 'self'"):
+                self.assertIn(directiva, politica.group(1))
+            self.assertNotIn("unsafe-eval", politica.group(1))
+            self.assertNotIn("script-src 'self' 'unsafe-inline'", politica.group(1))
+            # El único script en línea es el mapa de importación, autorizado por su huella SHA-256
+            en_linea = re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", html, re.S)
+            self.assertEqual(len(en_linea), 1)
+            huella = "sha256-" + base64.b64encode(hashlib.sha256(en_linea[0].encode()).digest()).decode()
+            self.assertIn(f"'{huella}'", politica.group(1))
+            self.assertNotRegex(html, r'(?:src|href)="https?://')   # ningún recurso externo
+
+    def test_dependabot_cubre_acciones_y_librerias(self):
+        texto = (Path(__file__).resolve().parent.parent / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        self.assertIn('package-ecosystem: "github-actions"', texto)
+        self.assertIn('package-ecosystem: "pip"', texto)
+        self.assertIn('interval: "monthly"', texto)
+
+
+class TestFechaSinHora(unittest.TestCase):
+    """FECHA_DE_OBTENCION se guarda como fecha (AAAA-MM-DD, sin hora) en el histórico y en las novedades."""
+
+    def test_historico_y_novedades_guardan_fecha_sin_hora(self):
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(historico, "HISTORICO_DIR", Path(tmp)):
+            historico.guardar_ejecucion(pd.DataFrame([programa(1), programa(2)]), dt.date(2026, 11, 3))
+            historico.guardar_ejecucion(pd.DataFrame([programa(1), programa(2), programa(3)]), dt.date(2026, 11, 10))
+            ruta = historico.ruta(2026)
+            self.assertEqual(pq.read_schema(ruta).field(F).type, pa.date32())
+            anotacion = {c["name"]: c for c in json.loads(pq.read_schema(ruta).metadata[b"pandas"])["columns"]}
+            self.assertEqual(anotacion[F]["pandas_type"], "date")          # la anotación de pandas coincide con el tipo real
+            self.assertEqual(historico.fechas(), [dt.date(2026, 11, 3), dt.date(2026, 11, 10)])
+            self.assertTrue(str(historico.leer()[F].dtype).startswith("datetime64"))          # en memoria sigue siendo datetime64
+            self.assertEqual(len(historico.leer(fecha=dt.date(2026, 11, 10))), 3)               # los filtros por fecha funcionan
+            self.assertEqual(len(historico.leer(antes_de=dt.date(2026, 11, 10))), 2)
+            nov = Path(tmp) / "Nuevos.parquet"
+            run_snies._escribir_parquet(pd.DataFrame([programa(3)]).assign(**{F: pd.Timestamp("2026-11-10"), "TIPO_NOVEDAD": "NUEVO"}), nov)
+            self.assertEqual(pq.read_schema(nov).field(F).type, pa.date32())
+            self.assertEqual(pq.read_table(nov).column(F)[0].as_py(), dt.date(2026, 11, 10))
+
+    def test_migracion_de_marca_de_tiempo_a_fecha_conserva_los_datos(self):
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(historico, "HISTORICO_DIR", Path(tmp)):
+            df = pd.DataFrame([programa(1), programa(2)]).assign(**{F: pd.Timestamp("2026-11-03")})
+            tabla = pa.Table.from_pandas(df, preserve_index=False)            # archivo anterior: marca de tiempo
+            pq.write_table(tabla, historico.ruta(2026))
+            self.assertTrue(pa.types.is_timestamp(pq.read_schema(historico.ruta(2026)).field(F).type))
+            antes = historico.leer()
+            self.assertEqual([p.name for p in historico.migrar_fecha_a_date()], [historico.ruta(2026).name])
+            self.assertEqual(pq.read_schema(historico.ruta(2026)).field(F).type, pa.date32())
+            anotacion = {c["name"]: c for c in json.loads(pq.read_schema(historico.ruta(2026)).metadata[b"pandas"])["columns"]}
+            self.assertEqual(anotacion[F]["pandas_type"], "date")
+            despues = historico.leer()
+            self.assertEqual(historico.migrar_fecha_a_date(), [])              # idempotente
+            self.assertEqual(antes.drop(columns=F).to_dict("records"), despues.drop(columns=F).to_dict("records"))
+            self.assertEqual(pd.to_datetime(antes[F]).tolist(), pd.to_datetime(despues[F]).tolist())
+            # Una ejecución posterior se agrega sobre el archivo ya migrado
+            historico.guardar_ejecucion(pd.DataFrame([programa(1)]), dt.date(2026, 11, 10))
+            self.assertEqual(historico.fechas(), [dt.date(2026, 11, 3), dt.date(2026, 11, 10)])
+
+
+class TestCatalogosDelDashboard(unittest.TestCase):
+    """Datos que el Dashboard usa para los filtros jerárquicos de universidades y de campos de CINE."""
+
+    @staticmethod
+    def _registros():
+        cols = ["CODIGO_INSTITUCION", "CODIGO_INSTITUCION_PADRE", "NOMBRE_INSTITUCION", "CINE_F_2013_AC_CAMPO_AMPLIO",
+                "CINE_F_2013_AC_CAMPO_ESPECIFIC", "FECHA_DE_OBTENCION"]
+        hist = pd.DataFrame([
+            [9001, 9001, "UNIVERSIDAD ZETA -", "SALUD", "MEDICINA", pd.Timestamp("2026-01-01")],
+            [9001, 9001, "UNIVERSIDAD ZETA", "SALUD", "ENFERMERIA", pd.Timestamp("2026-02-01")],
+            [9002, 9002, "UNIVERSIDAD ALFA", "EDUCACION", "PEDAGOGIA", pd.Timestamp("2026-02-01")],
+            [9002, 9002, "UNIVERSIDAD ALFA", "EDUCACION", "PEDAGOGIA", pd.Timestamp("2026-03-01")],
+            [9004, 9002, "UNIVERSIDAD ALFA SECCIONAL", "EDUCACION", "PEDAGOGIA", pd.Timestamp("2026-03-15")],
+            [9003, 9003, "UNIVERSIDAD SIN CAMPO", None, None, pd.Timestamp("2026-03-01")],
+        ], columns=cols)
+        return hist, {"nuevos": hist.iloc[:1].copy()}
+
+    def test_instituciones_con_el_nombre_mas_reciente_y_las_universidades_de_interes(self):
+        hist, nov = self._registros()
+        inst = generar_dashboard.instituciones(hist, nov)
+        self.assertEqual(inst["9001"], "UNIVERSIDAD ZETA")        # nombre más reciente, sin el guion final
+        self.assertEqual(inst["9002"], "UNIVERSIDAD ALFA")         # por institución padre: la seccional 9004 no figura aparte
+        self.assertNotIn("9004", inst)
+        self.assertIn(str(catalogos.UNINORTE), inst)             # figuran aunque no estén en los datos
+        for codigo in catalogos.MAYOR_INTERES:
+            self.assertIn(str(codigo), inst)
+
+    def test_jerarquia_cine_ordenada_y_sin_vacios(self):
+        hist, nov = self._registros()
+        self.assertEqual(generar_dashboard.jerarquia_cine(hist, nov),
+                         [["EDUCACION", ["PEDAGOGIA"]], ["SALUD", ["ENFERMERIA", "MEDICINA"]]])
+
+    def test_orden_de_columnas_de_las_tablas(self):
+        primeras = generar_dashboard.COLS_PRIMERO
+        base = ["FECHA_DE_OBTENCION", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA",
+                "MUNICIPIO_OFERTA_PROGRAMA", "MODALIDAD"]
+        cola = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"]
+        self.assertEqual(primeras["nuevos"], base + ["TIPO_NOVEDAD"] + cola)
+        self.assertEqual(primeras["modificados"], base + ["TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + cola)
+        self.assertEqual(primeras["inactivos"], base + cola)
+        # Las demás columnas conservan su orden y no se agrega REACTIVADO_POSTERIORMENTE
+        df = pd.DataFrame(columns=["X1", *base[::-1], "X2", *cola, "TIPO_NOVEDAD", "X3"])
+        ordenado = generar_dashboard._ordenar_columnas(df, "nuevos")
+        self.assertEqual(list(ordenado.columns), base + ["TIPO_NOVEDAD"] + cola + ["X1", "X2", "X3"])
+        self.assertFalse(any("REACTIVADO" in c for tipo in primeras for c in primeras[tipo]))
+
+
 class TestReclasificacion(unittest.TestCase):
+    """Reclasificación de divisiones del histórico y de las novedades."""
     def test_aplicar_clasificacion(self):
         df = pd.DataFrame([programa(1, NUCLEO_BASICO_DEL_CONOCIMIENTO="N", CINE_F_2013_AC_CAMPO_DETALLADO="C", DIVISION_UNINORTE="VIEJA",
                                     PUNTAJE_TOTAL=0.1, REQUIERE_REVISION="FALSO", **{F: pd.Timestamp("2026-11-03")})])

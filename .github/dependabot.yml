@@ -1,0 +1,23 @@
+# Actualizaciones de dependencias: abre una solicitud de cambios mensual por ecosistema para su revisión.
+# Nunca se fusionan solas: antes de aceptar una actualización de requirements.txt hay que ejecutar el flujo
+# completo (el clasificador verifica sus salidas con las versiones exactas de openpyxl y pandas).
+version: 2
+updates:
+  # Acciones de los workflows (fijadas por SHA con el número de versión en el comentario)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      timezone: "America/Bogota"
+    commit-message:
+      prefix: "Acciones"
+
+  # Librerías de Python (requirements.txt)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      timezone: "America/Bogota"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Dependencias"

@@ -52,7 +52,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 import historico
-from catalogos import GRUPOS_UNIVERSIDAD, grupo_universidad
 
 # ── Rutas ─────────────────────────────────────────────────────────────────────
 SCRIPTS_DIR    = Path(__file__).resolve().parent
@@ -433,7 +432,8 @@ def leer_programas(path: Path) -> pd.DataFrame:
 def _tipos_estables(df: pd.DataFrame) -> pd.DataFrame:
     """
     Tipos compatibles con parquet: columnas de fechas (con o sin hora) → datetime; columnas
-    con tipos mezclados (ej. 123 y '0031') → texto, sin perder ceros a la izquierda.
+    con tipos mezclados (ej. 123 y '0031') → texto, sin perder ceros a la izquierda. La fecha de ejecución
+    (FECHA_DE_OBTENCION) se guarda como fecha sin hora.
     """
     import numpy as np
 
@@ -447,6 +447,8 @@ def _tipos_estables(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_datetime(df[col], errors="coerce")
         elif len(tipos) > 1:
             df[col] = df[col].map(lambda v: v if pd.isna(v) else str(v))
+    if COL_FECHA in df.columns:
+        df[COL_FECHA] = pd.to_datetime(df[COL_FECHA], errors="coerce").dt.date
     return df
 
 
@@ -467,7 +469,8 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
         # donde los números pueden estar guardados como texto
         nuevos = historico.alinear(nuevos, pq.read_schema(path))
         existente = pd.read_parquet(path)
-        existente = existente[pd.to_datetime(existente[COL_FECHA]) != marca]
+        existente[COL_FECHA] = pd.to_datetime(existente[COL_FECHA])   # en memoria se trabaja como datetime64
+        existente = existente[existente[COL_FECHA] != marca]
         partes.append(existente)
     if not nuevos.empty:
         partes.append(nuevos)
@@ -723,17 +726,9 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
 
     return {"nuevos": nuevos, "modificados": modificados, "inactivos": inactivos,
             "total_activos": len(hoy), "linea_base": previo is None,
-            # Contexto del resumen del correo: ejecución anterior y programas activos por grupo de universidades
+            # Contexto del resumen del correo: ejecución anterior y su total de programas activos
             "fecha_anterior": previo[0] if previo else None,
-            "total_anterior": len(anterior) if anterior is not None else None,
-            "activos_grupo": activos_por_grupo(hoy),
-            "activos_grupo_anterior": activos_por_grupo(anterior) if anterior is not None else None}
-
-
-def activos_por_grupo(df: pd.DataFrame) -> dict[str, int]:
-    """Programas activos por grupo de universidades (Uninorte, mayor interés, otras)."""
-    conteo = df["CODIGO_INSTITUCION"].map(grupo_universidad).value_counts()
-    return {g: int(conteo.get(g, 0)) for g in GRUPOS_UNIVERSIDAD}
+            "total_anterior": len(anterior) if anterior is not None else None}
 
 
 def main(argv=None) -> int:

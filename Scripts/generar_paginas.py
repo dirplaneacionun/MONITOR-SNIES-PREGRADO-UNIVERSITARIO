@@ -10,6 +10,7 @@ Ejecución:
     python Scripts/generar_paginas.py
 """
 
+import base64
 import hashlib
 from pathlib import Path
 
@@ -21,32 +22,46 @@ def v(rel):
     return f"{rel}?v={hashlib.sha256((DOCS / rel).read_bytes()).hexdigest()[:10]}"
 SUB = "Programas Académicos Universitarios de Pregrado en Colombia"
 
+# Mapa de importación de los módulos de Parquet (hyparquet): script en línea, autorizado en la política de seguridad
+# por su huella SHA-256 (si el texto cambia, la huella se recalcula al generar las páginas).
+IMPORTMAP = """
+    { "imports": {
+      "hyparquet": "./assets/vendor/hyparquet/src/index.js",
+      "hyparquet/": "./assets/vendor/hyparquet/",
+      "hyparquet-writer": "./assets/vendor/hyparquet-writer/src/index.js"
+    } }
+  """
+# Política de seguridad de contenido: solo se ejecutan scripts propios del sitio (y el mapa de importación autorizado),
+# sin objetos incrustados ni formularios, y ninguna solicitud sale del origen. Los estilos en línea los usan Plotly
+# y flatpickr; las imágenes data: y blob: son las de las gráficas y de la exportación.
+CSP = ("default-src 'self'; script-src 'self' 'sha256-" + base64.b64encode(hashlib.sha256(IMPORTMAP.encode()).digest()).decode() + "'; "
+       "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; "
+       "object-src 'none'; base-uri 'self'; form-action 'none'")
+
 HEAD = '''<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="@CSP@">
   <title>{title}</title>
   <meta name="description" content="{desc}">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="assets/img/favicon-uninorte.ico" sizes="32x32">
   <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{css_fp}">
   <link rel="stylesheet" href="{css}">
-  <script type="importmap">
-    {{ "imports": {{
-      "hyparquet": "./assets/vendor/hyparquet/src/index.js",
-      "hyparquet/": "./assets/vendor/hyparquet/",
-      "hyparquet-writer": "./assets/vendor/hyparquet-writer/src/index.js"
-    }} }}
-  </script>
+  <script type="importmap">@IMPORTMAP@</script>
 </head>
 <body{body}>
   <header class="encabezado">
     <div class="encabezado-int">
       <div class="enc-fila">
-        <div>
-          <h1 class="enc-titulo">{h1}</h1>{sub}
+        <div class="enc-marca">
+          <img class="enc-logo" src="assets/img/logo-uninorte-blanco.png" width="198" height="68" alt="Universidad del Norte">
+          <div class="enc-textos">
+            <h1 class="enc-titulo">{h1}</h1>{sub}
+          </div>
         </div>
         {total}
       </div>
@@ -59,7 +74,9 @@ HEAD = '''<!doctype html>
   <main class="contenido">
     <div id="filtros"></div>
 '''
+HEAD = HEAD.replace("@CSP@", CSP).replace("@IMPORTMAP@", IMPORTMAP.replace("{", "{{").replace("}", "}}"))
 FOOT = '''
+    <img class="pie-logo" src="assets/img/logo-uninorte-principal.png" width="107" height="40" alt="Universidad del Norte">
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
@@ -109,6 +126,14 @@ def scripts(datos, js):
     return "\n".join(lineas)
 
 
+def _control_cine(defecto: int, maximo: int, ambito: str) -> tuple[str, str]:
+    """Descripción y control (selector de campos) de la gráfica de evolución por campo de CINE específico."""
+    desc = (f"Muestra los campos de CINE específico del filtro superior, sincronizado con el desplegable de esta gráfica: con TODOS marcado, "
+            f"los {defecto} con más {ambito}; con una selección, esos campos (máximo {maximo}). Marque o desmarque campos en cualquiera de los dos "
+            "desplegables, o use la × de cada campo, para ajustar las líneas.")
+    return desc, '\n        <div id="cine-ctrl"></div>'
+
+
 def main() -> None:
     """Escribe las cuatro páginas del Dashboard (Inicio, Nuevos, Modificados e Inactivos) en docs/."""
     # ── Inicio ────────────────────────────────────────────────────────────────────
@@ -120,89 +145,97 @@ def main() -> None:
           <a class="kpi k-inactivos" href="inactivos.html"><div class="kpi-et">INACTIVOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-inactivos">–</div><div class="kpi-s">Ejecución del <span data-fecha-ultima></span></div></a>
         </section>
     '''
+    desc_cine, extra_cine = _control_cine(10, 15, "registros activos")
+    tabs = "".join(
+        f'<button type="button" role="tab" class="tab t-{t}" id="tab-{t}" data-tab="{t}" aria-controls="panel-{t}" '
+        f'aria-selected="{"true" if t == "nuevos" else "false"}" tabindex="{0 if t == "nuevos" else -1}">'
+        f'{t.upper()} · <span data-n-tab="{t}">–</span></button>' for t in ("nuevos", "modificados", "inactivos"))
+    paneles = "\n".join(
+        f'      <div role="tabpanel" id="panel-{t}" aria-labelledby="tab-{t}"{"" if t == "nuevos" else " hidden"}><div id="tabla-{t}"></div></div>'
+        for t in ("nuevos", "modificados", "inactivos"))
+    tabla_novedades = (
+        '    <section class="tarjeta" aria-labelledby="t-novedades">\n'
+        '      <h2 class="tarjeta-tit" id="t-novedades">REGISTROS DE PROGRAMAS ACADÉMICOS NUEVOS, MODIFICADOS E INACTIVOS</h2>\n'
+        '      <p class="tarjeta-sub">Novedades del periodo filtrado, con todas las columnas y ordenadas desde la fecha más reciente. '
+        'Seleccione la pestaña de cada tipo de novedad: los filtros de esta página afectan siempre las tres tablas. '
+        'Haga clic en un encabezado para ordenar; DESCARGAR exporta los registros filtrados de la tabla visible.</p>\n'
+        f'      <div class="tabs" role="tablist" aria-label="Tipo de novedad">{tabs}</div>\n{paneles}\n'
+        '    </section>')
     cuerpo = [
         KPIS,
-        par(tarjeta("EVOLUCIÓN DE LOS PROGRAMAS ACADÉMICOS ACTIVOS", "g-activos",
-                    "Número de programas universitarios de pregrado activos en el SNIES en cada ejecución de la herramienta. Cada punto corresponde a una descarga."),
-            tarjeta("EVOLUCIÓN ACUMULADA DE NUEVOS, MODIFICADOS E INACTIVOS", "g-novedades",
+        par(tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-activos",
+                    "Número de programas universitarios de pregrado activos en el SNIES en cada ejecución de la herramienta. Cada punto corresponde a una ejecución."),
+            tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS NUEVOS, MODIFICADOS E INACTIVOS", "g-novedades",
                     "Novedades acumuladas desde el inicio del periodo seleccionado. La pendiente de cada línea muestra el ritmo de aperturas, cambios y cierres.")),
-        ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR MODALIDAD", "g-modalidad",
+        par(tarjeta("PROGRAMAS ACADÉMICOS ACTIVOS POR SECTOR", "g-sector", "Distribución entre instituciones oficiales y privadas en la ejecución del <span data-fecha-corte></span>."),
+            tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR SECTOR", "g-sector-evol", "Programas activos de instituciones oficiales y privadas en cada ejecución."), "tercio"),
+        par(tarjeta("DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-deptos", "Los 10 departamentos de oferta con más registros en la ejecución del <span data-fecha-corte></span>."),
+            tarjeta("UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS ACTIVOS", "g-univ", "Las 10 instituciones con más registros en la ejecución del <span data-fecha-corte></span>.")),
+        ancha("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR MODALIDAD", "g-modalidad",
               "Programas activos en cada ejecución según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual."),
-        ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR DIVISIÓN DE UNINORTE", "g-division",
+        ancha("PROGRAMAS ACADÉMICOS ACTIVOS POR NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",
+              "Cantidad de registros según la duración del programa en periodos académicos (semestres o equivalentes) en la ejecución del <span data-fecha-corte></span>.", "baja"),
+        ancha("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR CAMPO DE CINE ESPECÍFICO", "g-cine", desc_cine, extra=extra_cine),
+        ancha("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR DIVISIÓN DE UNINORTE", "g-division",
               "Programas activos en cada ejecución según la división académica de la Universidad del Norte con la que se relacionan. Haga clic en la leyenda para ocultar o aislar divisiones.", "alta"),
-        ancha("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR CAMPO DE CINE DETALLADO", "g-cine",
-              "Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 10).", extra='\n        <div id="cine-ctrl"></div>'),
-        par(tarjeta("PROGRAMAS ACTIVOS POR SECTOR", "g-sector", "Distribución entre instituciones oficiales y privadas en la ejecución del <span data-fecha-corte></span>."),
-            tarjeta("EVOLUCIÓN DE LOS PROGRAMAS ACTIVOS POR SECTOR", "g-sector-evol", "Programas activos de instituciones oficiales y privadas en cada ejecución."), "tercio"),
-        par(tarjeta("TOP 10 DEPARTAMENTOS CON MÁS PROGRAMAS ACTIVOS", "g-deptos", "Departamentos de oferta con más programas activos en la ejecución del <span data-fecha-corte></span>."),
-            tarjeta("TOP 10 UNIVERSIDADES CON MÁS PROGRAMAS ACTIVOS", "g-univ", "Instituciones con más programas activos en la ejecución del <span data-fecha-corte></span>.")),
-        ancha("PROGRAMAS ACTIVOS SEGÚN NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",
-              "Cantidad de programas activos según su duración en periodos académicos (semestres o equivalentes) en la ejecución del <span data-fecha-corte></span>.", "baja"),
+        tabla_novedades,
     ]
-    html = HEAD.format(css=v("assets/estilos.css"), css_fp=v("assets/vendor/flatpickr/flatpickr.min.css"), title="Monitor SNIES Pregrado", desc="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)",
+    html = HEAD.format(css=v("assets/estilos.css"), css_fp=v("assets/vendor/flatpickr/flatpickr.min.css"), title="PROGRAMAS ACADÉMICOS ACTIVOS", desc="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)",
                        body="", h1="MONITOR SNIES PREGRADO · UNIVERSITARIO", sub=f'\n          <p class="enc-sub">{SUB}</p>',
-                       total='<div class="enc-total"><div class="et">ÚLTIMA EJECUCIÓN</div><div class="ev" id="ultima">–</div></div>', nav=nav("index.html"))
+                       total='<div class="enc-total"><div class="et">ÚLTIMA EJECUCIÓN</div><div class="ev" id="ultima">–</div><div class="es"></div></div>', nav=nav("index.html"))
     html += "\n".join(cuerpo) + FOOT.format(scripts=scripts(["comun", "activos", "nuevos", "modificados", "inactivos"], "inicio"))
     (DOCS / "index.html").write_text(html, encoding="utf-8")
 
     # ── Detalle ───────────────────────────────────────────────────────────────────
     PAG = {
-        "nuevos": dict(t="PROGRAMAS ACADÉMICOS NUEVOS", sub=SUB, ht="Programas Nuevos · Monitor SNIES", s="NUEVOS",
+        "nuevos": dict(t="PROGRAMAS ACADÉMICOS NUEVOS", ht="PROGRAMAS ACADÉMICOS NUEVOS", s="NUEVOS",
                        estado="Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados), acumulados desde el inicio del periodo seleccionado."),
-        "modificados": dict(t="PROGRAMAS ACADÉMICOS MODIFICADOS", sub=SUB, ht="Programas Modificados · Monitor SNIES", s="MODIFICADOS",
+        "modificados": dict(t="PROGRAMAS ACADÉMICOS MODIFICADOS", ht="PROGRAMAS ACADÉMICOS MODIFICADOS", s="MODIFICADOS",
                             estado="Cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad, acumulados desde el inicio del periodo seleccionado (un registro por cambio)."),
-        "inactivos": dict(t="PROGRAMAS ACADÉMICOS INACTIVOS", sub=None, ht="Programas Inactivos · Monitor SNIES", s="INACTIVOS",
+        "inactivos": dict(t="PROGRAMAS ACADÉMICOS INACTIVOS", ht="PROGRAMAS ACADÉMICOS INACTIVOS", s="INACTIVOS",
                           estado="Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES, acumulados desde el inicio del periodo seleccionado."),
     }
     for tipo, p in PAG.items():
         N, n = p["s"], p["s"].lower()
-        c = [ancha(f"EVOLUCIÓN ACUMULADA DE PROGRAMAS ACADÉMICOS {N}", "g-evolucion", p["estado"])]
+        evol = tarjeta(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N}", "g-evolucion", p["estado"])
         if tipo == "modificados":
-            c.append(ancha("EVOLUCIÓN ACUMULADA DE LA MODIFICACIÓN DETECTADA POR TIPO DE CAMBIO", "g-tipos",
-                           "Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad."))
-        c.append(ancha("EVOLUCIÓN ACUMULADA POR DIVISIÓN DE UNINORTE", "g-division",
-                       f"Programas {n} acumulados según la división académica de la Universidad del Norte con la que se relacionan.", "alta"))
-        c.append(ancha("EVOLUCIÓN ACUMULADA POR MODALIDAD", "g-modalidad",
+            # El tipo de cambio se muestra a la derecha de la evolución de los modificados
+            c = [par(evol, tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS MODIFICADOS POR TIPO DE CAMBIO", "g-tipos",
+                                   "Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad."))]
+        else:
+            c = ['    <div class="fila">\n' + evol + "\n    </div>"]
+        desc_cine, extra_cine = _control_cine(10, 15, f"registros {n}")
+        c.append(par(tarjeta(f"PROGRAMAS ACADÉMICOS {N} POR SECTOR", "g-sector", "Distribución de los registros del periodo filtrado entre instituciones oficiales y privadas."),
+                     tarjeta(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N} POR SECTOR", "g-sector-evol", f"Programas {n} acumulados de instituciones oficiales y privadas."), "tercio"))
+        c.append(par(tarjeta(f"DEPARTAMENTOS CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS {N}", "g-deptos", "Los 10 departamentos de oferta con más registros en el periodo filtrado."),
+                     tarjeta(f"UNIVERSIDADES CON MAYOR NÚMERO DE PROGRAMAS ACADÉMICOS {N}", "g-instituciones", "Las 10 instituciones con más registros en el periodo filtrado.")))
+        c.append(ancha(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N} POR MODALIDAD", "g-modalidad",
                        f"Programas {n} acumulados según la modalidad agrupada: presencial, virtual, a distancia, híbrida y dual."))
-        c.append(par(tarjeta(f"PROGRAMAS {N} POR SECTOR", "g-sector", "Distribución de los registros del periodo filtrado entre instituciones oficiales y privadas."),
-                     tarjeta("EVOLUCIÓN ACUMULADA POR SECTOR", "g-sector-evol", f"Programas {n} acumulados de instituciones oficiales y privadas."), "tercio"))
-        c.append(ancha("EVOLUCIÓN ACUMULADA POR CAMPO DE CINE DETALLADO", "g-cine",
-                       "Por defecto se muestran los campos con más programas activos. Use el desplegable y AGREGAR para comparar otros campos (máximo 10).",
-                       extra='\n        <div id="cine-ctrl"></div>'))
-        c.append(par(tarjeta("TOP 10 DEPARTAMENTOS", "g-deptos", "Departamentos de oferta con más registros en el periodo filtrado."),
-                     tarjeta("TOP 10 INSTITUCIONES", "g-instituciones", "Instituciones con más registros en el periodo filtrado.")))
-        c.append(ancha("REGISTROS SEGÚN NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",
+        c.append(ancha(f"PROGRAMAS ACADÉMICOS {N} POR NÚMERO DE PERIODOS DE DURACIÓN", "g-periodos",
                        "Cantidad de registros del periodo filtrado según la duración del programa en periodos académicos.", "baja"))
+        c.append(ancha(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N} POR CAMPO DE CINE ESPECÍFICO", "g-cine", desc_cine, extra=extra_cine))
+        c.append(ancha(f"EVOLUCIÓN DE PROGRAMAS ACADÉMICOS {N} POR DIVISIÓN DE UNINORTE", "g-division",
+                       f"Programas {n} acumulados según la división académica de la Universidad del Norte con la que se relacionan.", "alta"))
         if tipo == "modificados":
-            c.append(par(
-                tarjeta("AUMENTOS Y REDUCCIONES DE CRÉDITOS POR EJECUCIÓN", "g-creditos",
-                        "Programas que aumentaron (barras negras, hacia arriba) o redujeron (barras rojas, hacia abajo) su número de créditos en cada ejecución.",
-                        extra='\n        <p class="nota" id="g-creditos-nota"></p>'),
-                tarjeta("AUMENTOS Y REDUCCIONES DE PERIODOS POR EJECUCIÓN", "g-periodos-dir",
-                        "Programas que alargaron (barras negras, hacia arriba) o acortaron (barras rojas, hacia abajo) su duración en cada ejecución.",
-                        extra='\n        <p class="nota" id="g-periodos-dir-nota"></p>')))
             c.append(ancha("TRANSICIONES DE MODALIDAD: ANTERIOR → NUEVA", "g-transiciones",
                            "Número de cambios de modalidad agrupada en el periodo filtrado: cada fila es la modalidad anterior y cada columna, la nueva."))
-        if tipo == "inactivos":
             c.append(par(
-                tarjeta("ANTIGÜEDAD DE LOS PROGRAMAS AL INACTIVARSE", "g-antiguedad", "Años transcurridos entre el registro del programa en el SNIES y su inactivación."),
-                tarjeta("BALANCE NETO POR DIVISIÓN DE UNINORTE", "g-balance",
-                        "Programas nuevos menos programas inactivos del periodo filtrado, por división: verde indica crecimiento y rojo, contracción.")))
+                tarjeta("AUMENTOS Y REDUCCIONES DE NÚMERO DE CRÉDITOS EN PROGRAMAS ACADÉMICOS", "g-creditos",
+                        "Programas que aumentaron (barras negras, hacia arriba) o redujeron (barras amarillas, hacia abajo) su número de créditos en cada ejecución."),
+                tarjeta("AUMENTOS Y REDUCCIONES DE NÚMERO DE PERIODOS DE DURACIÓN EN PROGRAMAS ACADÉMICOS", "g-periodos-dir",
+                        "Programas que alargaron (barras negras, hacia arriba) o acortaron (barras amarillas, hacia abajo) su duración en cada ejecución.")))
         nota = (f"Todos los registros de programas {n} que cumplen los filtros, con todas las columnas, ordenados desde la fecha más reciente. "
-                "Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR PARQUET exporta los registros filtrados.")
-        if tipo == "inactivos":
-            nota += " REACTIVADO POSTERIORMENTE indica la fecha en que el programa volvió a estar activo."
+                "Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR exporta los registros filtrados.")
         c.append('    <section class="tarjeta" aria-labelledby="t-tabla">\n'
-                 f'      <h2 class="tarjeta-tit" id="t-tabla">REGISTROS DE PROGRAMAS {N}</h2>\n'
+                 f'      <h2 class="tarjeta-tit" id="t-tabla">REGISTROS DE PROGRAMAS ACADÉMICOS {N}</h2>\n'
                  f'      <p class="tarjeta-sub">{nota}</p>\n'
                  '      <div id="tabla"></div>\n'
                  '    </section>')
         html = HEAD.format(css=v("assets/estilos.css"), css_fp=v("assets/vendor/flatpickr/flatpickr.min.css"), title=p["ht"], desc=f'{p["t"].capitalize()} · Monitor SNIES de programas universitarios de pregrado',
-                           body=f' data-tipo="{tipo}"', h1=p["t"], sub=f'\n          <p class="enc-sub">{p["sub"]}</p>' if p["sub"] else "",
+                           body=f' data-tipo="{tipo}"', h1=p["t"], sub=f'\n          <p class="enc-sub">{SUB}</p>',
                            total='<div class="enc-total" aria-live="polite"><div class="et">TOTAL</div><div class="ev" id="total">–</div><div class="es" id="total-s"></div></div>',
                            nav=nav(f"{tipo}.html"))
-        datos = ["comun", tipo] + (["nuevos"] if tipo == "inactivos" else [])
-        html += "\n" + "\n".join(c) + FOOT.format(scripts=scripts(datos, "detalle"))
+        html += "\n" + "\n".join(c) + FOOT.format(scripts=scripts(["comun", tipo], "detalle"))
         (DOCS / f"{tipo}.html").write_text(html, encoding="utf-8")
     print("  Páginas del Dashboard: index, nuevos, modificados e inactivos")
 

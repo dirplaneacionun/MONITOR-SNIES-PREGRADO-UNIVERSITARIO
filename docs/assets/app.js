@@ -5,16 +5,32 @@
   const C = S.comun;
   const CAT = C.catalogos;
 
-  // ── Colores (paleta institucional Universidad del Norte) ──────────────────
-  const ROJO = "#BE0000", AMARILLO = "#FFB700", NEGRO = "#000000";
-  // Estados: verde/naranja/rojo validados para daltonismo (ΔE ≥ 8 entre los tres)
-  const ESTADO = { nuevos: "#1E8E5A", modificados: "#F28C00", inactivos: "#BE0000" };
-  // Paleta categórica complementaria (validada: separación para daltonismo ≥ 8 entre colores vecinos).
-  // Orden fijo: el color sigue a la categoría, nunca a su posición en un ranking.
-  const CATEGORICA = ["#BE0000", "#2563B0", "#D4A100", "#0E9384", "#7B4FB0", "#E8743B", "#C2408A", "#6B8E23"];
+  // ── Colores (paleta institucional Universidad del Norte, BRANDBOOK_UNINORTE: códigos HEX impresos) ──
+  // Rojo Pantone 7427 C, negro Pantone Black 6 C, amarillo Pantone 116 C, ocre Pantone 7556 C y gris K70.
+  const ROJO = "#960A11", AMARILLO = "#FFCC00", NEGRO = "#151515", OCRE = "#B78B1E";
+  // Estados: verde (funcional, fuera de la marca), amarillo y rojo institucionales.
+  // El amarillo rellena (barras, tarjetas, pestañas); en líneas y textos Modificados usa el ocre, porque el amarillo
+  // sobre blanco tiene un contraste de solo 1,5:1 y una línea fina casi no se vería.
+  const ESTADO = { nuevos: "#1E8E5A", modificados: AMARILLO, inactivos: ROJO };
+  /** Color del trazo de una serie: el de relleno, salvo el amarillo de Modificados, que en líneas pasa a ocre. */
+  const colorLinea = (c) => (c === ESTADO.modificados ? OCRE : c);
+  /** Marcador de barras: el amarillo sobre blanco tiene un contraste de 1,5:1, así que lo delimita un contorno ocre de 1 px
+      (con el ocre el borde alcanza 3,1:1). Los demás colores no llevan contorno. Acepta un color o una lista de colores. */
+  const marcador = (color) => {
+    const trazo = (c) => (c === AMARILLO ? OCRE : "rgba(0,0,0,0)");
+    return Array.isArray(color) ? { color, line: { color: color.map(trazo), width: 1 } } : { color, line: { color: trazo(color), width: color === AMARILLO ? 1 : 0 } };
+  };
+  // Paleta categórica complementaria para las series de las gráficas de líneas (hasta 15, todas con línea continua).
+  // Las 8 primeras están validadas para daltonismo (separación ≥ 8 entre colores vecinos); las 7 siguientes amplían
+  // la paleta con tonos de matiz y luminosidad distintos. Orden fijo: el color sigue a la categoría, no a su posición.
+  const CATEGORICA = ["#960A11", "#2563B0", "#D4A100", "#0E9384", "#7B4FB0", "#E8743B", "#C2408A", "#6B8E23",
+    "#5B6770", "#8C5A2B", "#3AA6D0", "#3FA34D", "#1F2A5C", "#E58AB0", "#333333"];
+  const MAX_SERIES = CATEGORICA.length;
   const GRIS = "#9E9E9E";
-  const SECTOR_COLOR = { PRIVADO: ROJO, OFICIAL: NEGRO };
-  const TINTA = "#000000", TINTA2 = "#4D4D4D", REJILLA = "#E5E5E5";
+  /** Colores del sector: oficial en negro y privado en el color de acento de la página (rojo por defecto). */
+  const colorSector = (acento = ROJO) => ({ PRIVADO: acento, OFICIAL: NEGRO });
+  const SECTOR_COLOR = colorSector();
+  const TINTA = NEGRO, TINTA2 = "#3E4751", REJILLA = "#E5E5E5";
 
   // ── Utilidades ────────────────────────────────────────────────────────────
   const fmt = (n) => (n == null || isNaN(n) ? "–" : Number(n).toLocaleString("es-CO"));
@@ -26,6 +42,10 @@
     const d = hoy - antes;
     return d === 0 ? "Sin variación" : `${d > 0 ? "+" : "−"}${fmt(Math.abs(d))}`;
   };
+  /** Etiquetas visibles de las modalidades agrupadas (los datos y la dirección conservan su valor sin tilde: HIBRIDA). */
+  const ETIQUETA_MODALIDAD = { HIBRIDA: "HÍBRIDA" };
+  const etqModalidad = (m) => ETIQUETA_MODALIDAD[m] || m;
+  const etiquetasModalidad = (lista) => Object.fromEntries(lista.map((m) => [m, etqModalidad(m)]));
   const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
   const normalizar = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -42,7 +62,7 @@
     return CAT.modalidad_a_grupo[normalizar(m).trim()] || "SIN INFORMACIÓN";
   }
   function derivar(o) {
-    o._GU = grupoUniversidad(o.CODIGO_INSTITUCION);
+    o._GU = grupoUniversidad(o.CODIGO_INSTITUCION_PADRE ?? o.CODIGO_INSTITUCION);   // por institución padre, como el correo
     o._MG = grupoModalidad(o.MODALIDAD);
     return o;
   }
@@ -62,13 +82,13 @@
     return filas;
   }
 
-  /** Color estable por entidad: orden fijo; 9.ª categoría en adelante con línea punteada; OTRO/SIN INFORMACIÓN en gris. */
+  /** Color estable por entidad: orden fijo de la paleta de 15 colores; OTRO/SIN INFORMACIÓN en gris. Siempre línea continua. */
   function asignarColores(valores) {
     const mapa = {};
     let k = 0;
     valores.forEach((v) => {
-      if (v === "OTRO" || v === "SIN INFORMACIÓN") { mapa[v] = { color: GRIS, dash: "solid" }; return; }
-      mapa[v] = { color: CATEGORICA[k % CATEGORICA.length], dash: k < CATEGORICA.length ? "solid" : "dash" };
+      if (v === "OTRO" || v === "SIN INFORMACIÓN") { mapa[v] = { color: GRIS }; return; }
+      mapa[v] = { color: CATEGORICA[k % CATEGORICA.length] };
       k++;
     });
     return mapa;
@@ -77,15 +97,18 @@
   // ── Filtros desplegables (selección múltiple) ─────────────────────────────
   // `param`: nombre del parámetro en la dirección de la página (#universidad=...&division=...)
   const DEF_FILTROS = {
-    universidades: { etiqueta: "TODAS LAS UNIVERSIDADES", campo: "_GU", plural: "UNIVERSIDADES", param: "universidad" },
+    universidades: { etiqueta: "TODAS LAS UNIVERSIDADES", plural: "INSTITUCIONES", param: "universidad", buscar: true },
     divisiones: { etiqueta: "TODAS LAS DIVISIONES", campo: "DIVISION_UNINORTE", plural: "DIVISIONES", param: "division" },
-    cine: { etiqueta: "TODOS LOS CAMPOS DE CINE DETALLADO", campo: "CINE_F_2013_AC_CAMPO_DETALLADO", plural: "CAMPOS CINE", buscar: true, param: "cine" },
+    programas: { etiqueta: "TODOS LOS PROGRAMAS ACADÉMICOS", campo: "CODIGO_SNIES_DEL_PROGRAMA", plural: "PROGRAMAS", param: "programa", buscar: true, complemento: true },
+    cine: { etiqueta: "TODOS LOS CAMPOS DE CINE ESPECÍFICO", campo: "CINE_F_2013_AC_CAMPO_ESPECIFIC", plural: "CAMPOS CINE", buscar: true, param: "cine" },
     fechas: { etiqueta: "TODAS LAS FECHAS", tipo: "fecha" },
     departamentos: { etiqueta: "TODOS LOS DEPARTAMENTOS", campo: "DEPARTAMENTO_OFERTA_PROGRAMA", plural: "DEPARTAMENTOS", buscar: true, param: "departamento" },
     modalidades: { etiqueta: "TODAS LAS MODALIDADES", campo: "_MG", plural: "MODALIDADES", param: "modalidad" },
     sectores: { etiqueta: "TODOS LOS SECTORES", campo: "SECTOR", plural: "SECTORES", param: "sector" },
     cambios: { etiqueta: "TODOS LOS CAMBIOS", campo: "TIPO_CAMBIO_DETECTADO", plural: "CAMBIOS", param: "cambio", propio: true },
   };
+  const SIN_SELECCION = "SIN SELECCIÓN";
+  const alfabetico = (a, b) => String(a).localeCompare(String(b), "es");
 
   const desplegables = [];
   function cerrarDesplegables(excepto) { desplegables.forEach((d) => d !== excepto && d.cerrar()); }
@@ -99,156 +122,256 @@
     if (panel.getBoundingClientRect().right > document.documentElement.clientWidth - 8) panel.classList.add("a-derecha");
   }
 
-  class Multiselect {
+  /** Comportamiento común de los filtros desplegables: botón que abre el panel, cierre al elegir otro y accesibilidad. */
+  class Desplegable {
+    /** Registra el desplegable; `this.el` y `this.btn` ya deben existir. */
+    enlazar() {
+      this.btn.addEventListener("click", (e) => { e.stopPropagation(); cerrarDesplegables(this); this.alternar(); });
+      this.el.querySelector(".ms-panel").addEventListener("click", (e) => e.stopPropagation());
+      desplegables.push(this);
+    }
+    alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
+    cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
+  }
+
+  /** Texto del botón: todas las opciones, sin selección, una opción o la cantidad seleccionada. */
+  function textoSeleccion(def, n, total, unica) {
+    return n === total ? def.etiqueta : n === 0 ? SIN_SELECCION : n === 1 ? unica : `${n} ${def.plural}`;
+  }
+
+  /**
+   * Filtro de selección múltiple con la opción TODOS/TODAS sincronizada: TODOS marcada equivale a tener todas las
+   * opciones marcadas. Marcar TODOS selecciona todas; desmarcarla las quita todas; marcar o desmarcar una opción
+   * actualiza TODOS. Las opciones se muestran en orden alfabético.
+   * Estado: `sel` = opciones marcadas. Todas marcadas = sin filtro; ninguna marcada = sin resultados.
+   */
+  class Multiselect extends Desplegable {
     constructor(def, opciones, etiquetas, alCambiar) {
-      this.def = def; this.sel = new Set(); this.alCambiar = alCambiar; this.etiquetas = etiquetas || {};
-      this.opciones = new Set(opciones.map(String));
+      super();
+      this.def = def; this.alCambiar = alCambiar; this.etiquetas = etiquetas || {};
+      const etq = (o) => this.etiquetas[o] || o;
+      this.lista = [...new Set(opciones.map(String))].sort((a, b) => alfabetico(etq(a), etq(b)));
+      this.opciones = new Set(this.lista); this.sel = new Set(this.lista);
       const el = (this.el = document.createElement("div"));
       el.className = "ms";
       el.innerHTML = `<button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false"><span></span></button>
         <div class="ms-panel" role="listbox" aria-multiselectable="true">
           ${def.buscar ? '<input type="search" placeholder="Buscar..." aria-label="Buscar opción">' : ""}
           <label class="ms-op todos"><input type="checkbox" data-todos checked> ${esc(def.etiqueta)}</label>
-          <div class="ms-ops">${opciones.map((o) => `<label class="ms-op"><input type="checkbox" value="${esc(o)}"> ${esc(this.etiquetas[o] || o)}</label>`).join("")}</div>
+          <div class="ms-ops">${this.lista.map((o) => `<label class="ms-op" data-b="${esc(normalizar(`${etq(o)} ${o}`))}"><input type="checkbox" value="${esc(o)}" checked> ${esc(etq(o))}</label>`).join("")}</div>
         </div>`;
       this.btn = el.querySelector(".ms-btn");
-      this.btn.addEventListener("click", (e) => { e.stopPropagation(); cerrarDesplegables(this); this.alternar(); });
-      el.querySelector(".ms-panel").addEventListener("click", (e) => e.stopPropagation());
+      this.enlazar();
       el.querySelectorAll(".ms-ops input").forEach((cb) => cb.addEventListener("change", () => {
         cb.checked ? this.sel.add(cb.value) : this.sel.delete(cb.value);
         this.refrescar(); this.alCambiar();
       }));
-      el.querySelector("[data-todos]").addEventListener("change", () => { this.limpiar(); this.alCambiar(); });
+      el.querySelector("[data-todos]").addEventListener("change", (e) => {
+        this.sel = new Set(e.target.checked ? this.lista : []);
+        this.refrescar(); this.alCambiar();
+      });
       const busq = el.querySelector("input[type=search]");
       if (busq) busq.addEventListener("input", () => {
         const q = normalizar(busq.value);
-        el.querySelectorAll(".ms-ops .ms-op").forEach((l) => { l.style.display = normalizar(l.textContent).includes(q) ? "" : "none"; });
+        el.querySelectorAll(".ms-ops .ms-op").forEach((l) => { l.style.display = l.dataset.b.includes(q) ? "" : "none"; });
       });
-      desplegables.push(this);
       this.refrescar();
     }
-    alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
-    cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
-    limpiar() { this.sel.clear(); this.el.querySelectorAll(".ms-ops input").forEach((cb) => (cb.checked = false)); this.refrescar(); }
-    /** Valores seleccionados (para la dirección de la página). */
-    valores() { return [...this.sel]; }
+    /** ¿Hay filtro? (alguna opción sin marcar) */
+    get activo() { return this.sel.size < this.opciones.size; }
+    /** ¿El registro cumple el filtro? Con todas las opciones marcadas pasan todos, también los valores vacíos. */
+    pasa(r) { return !this.activo || this.sel.has(String(r[this.def.campo])); }
+    limpiar() { this.sel = new Set(this.lista); this.refrescar(); }
+    /**
+     * Valores para la dirección de la página: ninguno si están todas, [""] si no hay ninguna y las marcadas en otro caso.
+     * En listas muy largas (programas) con más de la mitad marcada, se escriben las excluidas precedidas de "!".
+     */
+    valores() {
+      if (!this.activo) return [];
+      if (this.sel.size === 0) return [""];
+      if (this.def.complemento && this.sel.size > this.opciones.size / 2) return ["!", ...this.lista.filter((o) => !this.sel.has(o))];
+      return this.lista.filter((o) => this.sel.has(o));
+    }
     /** Restablece la selección desde la dirección, sin avisar; se descartan los valores que no son opciones. */
     fijar(valores) {
-      this.sel = new Set(valores.filter((v) => this.opciones.has(v)));
-      this.el.querySelectorAll(".ms-ops input").forEach((cb) => (cb.checked = this.sel.has(cb.value)));
+      if (!valores.length) this.sel = new Set(this.lista);
+      else if (valores.length === 1 && valores[0] === "") this.sel = new Set();
+      else if (valores[0] === "!") { const fuera = new Set(valores.slice(1)); const v = this.lista.filter((o) => !fuera.has(o)); this.sel = new Set(v.length ? v : this.lista); }
+      else { const v = valores.filter((x) => this.opciones.has(x)); this.sel = new Set(v.length ? v : this.lista); }
       this.refrescar();
     }
     refrescar() {
-      const n = this.sel.size;
-      const txt = n === 0 ? this.def.etiqueta : n === 1 ? (this.etiquetas[[...this.sel][0]] || [...this.sel][0]) : `${n} ${this.def.plural}`;
-      this.btn.querySelector("span").textContent = txt;
-      this.btn.title = n ? [...this.sel].join(" · ") : this.def.etiqueta;
-      this.btn.classList.toggle("con-valor", n > 0);
-      this.el.querySelector("[data-todos]").checked = n === 0;
+      const n = this.sel.size, unica = n === 1 ? (this.etiquetas[[...this.sel][0]] || [...this.sel][0]) : "";
+      this.el.querySelectorAll(".ms-ops input").forEach((cb) => (cb.checked = this.sel.has(cb.value)));
+      this.btn.querySelector("span").textContent = textoSeleccion(this.def, n, this.opciones.size, unica);
+      this.btn.title = this.activo ? (n > 15 ? `${n} opciones seleccionadas` : [...this.sel].join(" · ")) : this.def.etiqueta;
+      this.btn.classList.toggle("con-valor", this.activo);
+      this.el.querySelector("[data-todos]").checked = !this.activo;
     }
   }
 
-  // ── Selector jerárquico de universidades ──────────────────────────────────
+  // ── Filtro jerárquico (universidades y campos de CINE) ────────────────────
   /**
-   * TODAS LAS UNIVERSIDADES · UNIVERSIDAD DEL NORTE · UNIVERSIDADES DE MAYOR INTERÉS (desplegable con cada
-   * universidad) · OTRAS UNIVERSIDADES. Marcar el grupo de mayor interés selecciona todas sus universidades;
-   * marcar solo algunas deja el grupo en estado parcial.
+   * Opciones agrupadas: cada grupo se puede expandir para elegir sus elementos y su casilla queda marcada, parcial o
+   * vacía según sus elementos. Mismo comportamiento de TODOS/TODAS que Multiselect, con barra de búsqueda: al buscar
+   * se muestran los grupos con coincidencias, expandidos.
+   * grupos = [{ id, etiqueta, token?, expandible, hijos: [{ valor, etiqueta, busqueda? }] }]; `token` es el nombre
+   * corto del grupo completo en la dirección; `valorDe(registro)` da el valor del elemento al que pertenece.
    */
-  class SelectorUniversidades {
-    constructor(alCambiar) {
-      this.alCambiar = alCambiar; this.sel = new Set();
-      const [gU, gM, gO] = CAT.grupos_universidad;
-      this.grupos = { U: gU, M: gM, O: gO };
-      const nombres = CAT.mayor_interes_nombres || {};
-      this.codigos = CAT.mayor_interes.map(String).sort((a, b) => String(nombres[a] || a).localeCompare(String(nombres[b] || b), "es"));
-      this.nombres = Object.fromEntries(this.codigos.map((c) => [c, nombres[c] || `INSTITUCIÓN ${c}`]));
+  class SelectorJerarquico extends Desplegable {
+    constructor(def, grupos, valorDe, alCambiar) {
+      super();
+      this.def = def; this.grupos = grupos.filter((g) => g.hijos.length); this.valorDe = valorDe; this.alCambiar = alCambiar;
+      this.etiquetaDe = {};
+      this.grupos.forEach((g) => { g.abierto = false; g.hijos.forEach((h) => { this.etiquetaDe[h.valor] = h.etiqueta; }); });
+      this.hojas = Object.keys(this.etiquetaDe);
+      this.sel = new Set(this.hojas);
+      const fila = (g) => (g.expandible
+        ? `<div class="ms-grupo"><div class="ms-op ms-padre"><label><input type="checkbox" data-g="${esc(g.id)}"> ${esc(g.etiqueta)}</label>
+             <button type="button" class="ms-expandir" aria-expanded="false" aria-label="Mostrar u ocultar: ${esc(g.etiqueta)}">▸</button></div>
+             <div class="ms-hijos" hidden>${g.hijos.map((h) => `<label class="ms-op hijo" data-b="${esc(normalizar(`${h.etiqueta} ${h.busqueda || ""}`))}"><input type="checkbox" data-v="${esc(h.valor)}"> ${esc(h.etiqueta)}</label>`).join("")}</div></div>`
+        : `<div class="ms-grupo"><label class="ms-op"><input type="checkbox" data-g="${esc(g.id)}"> ${esc(g.etiqueta)}</label></div>`);
       const el = (this.el = document.createElement("div"));
       el.className = "ms";
       el.innerHTML = `<button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false"><span></span></button>
         <div class="ms-panel" role="listbox" aria-multiselectable="true">
-          <label class="ms-op todos"><input type="checkbox" data-todos checked> TODAS LAS UNIVERSIDADES</label>
-          <div class="ms-ops">
-            <label class="ms-op"><input type="checkbox" data-g="U"> ${esc(gU)}</label>
-            <div class="ms-op ms-padre">
-              <label><input type="checkbox" data-g="M"> ${esc(gM)}</label>
-              <button type="button" class="ms-expandir" aria-expanded="false" aria-label="Mostrar las universidades de mayor interés">▸</button>
-            </div>
-            <div class="ms-hijos" hidden>
-              ${this.codigos.map((c) => `<label class="ms-op hijo"><input type="checkbox" data-c="${c}"> ${esc(this.nombres[c])}</label>`).join("")}
-            </div>
-            <label class="ms-op"><input type="checkbox" data-g="O"> ${esc(gO)}</label>
-          </div>
+          <input type="search" placeholder="Buscar..." aria-label="Buscar opción">
+          <label class="ms-op todos"><input type="checkbox" data-todos checked> ${esc(def.etiqueta)}</label>
+          <div class="ms-ops">${this.grupos.map(fila).join("")}</div>
         </div>`;
       this.btn = el.querySelector(".ms-btn");
-      this.padre = el.querySelector('[data-g="M"]');
-      this.hijos = el.querySelector(".ms-hijos");
-      const expandir = el.querySelector(".ms-expandir");
-      this.btn.addEventListener("click", (e) => { e.stopPropagation(); cerrarDesplegables(this); this.alternar(); });
-      el.querySelector(".ms-panel").addEventListener("click", (e) => e.stopPropagation());
-      expandir.addEventListener("click", () => {
-        const abrir = this.hijos.hidden;
-        this.hijos.hidden = !abrir; expandir.textContent = abrir ? "▾" : "▸"; expandir.setAttribute("aria-expanded", abrir);
+      this.enlazar();
+      this.panel = el.querySelector(".ms-panel");
+      this.filas = [...el.querySelectorAll(".ms-grupo")];
+      el.querySelector(".ms-ops").addEventListener("change", (e) => {
+        const cb = e.target;
+        if (cb.dataset.v !== undefined) cb.checked ? this.sel.add(cb.dataset.v) : this.sel.delete(cb.dataset.v);
+        else if (cb.dataset.g !== undefined) this.grupos.find((g) => g.id === cb.dataset.g).hijos.forEach((h) => (cb.checked ? this.sel.add(h.valor) : this.sel.delete(h.valor)));
+        this.refrescar(); this.alCambiar();
       });
-      el.querySelector('[data-g="U"]').addEventListener("change", (e) => this.marcar("U", e.target.checked));
-      el.querySelector('[data-g="O"]').addEventListener("change", (e) => this.marcar("O", e.target.checked));
-      this.padre.addEventListener("change", (e) => { this.codigos.forEach((c) => this.marcar(`C:${c}`, e.target.checked, false)); this.listo(); });
-      el.querySelectorAll("[data-c]").forEach((cb) => cb.addEventListener("change", () => this.marcar(`C:${cb.dataset.c}`, cb.checked)));
-      el.querySelector("[data-todos]").addEventListener("change", () => { this.limpiar(); this.alCambiar(); });
-      desplegables.push(this);
+      el.querySelectorAll(".ms-expandir").forEach((b, i) => b.addEventListener("click", () => {
+        const g = this.grupos.filter((x) => x.expandible)[i];
+        g.abierto = !g.abierto; this.mostrarHijos();
+      }));
+      el.querySelector("[data-todos]").addEventListener("change", (e) => {
+        this.sel = new Set(e.target.checked ? this.hojas : []);
+        this.refrescar(); this.alCambiar();
+      });
+      const busq = el.querySelector("input[type=search]");
+      busq.addEventListener("input", () => this.buscar(normalizar(busq.value).trim()));
+      this.q = "";
       this.refrescar();
     }
-    marcar(token, activo, avisar = true) {
-      activo ? this.sel.add(token) : this.sel.delete(token);
-      if (avisar) this.listo();
+    /** Muestra u oculta la lista de elementos de cada grupo según su estado de expansión y la búsqueda vigente. */
+    mostrarHijos() {
+      this.filas.forEach((fila, i) => {
+        const g = this.grupos[i], hijos = fila.querySelector(".ms-hijos");
+        if (!hijos) return;
+        const propios = this.q ? [...hijos.children].some((l) => l.dataset.b.includes(this.q)) : false;
+        const abierto = this.q ? propios : g.abierto;
+        hijos.hidden = !abierto;
+        const boton = fila.querySelector(".ms-expandir");
+        boton.textContent = abierto ? "▾" : "▸"; boton.setAttribute("aria-expanded", abierto);
+      });
     }
-    listo() { this.refrescar(); this.alCambiar(); }
-    alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
-    cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
-    limpiar() { this.sel.clear(); this.refrescar(); }
-    /** Selección para la dirección: "uninorte", "otras" y el código de cada universidad de mayor interés. */
-    valores() { return [...this.sel].map((t) => (t === "U" ? "uninorte" : t === "O" ? "otras" : t.slice(2))); }
+    /** Filtra las opciones por texto (sin tildes ni mayúsculas); un grupo cuyo nombre coincide se muestra con todos sus elementos. */
+    buscar(q) {
+      this.q = q;
+      this.filas.forEach((fila, i) => {
+        const g = this.grupos[i], coincideGrupo = !q || normalizar(g.etiqueta).includes(q);
+        let visibles = 0;
+        fila.querySelectorAll(".ms-op.hijo").forEach((l) => {
+          const ok = coincideGrupo || l.dataset.b.includes(q);
+          l.style.display = ok ? "" : "none"; if (ok) visibles++;
+        });
+        fila.style.display = coincideGrupo || visibles ? "" : "none";
+      });
+      this.mostrarHijos();
+    }
+    get activo() { return this.sel.size < this.hojas.length; }
+    pasa(r) { return !this.activo || this.sel.has(this.valorDe(r)); }
+    limpiar() { this.sel = new Set(this.hojas); this.refrescar(); }
+    /** Valores para la dirección: ninguno si están todos, [""] si no hay ninguno; grupos completos por su token y el resto uno a uno. */
+    valores() {
+      if (!this.activo) return [];
+      if (!this.sel.size) return [""];
+      const out = new Set(), cubiertos = new Set();
+      this.grupos.forEach((g) => {
+        if (g.token && g.hijos.every((h) => this.sel.has(h.valor))) { out.add(g.token); g.hijos.forEach((h) => cubiertos.add(h.valor)); }
+      });
+      this.hojas.forEach((v) => { if (this.sel.has(v) && !cubiertos.has(v)) out.add(v); });
+      return [...out];
+    }
+    /** Restablece la selección desde la dirección, sin avisar; se descartan los valores desconocidos. */
     fijar(valores) {
-      this.sel = new Set();
-      valores.forEach((v) => {
-        if (v === "uninorte") this.sel.add("U");
-        else if (v === "otras") this.sel.add("O");
-        else if (this.codigos.includes(v)) this.sel.add(`C:${v}`);
-      });
+      if (!valores.length) this.sel = new Set(this.hojas);
+      else if (valores.length === 1 && valores[0] === "") this.sel = new Set();
+      else {
+        const sel = new Set();
+        valores.forEach((v) => {
+          const g = this.grupos.find((x) => x.token === v);
+          if (g) g.hijos.forEach((h) => sel.add(h.valor));
+          else if (this.etiquetaDe[v] !== undefined) sel.add(v);
+        });
+        this.sel = sel.size ? sel : new Set(this.hojas);
+      }
       this.refrescar();
-    }
-    /** ¿El registro pertenece a la selección? (sin selección: todas las universidades) */
-    pasa(r) {
-      if (!this.sel.size) return true;
-      if (r._GU === this.grupos.U) return this.sel.has("U");
-      if (r._GU === this.grupos.O) return this.sel.has("O");
-      return this.sel.has(`C:${Number(r.CODIGO_INSTITUCION)}`);
     }
     refrescar() {
-      const marcadas = this.codigos.filter((c) => this.sel.has(`C:${c}`));
-      this.el.querySelectorAll("[data-c]").forEach((cb) => (cb.checked = this.sel.has(`C:${cb.dataset.c}`)));
-      this.el.querySelector('[data-g="U"]').checked = this.sel.has("U");
-      this.el.querySelector('[data-g="O"]').checked = this.sel.has("O");
-      this.padre.checked = marcadas.length === this.codigos.length;
-      this.padre.indeterminate = marcadas.length > 0 && marcadas.length < this.codigos.length;
-      this.el.querySelector("[data-todos]").checked = this.sel.size === 0;
-      const partes = [];
-      if (this.sel.has("U")) partes.push(this.grupos.U);
-      if (marcadas.length === this.codigos.length) partes.push(this.grupos.M);
-      else if (marcadas.length === 1) partes.push(this.nombres[marcadas[0]]);
-      else if (marcadas.length > 1) partes.push(`${marcadas.length} DE MAYOR INTERÉS`);
-      if (this.sel.has("O")) partes.push(this.grupos.O);
-      this.btn.querySelector("span").textContent = partes.length ? partes.join(" + ") : "TODAS LAS UNIVERSIDADES";
-      this.btn.title = partes.length ? [this.sel.has("U") && this.grupos.U, ...marcadas.map((c) => this.nombres[c]), this.sel.has("O") && this.grupos.O].filter(Boolean).join(" · ") : "TODAS LAS UNIVERSIDADES";
-      this.btn.classList.toggle("con-valor", this.sel.size > 0);
+      this.el.querySelectorAll("[data-v]").forEach((cb) => (cb.checked = this.sel.has(cb.dataset.v)));
+      this.grupos.forEach((g, i) => {
+        const n = g.hijos.filter((h) => this.sel.has(h.valor)).length, cb = this.filas[i].querySelector("[data-g]");
+        cb.checked = n === g.hijos.length; cb.indeterminate = n > 0 && n < g.hijos.length;
+      });
+      const n = this.sel.size, todas = !this.activo;
+      const completos = this.grupos.filter((g) => g.hijos.every((h) => this.sel.has(h.valor)));
+      const parciales = this.grupos.some((g) => !completos.includes(g) && g.hijos.some((h) => this.sel.has(h.valor)));
+      const txt = todas || n === 0 || n === 1 || parciales || completos.length > 3 ? textoSeleccion(this.def, n, this.hojas.length, this.etiquetaDe[[...this.sel][0]])
+        : completos.map((g) => g.etiqueta).join(" + ");
+      this.btn.querySelector("span").textContent = txt;
+      this.btn.title = todas ? this.def.etiqueta : n > 15 ? `${n} opciones seleccionadas` : [...this.sel].map((v) => this.etiquetaDe[v]).join(" · ");
+      this.btn.classList.toggle("con-valor", !todas);
+      this.el.querySelector("[data-todos]").checked = todas;
     }
   }
 
+  /**
+   * Filtro de universidades: UNIVERSIDAD DEL NORTE, UNIVERSIDADES DE MAYOR INTERÉS y OTRAS UNIVERSIDADES (con cada institución).
+   * Se agrupa por la institución padre (CODIGO_INSTITUCION_PADRE): las seccionales quedan con su institución principal.
+   */
+  function selectorUniversidades(alCambiar) {
+    const [gU, gM, gO] = CAT.grupos_universidad;
+    const nombres = CAT.instituciones || {}, uninorte = String(CAT.uninorte), mayor = new Set(CAT.mayor_interes.map(String));
+    const repetidos = {};
+    Object.values(nombres).forEach((n) => (repetidos[n] = (repetidos[n] || 0) + 1));
+    const hijos = (codigos) => codigos.map((c) => ({ valor: c, etiqueta: repetidos[nombres[c]] > 1 ? `${nombres[c]} (${c})` : nombres[c], busqueda: c }))
+      .sort((a, b) => alfabetico(a.etiqueta, b.etiqueta));
+    const codigos = Object.keys(nombres);
+    return new SelectorJerarquico(DEF_FILTROS.universidades, [
+      { id: "uninorte", token: "uninorte", etiqueta: gU, expandible: false, hijos: [{ valor: uninorte, etiqueta: gU }] },
+      { id: "mayor", token: "mayor", etiqueta: gM, expandible: true, hijos: hijos(codigos.filter((c) => mayor.has(c))) },
+      { id: "otras", token: "otras", etiqueta: gO, expandible: true, hijos: hijos(codigos.filter((c) => c !== uninorte && !mayor.has(c))) },
+    ], (r) => String(Number(r.CODIGO_INSTITUCION_PADRE ?? r.CODIGO_INSTITUCION)), alCambiar);
+  }
+
+  /** Filtro de campos de CINE: campo amplio (primer nivel) y campos específicos (segundo nivel, expandible). */
+  function selectorCineJerarquico(alCambiar) {
+    const grupos = [...(CAT.cine_jerarquia || [])].sort((a, b) => alfabetico(a[0], b[0]))
+      .map(([amplio, especificos], i) => ({ id: `a${i}`, etiqueta: amplio, expandible: true, hijos: [...especificos].sort(alfabetico).map((d) => ({ valor: d, etiqueta: d })) }));
+    return new SelectorJerarquico(DEF_FILTROS.cine, grupos, (r) => String(r[DEF_FILTROS.cine.campo]), alCambiar);
+  }
+
   // ── Selector de fechas de ejecución: fecha, rango, mes o año ──────────────
-  class SelectorFechas {
+  /**
+   * FECHA, MES y AÑO admiten selección múltiple (no contigua: p. ej. enero y marzo sin febrero); RANGO toma todas
+   * las ejecuciones entre dos fechas. Solo hay un tipo de selección vigente; al elegir con otro tipo, reemplaza a la anterior.
+   */
+  class SelectorFechas extends Desplegable {
     constructor(fechas, alCambiar) {
-      this.fechas = fechas; this.alCambiar = alCambiar;
-      this.modo = "fecha"; this.desde = null; this.hasta = null; this.etiqueta = "TODAS LAS FECHAS";
-      this.tipoSel = null;   // modo con el que se hizo la selección vigente (fecha, rango, mes o anio)
+      super();
+      this.fechas = fechas; this.fechasSet = new Set(fechas); this.alCambiar = alCambiar;
+      this.modo = "fecha"; this.tipoSel = null;   // tipoSel: null (todas), fecha, rango, mes o anio
+      this.vals = new Set(); this.desde = null; this.hasta = null;
       const el = (this.el = document.createElement("div"));
       el.className = "ms fs";
       el.innerHTML = `<button type="button" class="ms-btn fs-btn" aria-haspopup="dialog" aria-expanded="false"><span>TODAS LAS FECHAS</span></button>
@@ -259,115 +382,142 @@
           </div>
           <p class="fs-ayuda"></p>
           <div class="fs-cuerpo"></div>
-          <div class="fs-pie"><button type="button" class="btn btn-reset">TODAS LAS FECHAS</button><span>Solo se habilitan los días con ejecución</span></div>
+          <div class="fs-pie"><button type="button" class="btn btn-reset">TODAS LAS FECHAS</button><span class="fs-nota"></span></div>
         </div>`;
       this.btn = el.querySelector(".fs-btn"); this.quitar = el.querySelector(".fs-quitar");
-      this.cuerpo = el.querySelector(".fs-cuerpo"); this.ayuda = el.querySelector(".fs-ayuda");
-      this.btn.addEventListener("click", (e) => { e.stopPropagation(); cerrarDesplegables(this); this.alternar(); });
-      el.querySelector(".fs-panel").addEventListener("click", (e) => e.stopPropagation());
+      this.cuerpo = el.querySelector(".fs-cuerpo"); this.ayuda = el.querySelector(".fs-ayuda"); this.nota = el.querySelector(".fs-nota");
+      this.enlazar();
       el.querySelectorAll("[data-modo]").forEach((b) => b.addEventListener("click", () => this.cambiarModo(b.dataset.modo)));
       el.querySelector(".btn-reset").addEventListener("click", () => { this.limpiar(); this.cerrar(); this.alCambiar(); });
       this.quitar.addEventListener("click", (e) => { e.stopPropagation(); this.limpiar(); this.alCambiar(); });
-      desplegables.push(this);
       this.cambiarModo("fecha");
     }
-    alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
-    cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
+    get activo() { return this.tipoSel !== null; }
+    /** ¿La fecha de ejecución (AAAA-MM-DD) está dentro de la selección? Sin selección, todas. */
+    coincide(f) {
+      switch (this.tipoSel) {
+        case "fecha": return this.vals.has(f);
+        case "rango": return f >= this.desde && f <= this.hasta;
+        case "mes": return this.vals.has(f.slice(0, 7));
+        case "anio": return this.vals.has(f.slice(0, 4));
+        default: return true;
+      }
+    }
+    /** Fechas (de `lista`) dentro de la selección, en su orden. */
+    enRango(lista) { return this.activo ? lista.filter((f) => this.coincide(f)) : lista.slice(); }
     cambiarModo(modo) {
       this.modo = modo;
       this.el.querySelectorAll("[data-modo]").forEach((b) => { const a = b.dataset.modo === modo; b.classList.toggle("activo", a); b.setAttribute("aria-selected", a); });
       if (this.fp) { this.fp.destroy(); this.fp = null; }
-      this.cuerpo.innerHTML = "";
-      const textos = {
-        fecha: "Seleccione una ejecución específica.",
-        rango: "Seleccione la fecha inicial y luego la fecha final.",
-        mes: "Seleccione un mes con ejecuciones registradas.",
-        anio: "Seleccione un año con ejecuciones registradas.",
+      this.cuerpo.innerHTML = ""; this.cuerpo.classList.remove("fs-con-calendario", "fs-calendario-rango");
+      const ayudas = {
+        fecha: ["Seleccione una o varias ejecuciones. Haga clic de nuevo en una fecha para quitarla.", "Solo se habilitan los días con ejecución"],
+        rango: ["Seleccione la fecha inicial y luego la final: se incluyen todas las ejecuciones entre ambas.", "En negrita, los días con ejecución"],
+        mes: ["Seleccione uno o varios meses con ejecuciones registradas.", "Solo se habilitan los meses con ejecución"],
+        anio: ["Seleccione uno o varios años con ejecuciones registradas.", "Solo se habilitan los años con ejecución"],
       };
-      this.ayuda.textContent = textos[modo];
+      [this.ayuda.textContent, this.nota.textContent] = ayudas[modo];
       if (modo === "fecha" || modo === "rango") {
         const cont = document.createElement("div");
         this.cuerpo.appendChild(cont);
-        this.fp = flatpickr(cont, {
-          inline: true, mode: modo === "rango" ? "range" : "single", locale: "es", dateFormat: "Y-m-d",
-          enable: this.fechas, minDate: this.fechas[0], maxDate: this.fechas[this.fechas.length - 1],
-          defaultDate: this.fechas[this.fechas.length - 1] && this.desde ? (modo === "rango" ? [this.desde, this.hasta] : this.desde) : null,
+        const actual = this.tipoSel === modo ? (modo === "rango" ? [this.desde, this.hasta] : [...this.vals]) : null;
+        const opciones = {
+          inline: true, mode: modo === "rango" ? "range" : "multiple", locale: "es", dateFormat: "Y-m-d", conjunction: ", ",
+          minDate: this.fechas[0], maxDate: this.fechas[this.fechas.length - 1], defaultDate: actual,
           onChange: (sel) => {
-            if (modo === "fecha" && sel.length === 1) {
-              const f = isoDe(sel[0]);
-              this.aplicar(f, f, fmtFecha(f));
-            } else if (modo === "rango" && sel.length === 2) {
-              const a = isoDe(sel[0]), b = isoDe(sel[1]);
-              this.aplicar(a, b, `${fmtFecha(a)} A ${fmtFecha(b)}`);
-            }
+            if (modo === "fecha") this.definir("fecha", sel.map(isoDe));
+            else if (sel.length === 2) this.definirRango(isoDe(sel[0]), isoDe(sel[1]));
           },
-        });
+        };
+        // FECHA: solo días con ejecución. RANGO: cualquier día entre la primera y la última ejecución; flatpickr no permite
+        // un rango que incluya días deshabilitados, por lo que los días con ejecución solo se resaltan.
+        if (modo === "fecha") opciones.enable = this.fechas;
+        else opciones.onDayCreate = (_a, _b, _c, dia) => { if (this.fechasSet.has(isoDe(dia.dateObj))) dia.classList.add("con-ejecucion"); };
+        this.fp = flatpickr(cont, opciones);
+        this.cuerpo.classList.add("fs-con-calendario"); this.cuerpo.classList.toggle("fs-calendario-rango", modo === "rango");
         return;
       }
       const porAnio = {};
       this.fechas.forEach((f) => { (porAnio[f.slice(0, 4)] = porAnio[f.slice(0, 4)] || new Set()).add(Number(f.slice(5, 7))); });
       const anios = Object.keys(porAnio).sort();
       if (modo === "anio") {
-        this.cuerpo.innerHTML = `<div class="fs-rejilla">${anios.map((a) => `<button type="button" class="btn" data-anio="${a}">${a}</button>`).join("")}</div>`;
-        this.cuerpo.querySelectorAll("[data-anio]").forEach((b) => b.addEventListener("click", () => {
-          const a = b.dataset.anio; this.aplicar(`${a}-01-01`, `${a}-12-31`, `AÑO ${a}`);
-        }));
+        this.cuerpo.innerHTML = `<div class="fs-rejilla">${anios.map((a) => `<button type="button" class="btn" data-anio="${a}" aria-pressed="false">${a}</button>`).join("")}</div>`;
+        this.cuerpo.querySelectorAll("[data-anio]").forEach((b) => b.addEventListener("click", () => this.alternarValor("anio", b.dataset.anio)));
       } else {
         this.cuerpo.innerHTML = anios.map((a) => `<div class="fs-anio">${a}</div><div class="fs-rejilla meses">${MESES.map((m, i) => {
           const hay = porAnio[a].has(i + 1);
-          return `<button type="button" class="btn" data-mes="${a}-${String(i + 1).padStart(2, "0")}" ${hay ? "" : "disabled"}>${m}</button>`;
+          return `<button type="button" class="btn" data-mes="${a}-${String(i + 1).padStart(2, "0")}" aria-pressed="false" ${hay ? "" : "disabled"}>${m}</button>`;
         }).join("")}</div>`).join("");
-        this.cuerpo.querySelectorAll("[data-mes]").forEach((b) => b.addEventListener("click", () => {
-          const [a, m] = b.dataset.mes.split("-").map(Number);
-          const fin = new Date(a, m, 0).getDate();
-          this.aplicar(`${b.dataset.mes}-01`, `${b.dataset.mes}-${String(fin).padStart(2, "0")}`, `${MESES[m - 1]} ${a}`);
-        }));
+        this.cuerpo.querySelectorAll("[data-mes]").forEach((b) => b.addEventListener("click", () => this.alternarValor("mes", b.dataset.mes)));
       }
       this.marcar();
     }
+    /** Marca en el panel los meses o años seleccionados. */
     marcar() {
       this.cuerpo.querySelectorAll("[data-anio],[data-mes]").forEach((b) => {
-        const a = b.dataset.anio ? `${b.dataset.anio}-01-01` : `${b.dataset.mes}-01`;
-        b.classList.toggle("activo", !!this.desde && this.desde === a);
+        const tipo = b.dataset.anio ? "anio" : "mes", activo = this.tipoSel === tipo && this.vals.has(b.dataset.anio || b.dataset.mes);
+        b.classList.toggle("activo", activo); b.setAttribute("aria-pressed", activo);
       });
     }
-    aplicar(desde, hasta, etiqueta) {
-      this.desde = desde; this.hasta = hasta; this.etiqueta = etiqueta; this.tipoSel = this.modo;
-      this.refrescar(); this.marcar(); this.cerrar(); this.alCambiar();
+    /** Reemplaza la selección por `valores` del tipo indicado (fecha, mes o anio); sin valores, vuelve a todas las fechas. */
+    definir(tipo, valores) {
+      this.vals = new Set(valores); this.desde = this.hasta = null; this.tipoSel = valores.length ? tipo : null;
+      this.refrescar(); this.marcar(); this.alCambiar();
     }
-    /** Selección como parámetros: fecha=AAAA-MM-DD · desde=...&hasta=... · mes=AAAA-MM · anio=AAAA. */
+    definirRango(desde, hasta) {
+      this.vals = new Set(); this.desde = desde; this.hasta = hasta; this.tipoSel = "rango";
+      this.refrescar(); this.cerrar(); this.alCambiar();
+    }
+    /** Agrega o quita un mes o año; si había otro tipo de selección, comienza una nueva. */
+    alternarValor(tipo, valor) {
+      const base = this.tipoSel === tipo ? new Set(this.vals) : new Set();
+      base.has(valor) ? base.delete(valor) : base.add(valor);
+      this.definir(tipo, [...base]);
+    }
+    etiquetaSel() {
+      const n = this.vals.size, [primero] = [...this.vals].sort();
+      switch (this.tipoSel) {
+        case "rango": return `${fmtFecha(this.desde)} A ${fmtFecha(this.hasta)}`;
+        case "fecha": return n === 1 ? fmtFecha(primero) : `${n} FECHAS`;
+        case "mes": return n === 1 ? `${MESES[Number(primero.slice(5)) - 1]} ${primero.slice(0, 4)}` : `${n} MESES`;
+        case "anio": return n === 1 ? `AÑO ${primero}` : `${n} AÑOS`;
+        default: return "TODAS LAS FECHAS";
+      }
+    }
+    /** Selección como parámetros: fecha=AAAA-MM-DD · mes=AAAA-MM · anio=AAAA (repetidos si hay varios) · desde=...&hasta=... */
     aParams(p) {
-      if (!this.desde) return;
-      if (this.tipoSel === "fecha") p.set("fecha", this.desde);
-      else if (this.tipoSel === "mes") p.set("mes", this.desde.slice(0, 7));
-      else if (this.tipoSel === "anio") p.set("anio", this.desde.slice(0, 4));
-      else { p.set("desde", this.desde); p.set("hasta", this.hasta); }
+      if (this.tipoSel === "rango") { p.set("desde", this.desde); p.set("hasta", this.hasta); return; }
+      const param = { fecha: "fecha", mes: "mes", anio: "anio" }[this.tipoSel];
+      if (param) [...this.vals].sort().forEach((v) => p.append(param, v));
     }
     /** Restablece la selección desde la dirección, sin avisar. Solo acepta fechas, meses o años con ejecuciones. */
     desdeParams(p) {
       const hay = (pref) => this.fechas.some((f) => f.startsWith(pref));
-      const f = p.get("fecha"), d = p.get("desde"), h = p.get("hasta"), m = p.get("mes"), a = p.get("anio");
-      let sel = null;
-      if (f && this.fechas.includes(f)) sel = ["fecha", f, f, fmtFecha(f)];
-      else if (d && h && this.fechas.includes(d) && this.fechas.includes(h) && d <= h) sel = ["rango", d, h, `${fmtFecha(d)} A ${fmtFecha(h)}`];
-      else if (m && /^\d{4}-\d{2}$/.test(m) && hay(m)) {
-        const [y, mm] = m.split("-").map(Number);
-        sel = ["mes", `${m}-01`, `${m}-${String(new Date(y, mm, 0).getDate()).padStart(2, "0")}`, `${MESES[mm - 1]} ${y}`];
-      } else if (a && /^\d{4}$/.test(a) && hay(a)) sel = ["anio", `${a}-01-01`, `${a}-12-31`, `AÑO ${a}`];
-      if (!sel) { this.limpiar(); return; }
-      [this.tipoSel, this.desde, this.hasta, this.etiqueta] = sel;
-      this.cambiarModo(this.tipoSel);   // muestra el modo de la selección, con la fecha marcada en el calendario
+      const unicos = (lista) => [...new Set(lista)].sort();
+      const fechas = unicos(p.getAll("fecha").filter((f) => this.fechasSet.has(f)));
+      const d = p.get("desde"), h = p.get("hasta");
+      const meses = unicos(p.getAll("mes").filter((m) => /^\d{4}-\d{2}$/.test(m) && hay(m)));
+      const anios = unicos(p.getAll("anio").filter((a) => /^\d{4}$/.test(a) && hay(a)));
+      const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") && isoDe(new Date(`${s}T00:00:00`)) === s;
+      this.vals = new Set(); this.desde = this.hasta = null;
+      if (fechas.length) { this.tipoSel = "fecha"; this.vals = new Set(fechas); }
+      else if (iso(d) && iso(h) && d <= h) { this.tipoSel = "rango"; this.desde = d; this.hasta = h; }
+      else if (meses.length) { this.tipoSel = "mes"; this.vals = new Set(meses); }
+      else if (anios.length) { this.tipoSel = "anio"; this.vals = new Set(anios); }
+      else this.tipoSel = null;
+      this.cambiarModo(this.tipoSel || this.modo);   // muestra el modo de la selección, con las fechas marcadas
       this.refrescar();
     }
     limpiar() {
-      this.desde = this.hasta = null; this.etiqueta = "TODAS LAS FECHAS"; this.tipoSel = null;
-      if (this.fp) this.fp.clear();
+      this.vals = new Set(); this.desde = this.hasta = null; this.tipoSel = null;
+      if (this.fp) this.fp.clear(false);
       this.refrescar(); this.marcar();
     }
     refrescar() {
-      this.btn.querySelector("span").textContent = this.etiqueta;
-      this.btn.classList.toggle("con-valor", !!this.desde);
-      this.quitar.hidden = !this.desde;
+      this.btn.querySelector("span").textContent = this.etiquetaSel();
+      this.btn.title = this.tipoSel === "fecha" ? [...this.vals].sort().map(fmtFecha).join(" · ") : this.etiquetaSel();
+      this.btn.classList.toggle("con-valor", this.activo);
+      this.quitar.hidden = !this.activo;
     }
   }
 
@@ -386,9 +536,17 @@
     constructor(cont, config) {
       this.cfg = config; this.texto = ""; this.ms = {};
       const alCambiar = () => { this.escribirUrl(); config.alCambiar(); };
+      this.notificar = alCambiar;   // para los controles que modifican un filtro desde fuera de la barra (selector de CINE de la gráfica)
       const barra = document.createElement("div");
       barra.className = "filtros";
       barra.setAttribute("role", "search");
+      // En pantallas angostas los filtros se pliegan tras el botón FILTROS (en escritorio el botón no se muestra)
+      const toggle = document.createElement("button");
+      toggle.type = "button"; toggle.className = "btn filtros-toggle"; toggle.setAttribute("aria-expanded", "false");
+      barra.classList.add("plegada");
+      toggle.addEventListener("click", () => toggle.setAttribute("aria-expanded", String(!barra.classList.toggle("plegada"))));
+      barra.appendChild(toggle);
+      this.toggle = toggle;
       const input = document.createElement("input");
       input.type = "search"; input.className = "buscar"; input.placeholder = config.buscar; input.setAttribute("aria-label", config.buscar);
       let t;
@@ -402,13 +560,10 @@
           barra.appendChild(this.fechas.el);
           return;
         }
-        if (clave === "universidades") {
-          this.ms[clave] = new SelectorUniversidades(alCambiar);
-          barra.appendChild(this.ms[clave].el);
-          return;
-        }
-        const opciones = (config.opciones && config.opciones[clave]) || this.opcionesDe(def.campo);
-        const ms = new Multiselect(def, opciones, (config.etiquetas || {})[clave], alCambiar);
+        // Universidades y campos de CINE son filtros jerárquicos; los demás, listas planas en orden alfabético
+        const ms = clave === "universidades" ? selectorUniversidades(alCambiar)
+          : clave === "cine" ? selectorCineJerarquico(alCambiar)
+          : new Multiselect(def, (config.opciones && config.opciones[clave]) || this.opcionesDe(def.campo), (config.etiquetas || {})[clave], alCambiar);
         this.ms[clave] = ms;
         barra.appendChild(ms.el);
       });
@@ -443,8 +598,14 @@
       for (const [clave, ms] of Object.entries(this.ms)) ms.fijar(p.getAll(DEF_FILTROS[clave].param));
       if (this.fechas) this.fechas.desdeParams(p);
     }
+    /** Texto del botón FILTROS (pantallas angostas): con la cantidad de filtros activos, si hay alguno. */
+    actualizarToggle() {
+      const n = Object.values(this.ms).filter((m) => m.activo).length + (this.fechas && this.fechas.activo ? 1 : 0) + (this.texto ? 1 : 0);
+      this.toggle.textContent = n ? `FILTROS · ${n}` : "FILTROS";
+    }
     /** Actualiza la dirección y los enlaces internos con los filtros vigentes. */
     escribirUrl() {
+      this.actualizarToggle();
       const p = this.estado(), h = p.toString();
       const url = location.pathname + location.search + (h ? `#${h}` : "");
       if (url !== location.pathname + location.search + location.hash) history.replaceState(null, "", url);
@@ -458,12 +619,10 @@
         a.setAttribute("href", comun ? `${base}#${comun}` : base);
       });
     }
-    get desde() { return this.fechas ? this.fechas.desde : null; }
-    get hasta() { return this.fechas ? this.fechas.hasta : null; }
     opcionesDe(campo) {
       const set = new Set();
       this.cfg.registros.forEach((r) => { const v = r[campo]; if (v != null && v !== "") set.add(v); });
-      return [...set].sort((a, b) => String(a).localeCompare(String(b), "es"));
+      return [...set].sort(alfabetico);
     }
     limpiar() {
       this.texto = ""; this.input.value = "";
@@ -472,15 +631,10 @@
       this.escribirUrl();
       this.cfg.alCambiar();
     }
-    /** ¿El registro cumple los filtros? opciones.sinFecha ignora el rango de fechas. */
+    /** ¿El registro cumple los filtros? opciones.sinFecha ignora la selección de fechas. */
     pasa(r, opciones = {}) {
-      for (const [clave, ms] of Object.entries(this.ms)) {
-        if (ms.pasa) { if (!ms.pasa(r)) return false; continue; }
-        if (ms.sel.size && !ms.sel.has(String(r[DEF_FILTROS[clave].campo]))) return false;
-      }
-      if (!opciones.sinFecha && this.desde && r.FECHA_DE_OBTENCION) {
-        if (r.FECHA_DE_OBTENCION < this.desde || r.FECHA_DE_OBTENCION > this.hasta) return false;
-      }
+      for (const ms of Object.values(this.ms)) if (!ms.pasa(r)) return false;
+      if (!opciones.sinFecha && this.fechas && this.fechas.activo && r.FECHA_DE_OBTENCION && !this.fechas.coincide(r.FECHA_DE_OBTENCION)) return false;
       if (this.texto) {
         let ok = false;
         for (const c of this.cfg.camposBusqueda) { if (normalizar(r[c]).includes(this.texto)) { ok = true; break; } }
@@ -488,8 +642,8 @@
       }
       return true;
     }
-    /** Fechas (de `lista`) dentro del rango seleccionado. */
-    enRango(lista) { return this.desde ? lista.filter((f) => f >= this.desde && f <= this.hasta) : lista.slice(); }
+    /** Fechas (de `lista`) dentro de la selección de fechas. */
+    enRango(lista) { return this.fechas ? this.fechas.enRango(lista) : lista.slice(); }
   }
 
   // ── Gráficas (Plotly) ─────────────────────────────────────────────────────
@@ -562,15 +716,15 @@
     // El color de cada serie no cambia: sigue a la categoría, no a su posición.
     const ser = acumuladas.map((s, i) => [s, i]).sort((a, b) => total(b[0]) - total(a[0]) || a[1] - b[1]).map((x) => x[0]);
     const varias = ser.length > 1;
-    const etiquetaHover = opciones.modo === "acumulado" ? "acumulado" : "programas";
+    const etiquetaHover = opciones.modo === "acumulado" ? "registros acumulados" : "registros";
     // Pantalla angosta: la leyenda pasa debajo del gráfico (a la derecha taparía las líneas) y el contenedor crece
     const angosta = varias && div.clientWidth > 0 && div.clientWidth < 640;
     div.style.height = angosta ? `${300 + ser.length * 22}px` : "";
     const trazas = ser.map((s) => ({
       type: "scatter", mode: fechas.length === 1 ? "lines+markers" : "lines", x: fechas, y: s.valores,   // con una sola fecha una línea no se dibuja: se muestra el punto
       name: varias ? `${angosta && s.nombre.length > 36 ? s.nombre.slice(0, 35) + "…" : s.nombre} · ${fmt(total(s))}` : s.nombre,
-      line: { color: s.color, width: 2, dash: s.dash || "solid", shape: "linear" },
-      marker: { color: s.color, size: 9 },
+      line: { color: colorLinea(s.color), width: 2, dash: "solid", shape: "linear" },   // siempre línea continua
+      marker: { color: colorLinea(s.color), size: 9 },
       hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}<extra></extra>`,
     }));
     const layout = baseLayout({
@@ -598,10 +752,10 @@
     const corta = (s) => (s.length > 34 ? s.slice(0, 33) + "…" : s);
     const traza = {
       type: "bar", orientation: "h", y: etiquetas.map(corta).reverse(), x: valores.slice().reverse(),
-      customdata: etiquetas.slice().reverse(), marker: { color: Array.isArray(color) ? color.slice().reverse() : color },
+      customdata: etiquetas.slice().reverse(), marker: marcador(Array.isArray(color) ? color.slice().reverse() : color),
       text: valores.slice().reverse().map(fmt), textposition: "outside", cliponaxis: false,
       textfont: { color: TINTA, size: 10 },
-      hovertemplate: `%{customdata}: <b>%{x:,}</b>${opciones.unidad ? " " + opciones.unidad : ""}<extra></extra>`,
+      hovertemplate: "%{customdata}: <b>%{x:,}</b> registros<extra></extra>",
     };
     const layout = baseLayout({
       margin: { l: 10, r: 40, t: 8, b: 30 }, bargap: 0.35,
@@ -615,9 +769,9 @@
   function barrasV(div, x, y, color, opciones = {}) {
     if (!y.length || !y.some((v) => v > 0)) return vacio(div);
     const traza = {
-      type: "bar", x: x.map(String), y, marker: { color }, text: y.map(fmt), textposition: "outside", cliponaxis: false,
+      type: "bar", x: x.map(String), y, marker: marcador(color), text: y.map(fmt), textposition: "outside", cliponaxis: false,
       textfont: { color: TINTA, size: 10 },
-      hovertemplate: `${opciones.prefijo || ""}%{x}${opciones.sufijo || ""}: <b>%{y:,}</b><extra></extra>`,
+      hovertemplate: `${opciones.prefijo || ""}%{x}${opciones.sufijo || ""}: <b>%{y:,}</b> registros<extra></extra>`,
     };
     const layout = baseLayout({
       margin: { l: 56, r: 16, t: 20, b: 48 }, bargap: 0.3,
@@ -632,9 +786,9 @@
     if (!valores.some((v) => v > 0)) return vacio(div);
     const traza = {
       type: "pie", hole: 0.55, labels: etiquetas, values: valores, sort: false, direction: "clockwise",
-      marker: { colors: colores, line: { color: "#FFFFFF", width: 2 } },
+      marker: { colors: colores, line: { color: colores.map((c) => (c === AMARILLO ? OCRE : "#FFFFFF")), width: 2 } },
       texttemplate: "<b>%{label}</b><br>%{percent:.1%}", textposition: "outside", textfont: { color: TINTA, size: 11 },
-      hovertemplate: "%{label}: <b>%{value:,}</b> (%{percent:.1%})<extra></extra>",
+      hovertemplate: "%{label}: <b>%{value:,}</b> registros (%{percent:.1%})<extra></extra>",
     };
     const total = valores.reduce((a, b) => a + b, 0);
     const layout = baseLayout({
@@ -647,42 +801,52 @@
 
   function plotly(div, trazas, layout) { limpiarVacio(div); Plotly.react(div, trazas, baseLayout(layout), CONFIG_PLOTLY); }
 
-  // ── Selector de campos CINE para la gráfica de evolución ──────────────────
-  // Estilos del selector CINE (máximo 10 campos): los 8 colores de la paleta y, del 9.º en adelante, los primeros
-  // colores con línea punteada (misma regla que asignarColores).
-  const ESTILOS_CINE = [...CATEGORICA.map((color) => ({ color, dash: "solid" })),
-    ...CATEGORICA.slice(0, 2).map((color) => ({ color, dash: "dash" }))];
-
+  // ── Gráfica de evolución por campo de CINE específico ─────────────────────
+  /**
+   * Controla las series de la gráfica de evolución por campo de CINE específico (todas con línea continua).
+   * Su desplegable jerárquico (campo amplio → campo específico, con búsqueda en ambos niveles) y el del filtro
+   * superior comparten la misma selección: marcar o desmarcar en uno se refleja en el otro y en toda la página.
+   * Con TODOS marcado la gráfica muestra los CINE_DEFECTO campos con más registros; con una selección, esos campos
+   * (los de más registros si son más de MAX_SERIES). Cada campo conserva su color mientras se muestre.
+   */
+  const CINE_DEFECTO = 10;
   class SelectorCine {
-    constructor(cont, opcionesOrdenadas, porDefecto, alCambiar) {
-      this.sel = [...porDefecto].slice(0, ESTILOS_CINE.length); this.alCambiar = alCambiar; this.max = ESTILOS_CINE.length;
-      this.colores = {};
-      this.sel.forEach((v, i) => (this.colores[v] = ESTILOS_CINE[i]));
-      cont.innerHTML = `<div class="cine-ctrl"><select aria-label="Buscar Campo De CINE Detallado"><option value="">Buscar Campo De CINE Detallado</option>
-        ${opcionesOrdenadas.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>
-        <button type="button" class="btn btn-primario">AGREGAR</button></div><div class="chips"></div>`;
-      this.select = cont.querySelector("select"); this.chips = cont.querySelector(".chips");
-      cont.querySelector("button").addEventListener("click", () => {
-        const v = this.select.value;
-        if (!v || this.sel.includes(v)) return;
-        if (this.sel.length >= this.max) { alert(`Máximo ${this.max} campos a la vez. Quite uno para agregar otro.`); return; }
-        const usados = new Set(Object.values(this.colores));
-        this.colores[v] = ESTILOS_CINE.find((e) => !usados.has(e)) || ESTILOS_CINE[0];
-        this.sel.push(v); this.select.value = ""; this.pintar(); this.alCambiar();
+    constructor(cont, filtros) {
+      this.filtros = filtros; this.global = filtros.ms.cine; this.sel = []; this.colores = {};
+      cont.innerHTML = '<div class="cine-ctrl"></div><div class="chips"></div>';
+      this.chips = cont.querySelector(".chips");
+      this.selector = selectorCineJerarquico(() => {
+        this.global.sel = new Set(this.selector.sel); this.global.refrescar(); this.filtros.notificar();
       });
+      cont.querySelector(".cine-ctrl").appendChild(this.selector.el);
+    }
+    /** Alinea el desplegable de la gráfica con el filtro superior y recalcula las series; `volumen`: Map campo → registros. */
+    fijar(volumen) {
+      const g = this.global, filtrado = g.activo, v = (c) => volumen.get(c) || 0;
+      this.selector.sel = new Set(g.sel); this.selector.refrescar();
+      const base = [...g.sel].filter((c) => filtrado || v(c) > 0).sort((a, b) => v(b) - v(a) || alfabetico(a, b));
+      this.sel = base.slice(0, filtrado ? MAX_SERIES : CINE_DEFECTO);
+      // Colores estables: cada campo conserva el suyo mientras se muestre; los nuevos toman el primero libre
+      const usados = new Set();
+      Object.keys(this.colores).forEach((c) => { if (this.sel.includes(c)) usados.add(this.colores[c]); else delete this.colores[c]; });
+      this.sel.forEach((c) => { if (!this.colores[c]) { this.colores[c] = CATEGORICA.find((k) => !usados.has(k)) || CATEGORICA[0]; usados.add(this.colores[c]); } });
       this.pintar();
     }
+    /** Color de línea del campo. */
+    colorDe(campo) { return this.colores[campo]; }
+    /** Quita un campo de la selección compartida (la × de su etiqueta). */
+    quitar(campo) {
+      this.global.sel = new Set([...this.global.sel].filter((c) => c !== campo));
+      this.global.refrescar(); this.filtros.notificar();
+    }
     pintar() {
-      const muestra = (e) => (e.dash === "solid" ? `background:${e.color}` : `border:2px dashed ${e.color};background:transparent`);
-      this.chips.innerHTML = this.sel.map((v) => `<span class="chip"><i style="${muestra(this.colores[v])}"></i>${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="Quitar ${esc(v)}">×</button></span>`).join("");
-      this.chips.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-        this.sel = this.sel.filter((x) => x !== b.dataset.v); delete this.colores[b.dataset.v]; this.pintar(); this.alCambiar();
-      }));
+      this.chips.innerHTML = [...this.sel].sort(alfabetico).map((v) => `<span class="chip"><i style="background:${this.colores[v]}"></i>${esc(v)}<button type="button" data-v="${esc(v)}" aria-label="Quitar ${esc(v)}">×</button></span>`).join("");
+      this.chips.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => this.quitar(b.dataset.v)));
     }
   }
 
   // ── Tabla: orden por tipo de dato, paginación y exportación a Parquet ─────
-  const COLS_FECHA = new Set(["FECHA_DE_OBTENCION", "FECHA_DE_RESOLUCION", "FECHA_EJECUTORIA", "FECHA_DE_REGISTRO_EN_SNIES", "VIGENCIA_TRANSITORIA", "REACTIVADO_POSTERIORMENTE"]);
+  const COLS_FECHA = new Set(["FECHA_DE_OBTENCION", "FECHA_DE_RESOLUCION", "FECHA_EJECUTORIA", "FECHA_DE_REGISTRO_EN_SNIES", "VIGENCIA_TRANSITORIA"]);
   const esFecha = (c) => COLS_FECHA.has(c) || c.startsWith("FECHA_");
   const encabezado = (c) => c.replace(/_/g, " ");
   const NUMERO_TEXTO = /^-?\d+(?:[.,]\d+)?$/;
@@ -736,7 +900,7 @@
       this.archivo = archivo; this.porPagina = porPagina;
       this.orden = { col: "FECHA_DE_OBTENCION", asc: false }; this.pagina = 0; this.filas = []; this.tipos = {};
       this.cont = cont;
-      cont.innerHTML = `<div class="tabla-cab"><span class="kpi-s" data-n aria-live="polite"></span><button type="button" class="btn btn-primario" data-pq>DESCARGAR PARQUET</button></div>
+      cont.innerHTML = `<div class="tabla-cab"><span class="kpi-s" data-n aria-live="polite"></span><button type="button" class="btn btn-primario" data-pq>DESCARGAR</button></div>
         <div class="tabla-env"><table class="datos"><thead><tr></tr></thead><tbody></tbody></table></div>
         <div class="paginacion"><button type="button" class="btn" data-p="-1">ANTERIOR</button><span data-pag></span><button type="button" class="btn" data-p="1">SIGUIENTE</button></div>`;
       this.thead = cont.querySelector("thead tr"); this.tbody = cont.querySelector("tbody");
@@ -806,11 +970,14 @@
       if (!this.filas.length) { alert("No hay registros para descargar con los filtros seleccionados."); return; }
       boton.disabled = true; boton.textContent = "GENERANDO...";
       try {
-        const { parquetWriteBuffer } = await import("hyparquet-writer");
+        const { parquetWriteBuffer, schemaFromColumnData } = await import("hyparquet-writer");
+        const esquema = {};
         const columnData = this.columnas.map((c) => {
           const tipo = this.tipos[c];
           if (tipo === "fecha") {
-            return { name: c, type: "TIMESTAMP", data: this.filas.map((r) => { const t = valorFecha(r[c]); return t == null ? null : new Date(t); }) };
+            // Fechas sin hora: columna de tipo fecha (DATE), igual que FECHA_DE_OBTENCION en los archivos de Historico/ y Novedades/
+            esquema[c] = { name: c, type: "INT32", converted_type: "DATE", logical_type: { type: "DATE" }, repetition_type: "OPTIONAL" };
+            return { name: c, data: this.filas.map((r) => { const t = valorFecha(r[c]); return t == null ? null : new Date(t); }) };
           }
           if (tipo === "numero") {
             const data = this.filas.map((r) => valorNumero(r[c]));
@@ -819,7 +986,9 @@
           }
           return { name: c, type: "STRING", data: this.filas.map((r) => (r[c] == null || r[c] === "" ? null : String(r[c]))) };
         });
-        const buffer = parquetWriteBuffer({ columnData });
+        // Con esquema explícito las columnas no llevan tipo: se deduce el esquema (con las fechas como DATE) y se escriben los datos
+        const schema = schemaFromColumnData({ columnData, schemaOverrides: esquema });
+        const buffer = parquetWriteBuffer({ columnData: columnData.map(({ type, ...columna }) => columna), schema });
         const enlace = document.createElement("a");
         enlace.href = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.apache.parquet" }));
         enlace.download = `${this.archivo} ${C.ultima_ejecucion}.parquet`;
@@ -827,9 +996,9 @@
         setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
       } catch (e) {
         console.error(e);
-        alert("No se pudo generar el archivo Parquet: " + e.message);
+        alert("No se pudo generar el archivo de descarga: " + e.message);
       } finally {
-        boton.disabled = false; boton.textContent = "DESCARGAR PARQUET";
+        boton.disabled = false; boton.textContent = "DESCARGAR";
       }
     }
   }
@@ -856,14 +1025,43 @@
     registros.forEach((r) => { const k = r[campo]; if (k == null || k === "") return; m.set(k, (m.get(k) || 0) + 1); });
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }
-  /** Series por categoría con colores estables según `orden` (lista completa de valores posibles). */
-  function seriesPorCategoria(mapa, orden, colores) {
-    return orden.filter((k) => mapa[k] && mapa[k].some((v) => v > 0)).map((k) => ({ nombre: k, valores: mapa[k], color: colores[k].color, dash: colores[k].dash }));
+  /** Series por categoría con colores estables según `orden` (lista completa de valores posibles); `etiquetas` cambia el nombre visible. */
+  function seriesPorCategoria(mapa, orden, colores, etiquetas = {}) {
+    return orden.filter((k) => mapa[k] && mapa[k].some((v) => v > 0)).map((k) => ({ nombre: etiquetas[k] || k, valores: mapa[k], color: colores[k].color, dash: colores[k].dash }));
+  }
+
+  // ── Rango temporal de las gráficas ────────────────────────────────────────
+  /** Primera fecha (AAAA-MM-DD) con algún registro; vacío si no hay registros. Las gráficas de una métrica empiezan ahí. */
+  function primeraFecha(registros) {
+    let min = null;
+    registros.forEach((r) => { const f = r.FECHA_DE_OBTENCION; if (f && (min === null || f < min)) min = f; });
+    return min;
+  }
+  /** Fechas de la lista desde `inicio` en adelante; sin `inicio` (la métrica no tiene datos) no queda ninguna. */
+  const desdeFecha = (lista, inicio) => (inicio ? lista.filter((f) => f >= inicio) : []);
+
+  /**
+   * Opciones del filtro de programas académicos: un programa por CODIGO_SNIES_DEL_PROGRAMA, con su nombre e
+   * institución más recientes (`recencia(r)`: valor mayor = registro más reciente). Retorna { opciones, etiquetas }.
+   */
+  function opcionesProgramas(registros, recencia = (r) => r.FECHA_DE_OBTENCION || "") {
+    const limpio = (s) => String(s ?? "").replace(/[\s-]+$/, "");
+    const mejor = new Map();
+    registros.forEach((r) => {
+      const c = r.CODIGO_SNIES_DEL_PROGRAMA;
+      if (c == null || c === "") return;
+      const k = String(c), rec = recencia(r), previo = mejor.get(k);
+      if (!previo || rec >= previo.rec) mejor.set(k, { rec, r });
+    });
+    const etiquetas = {};
+    mejor.forEach(({ r }, k) => { etiquetas[k] = `${limpio(r.NOMBRE_DEL_PROGRAMA)} · ${limpio(r.NOMBRE_INSTITUCION)} (${k})`; });
+    return { opciones: [...mejor.keys()], etiquetas };
   }
 
   window.App = {
-    C, CAT, ESTADO, CATEGORICA, GRIS, SECTOR_COLOR, ROJO, AMARILLO, NEGRO, fmt, fmtFecha, plural, variacion, esc, normalizar,
+    C, CAT, ESTADO, CATEGORICA, MAX_SERIES, GRIS, SECTOR_COLOR, colorSector, ROJO, AMARILLO, NEGRO, OCRE, colorLinea, marcador, TINTA, TINTA2, fmt, fmtFecha, plural, variacion, esc, normalizar,
     decodificar, derivar, asignarColores, Filtros, SelectorCine, Tabla, lineas, barrasH, barrasV, torta, plotly, vacio,
     contarPorFecha, contar, seriesPorCategoria, ejeMeses, ejeEntero, grupoModalidad, valorFecha, tipoColumna,
+    primeraFecha, desdeFecha, opcionesProgramas, etqModalidad, etiquetasModalidad,
   };
 })();

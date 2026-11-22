@@ -8,6 +8,10 @@ Los valores de los datos vienen normalizados por ETL-PROGRAMAS-SNIES (mayúscula
 from __future__ import annotations
 
 # ── Universidades ─────────────────────────────────────────────────────────────
+# Los grupos se definen por el código de la institución PADRE (CODIGO_INSTITUCION_PADRE): las seccionales y sedes
+# (por ejemplo, Universidad Libre o Javeriana Cali) quedan en el mismo grupo que su institución principal.
+COL_INSTITUCION = "CODIGO_INSTITUCION"
+COL_PADRE = "CODIGO_INSTITUCION_PADRE"
 UNINORTE = 1713
 MAYOR_INTERES = (2704, 1714, 2810, 1701, 1711, 1813, 1712, 1806, 1706, 1828, 1728, 2805)
 
@@ -17,10 +21,10 @@ GRUPO_OTRAS = "OTRAS UNIVERSIDADES"
 GRUPOS_UNIVERSIDAD = (GRUPO_UNINORTE, GRUPO_MAYOR_INTERES, GRUPO_OTRAS)
 
 
-def grupo_universidad(codigo_institucion) -> str:
-    """Grupo de universidades de una institución según su código SNIES; un código vacío o no numérico cuenta como "otras"."""
+def grupo_universidad(codigo_institucion_padre) -> str:
+    """Grupo de universidades según el código SNIES de la institución padre; un código vacío o no numérico cuenta como "otras"."""
     try:
-        codigo = int(codigo_institucion)
+        codigo = int(codigo_institucion_padre)
     except (TypeError, ValueError):
         return GRUPO_OTRAS
     if codigo == UNINORTE:
@@ -28,6 +32,12 @@ def grupo_universidad(codigo_institucion) -> str:
     if codigo in MAYOR_INTERES:
         return GRUPO_MAYOR_INTERES
     return GRUPO_OTRAS
+
+
+def grupos_de_registros(registros):
+    """Grupo de universidades de cada registro de una tabla, por CODIGO_INSTITUCION_PADRE (o por CODIGO_INSTITUCION si la tabla no lo trae)."""
+    col = COL_PADRE if COL_PADRE in registros.columns else COL_INSTITUCION
+    return registros[col].map(grupo_universidad)
 
 
 # ── Modalidades (solo para gráficas y filtros; las tablas conservan el valor original) ──

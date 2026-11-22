@@ -3,15 +3,14 @@ send_report.py
 --------------
 Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail).
 
-- Sin emojis ni archivos adjuntos: el detalle completo está en el Dashboard.
+- Sin emojis ni archivos adjuntos (solo el logotipo institucional, incrustado): el detalle completo está en el Dashboard.
 - Dos versiones del mismo contenido (multipart/alternative): texto plano y HTML.
 - Mismo lenguaje visual del Dashboard. Orden: encabezado con el acceso al Dashboard, indicadores, resumen
-  descriptivo de la ejecución (variación frente a la ejecución anterior y programas activos por grupo de
-  universidades) y las secciones NUEVOS, MODIFICADOS e INACTIVOS, con un máximo de 10 registros por tabla.
+  descriptivo de la ejecución (variación frente a la ejecución anterior y novedades por grupo de
+  universidades) y las secciones NUEVOS, MODIFICADOS e INACTIVOS, con todos los registros de la ejecución.
 - Orden de los registros: primero la Universidad del Norte, luego las Universidades de Mayor Interés y
-  después las demás instituciones, hasta completar 10. Bajo cada tabla, una nota indica las novedades de la
-  Universidad del Norte y de las Universidades de Mayor Interés y, si la tabla no alcanza a mostrar todos los
-  registros, remite al Dashboard (sección filtrada por la fecha de la ejecución).
+  después las demás instituciones, cada grupo por institución y programa. Bajo cada tabla, una nota indica
+  las novedades de la Universidad del Norte y de las Universidades de Mayor Interés.
 - La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor.
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
@@ -30,6 +29,7 @@ import ssl
 import sys
 import textwrap
 from datetime import date
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
@@ -39,7 +39,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalogos import (  # noqa: E402
-    GRUPO_MAYOR_INTERES, GRUPO_UNINORTE, TIPOS_CAMBIO_ETIQUETA, grupo_universidad,
+    GRUPO_MAYOR_INTERES, GRUPO_UNINORTE, GRUPOS_UNIVERSIDAD, TIPOS_CAMBIO_ETIQUETA, grupos_de_registros,
 )
 
 # Hijo del logger del orquestador: los mensajes del correo quedan en el log consolidado.
@@ -48,44 +48,50 @@ log = logging.getLogger("snies_monitor.correo")
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 DASHBOARD_URL = "https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/"
-MAX_FILAS = 10
 
 # Identidad visual
 # Paleta institucional Universidad del Norte
-NEGRO, ROJO, AMARILLO, GRIS, BORDE = "#000000", "#BE0000", "#FFB700", "#F5F5F5", "#E5E5E5"
-TEXTO2, TEXTO3 = "#4D4D4D", "#6B6B6B"   # textos secundarios del Dashboard (--texto-2 y --texto-3)
-ESTADO = {"nuevos": "#1E8E5A", "modificados": "#F28C00", "inactivos": "#BE0000"}  # validados para daltonismo
+# Paleta institucional (BRANDBOOK_UNINORTE, códigos HEX impresos), idéntica a la del Dashboard (estilos.css)
+NEGRO, ROJO, AMARILLO, GRIS, BORDE = "#151515", "#960A11", "#FFCC00", "#F5F5F5", "#E5E5E5"
+TEXTO2, TEXTO3 = "#3E4751", "#6B6B6B"   # textos secundarios del Dashboard (--texto-2 y --texto-3)
+ESTADO = {"nuevos": "#1E8E5A", "modificados": "#FFCC00", "inactivos": "#960A11"}  # el correo no tiene líneas: solo rellenos
 FUENTE = "Montserrat, 'Segoe UI', Arial, sans-serif"
 
-# Columnas comunes de las tres tablas (los modificados agregan el tipo de cambio y el cambio detectado)
-COLUMNAS_BASE = [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
-                     ("MODALIDAD", "MODALIDAD"), ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"),
-                     ("DIVISION_UNINORTE", "DIVISIÓN UNINORTE")]
+# Logotipo institucional (versión blanca para el encabezado negro). Va incrustado en el mensaje (Content-ID) y no
+# enlazado: se ve sin descargar imágenes remotas y no requiere que el Dashboard esté publicado.
+LOGO = Path(__file__).resolve().parent.parent / "docs" / "assets" / "img" / "logo-uninorte-blanco.png"
+LOGO_CID = "logo-uninorte"
+
+# Columnas de las tablas: las comunes (institución, programa, municipio y modalidad) y la división de Uninorte
+# al final; nuevos y modificados agregan entre ambas el tipo de novedad o el tipo y detalle del cambio.
+_INICIO = [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
+           ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"), ("MODALIDAD", "MODALIDAD")]
+_FINAL = [("DIVISION_UNINORTE", "DIVISIÓN DE UNINORTE")]
 
 SECCIONES = {
     "nuevos": {
         "titulo": "PROGRAMAS ACADÉMICOS NUEVOS",
         "descripcion": "Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados).",
         "vacio": "No se detectaron programas nuevos en esta ejecución.",
-        "unidad": ("programa nuevo", "programas nuevos"),
+        "unidad": ("registro", "registros"),
         "pagina": "nuevos.html",
-        "columnas": COLUMNAS_BASE,
+        "columnas": _INICIO + [("TIPO_NOVEDAD", "TIPO DE NOVEDAD")] + _FINAL,
     },
     "modificados": {
         "titulo": "PROGRAMAS ACADÉMICOS MODIFICADOS",
         "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad.",
         "vacio": "No se detectaron cambios en los programas activos en esta ejecución.",
-        "unidad": ("cambio", "cambios"),
+        "unidad": ("registro", "registros"),
         "pagina": "modificados.html",
-        "columnas": COLUMNAS_BASE + [("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")],
+        "columnas": _INICIO + [("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")] + _FINAL,
     },
     "inactivos": {
         "titulo": "PROGRAMAS ACADÉMICOS INACTIVOS",
         "descripcion": "Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES.",
         "vacio": "No se detectaron programas inactivos en esta ejecución.",
-        "unidad": ("programa inactivo", "programas inactivos"),
+        "unidad": ("registro", "registros"),
         "pagina": "inactivos.html",
-        "columnas": COLUMNAS_BASE,
+        "columnas": _INICIO + _FINAL,
     },
 }
 
@@ -94,16 +100,15 @@ SECCIONES = {
 
 def seleccionar(df: pd.DataFrame | None) -> pd.DataFrame:
     """
-    Registros a mostrar en la tabla de una sección (máximo MAX_FILAS): primero la Universidad del Norte, luego
-    las Universidades de Mayor Interés y después las demás instituciones, cada grupo en orden alfabético por
-    institución y programa.
+    Registros de la tabla de una sección, todos ellos: primero la Universidad del Norte, luego las Universidades
+    de Mayor Interés y después las demás instituciones, cada grupo en orden alfabético por institución y programa.
     """
     if df is None or df.empty:
         return pd.DataFrame()
-    grupos = df["CODIGO_INSTITUCION"].map(grupo_universidad)
+    grupos = grupos_de_registros(df)
     prioridad = grupos.map({GRUPO_UNINORTE: 0, GRUPO_MAYOR_INTERES: 1}).fillna(2)
     orden = ["_P", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA"]
-    return df.assign(_P=prioridad.values).sort_values(orden, kind="stable").head(MAX_FILAS).drop(columns="_P")
+    return df.assign(_P=prioridad.values).sort_values(orden, kind="stable").drop(columns="_P")
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -121,6 +126,9 @@ def _num(v) -> str:
 def _fecha(d) -> str:
     """Fecha en formato DD/MM/AAAA."""
     return d.strftime("%d/%m/%Y")
+
+
+PROGRAMA_DISTINTO = ("programa distinto", "programas distintos")   # los registros de Modificados pueden repetir un programa
 
 
 def _plural(n: int, singular: str, plural: str) -> str:
@@ -158,25 +166,39 @@ def _subtitulo(texto: str) -> str:
     return f'<p style="margin:4px 0 10px;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};">{texto}</p>'
 
 
-def _tabla(df: pd.DataFrame, columnas, numericas=()) -> str:
-    """Tabla HTML con encabezado negro; `columnas` = [(campo, encabezado)] y `numericas` las columnas alineadas a la derecha."""
-    # Tablas de más de 5 columnas (modificados): letra y márgenes algo menores para que quepan en el ancho del correo
-    compacta = len(columnas) > 5
-    letra_th, letra_td, margen = ("10px", "11px", "6px") if compacta else ("11px", "12px", "10px")
+# Estilo de las celdas de las tablas (clases del bloque <style> del correo): mismo tipo de letra, tamaños, márgenes,
+# borde y color que las tablas del Dashboard (docs/assets/estilos.css, table.datos).
+ESTILO_TABLAS = (
+    f".tabla .c {{ font-family: {FUENTE}; font-size: 12px; color: {NEGRO}; padding: 7px 10px; border-bottom: 1px solid {BORDE}; vertical-align: top; text-align: left; }}\n"
+    "  .tabla.compacta .c { font-size: 11px; padding: 7px 6px; }\n"
+    "  .tabla .n { text-align: right; white-space: nowrap; }\n"
+    "  .tabla .b { font-weight: 800; }")
+
+
+def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> str:
+    """
+    Tabla HTML con encabezado negro; `columnas` = [(campo, encabezado)] y `numericas` las columnas alineadas a la
+    derecha. Con `negrita_ultima`, la última fila (total) se muestra en negrita.
+    """
+    # Tablas de novedades (5 o más columnas): letra y márgenes algo menores para que quepan en el ancho del correo;
+    # las tres usan el mismo tamaño aunque difieran en número de columnas
+    compacta = len(columnas) >= 5
+    letra_th, margen = ("10px", "6px") if compacta else ("11px", "10px")
     th = (f"background:{NEGRO};color:#FFFFFF;font-family:{FUENTE};font-size:{letra_th};font-weight:700;"
           f"letter-spacing:.04em;padding:9px {margen};")
     alinear = lambda c: "right" if c in numericas else "left"  # noqa: E731
     cab = "".join(f'<th style="{th}text-align:{alinear(c)};">{escape(t)}</th>' for c, t in columnas)
+    # Las celdas usan clases del bloque <style> (ver ESTILO_TABLAS) y el color de fondo como atributo: sin límite de
+    # filas, repetir los estilos en cada celda superaría los 102 KB a partir de los cuales Gmail recorta el mensaje.
     filas = []
     for i, (_, r) in enumerate(df.iterrows()):
         fondo = "#FFFFFF" if i % 2 == 0 else "#FAFAFA"
-        td = (f"background:{fondo};font-family:{FUENTE};font-size:{letra_td};color:{NEGRO};padding:7px {margen};"
-              f"border-bottom:1px solid {BORDE};vertical-align:top;")
+        total = negrita_ultima and i == len(df) - 1
         filas.append("<tr>" + "".join(
-            f'<td style="{td}text-align:{alinear(c)};{"white-space:nowrap;" if c in numericas else ""}">'
+            f'<td class="c{" n" if c in numericas else ""}{" b" if total else ""}" bgcolor="{fondo}">'
             f'{escape(_texto(c, r.get(c)))}</td>' for c, _ in columnas) + "</tr>")
     # En pantallas angostas la tabla se desplaza dentro de su tarjeta, sin ensanchar el resto del correo
-    return (f'<div style="overflow-x:auto;"><table class="tabla" role="presentation" width="100%" cellpadding="0" '
+    return (f'<div style="overflow-x:auto;"><table class="tabla{" compacta" if compacta else ""}" role="presentation" width="100%" cellpadding="0" '
             f'cellspacing="0" style="border-collapse:collapse;border:1px solid {BORDE};margin:4px 0;">'
             f"<thead><tr>{cab}</tr></thead><tbody>{''.join(filas)}</tbody></table></div>")
 
@@ -199,7 +221,7 @@ def _frases_resumen(res: dict, fecha: date, negrita=lambda t: t) -> list[str]:
     frases = [f"El {_fecha(fecha)} se descargó del SNIES el reporte de programas académicos universitarios de "
               "pregrado con estado activo en Colombia."]
     if activos is not None:
-        frase = f"Se identificaron {negrita(_plural(activos, 'programa activo', 'programas activos'))}"
+        frase = f"Se identificaron {negrita(_plural(activos, 'registro activo', 'registros activos'))}"
         if antes is not None and f_ant is not None:
             d = activos - antes
             frase += (f", la misma cifra de la ejecución anterior ({_fecha(f_ant)})" if d == 0 else
@@ -210,78 +232,62 @@ def _frases_resumen(res: dict, fecha: date, negrita=lambda t: t) -> list[str]:
         frases.append("No se detectaron programas nuevos, modificados ni inactivos.")
     else:
         frases.append(
-            f"Novedades detectadas: {_plural(n['nuevos'], 'programa nuevo', 'programas nuevos')}, "
-            f"{_plural(n['modificados'], 'cambio', 'cambios')} en "
-            f"{_plural(prog_mod, 'programa modificado', 'programas modificados')} y "
-            f"{_plural(n['inactivos'], 'programa inactivo', 'programas inactivos')}.")
-        grupos = pd.concat([res[t]["CODIGO_INSTITUCION"] for t in n if n[t]]).map(grupo_universidad)
+            f"Novedades detectadas: {_plural(n['nuevos'], 'registro nuevo', 'registros nuevos')}, "
+            f"{_plural(n['modificados'], 'registro modificado', 'registros modificados')}"
+            f"{f' (de {_plural(prog_mod, *PROGRAMA_DISTINTO)})' if n['modificados'] else ''} y "
+            f"{_plural(n['inactivos'], 'registro inactivo', 'registros inactivos')}.")
+        grupos = pd.concat([grupos_de_registros(res[t]) for t in n if n[t]])
         uni, mi = int((grupos == GRUPO_UNINORTE).sum()), int((grupos == GRUPO_MAYOR_INTERES).sum())
         frases.append(f"De estas novedades, {_num(uni)} corresponde{'' if uni == 1 else 'n'} a la Universidad del Norte "
                       f"y {_num(mi)} a las Universidades de Mayor Interés.")
     return frases
 
 
-def _grupos(res: dict, fecha: date):
-    """Programas activos por grupo de universidades: (columnas, filas) o None si no hay datos."""
-    hoy_g, antes_g, f_ant = res.get("activos_grupo"), res.get("activos_grupo_anterior"), res.get("fecha_anterior")
-    if not hoy_g:
-        return None
-    con_anterior = bool(antes_g) and f_ant is not None
-    cols = [("GRUPO", "GRUPO DE UNIVERSIDADES")]
-    if con_anterior:
-        cols.append(("ANTES", f"EJECUCIÓN ANTERIOR ({_fecha(f_ant)})"))
-    cols += [("HOY", f"ESTA EJECUCIÓN ({_fecha(fecha)})"), ("VAR", "VARIACIÓN")]
-    filas = pd.DataFrame([{"GRUPO": g, "ANTES": _num(antes_g.get(g, 0)) if con_anterior else None, "HOY": _num(v),
-                           "VAR": _variacion(v, antes_g.get(g, 0) if con_anterior else None)}
-                          for g, v in hoy_g.items()])
-    return cols, filas
+def _grupos(res: dict):
+    """
+    Novedades de la ejecución por grupo de universidades (nuevos, modificados e inactivos) y su total:
+    (columnas, filas). Los modificados cuentan registros de cambio detectado, igual que el indicador MODIFICADOS.
+    """
+    cols = [("GRUPO", "GRUPO DE UNIVERSIDADES"), ("NUEVOS", "NUEVOS"), ("MODIFICADOS", "MODIFICADOS"), ("INACTIVOS", "INACTIVOS")]
+    conteos = {}
+    for tipo in ("nuevos", "modificados", "inactivos"):
+        df = res.get(tipo)
+        grupos = pd.Series(dtype=object) if df is None or df.empty else grupos_de_registros(df)
+        conteos[tipo.upper()] = {g: int((grupos == g).sum()) for g in GRUPOS_UNIVERSIDAD}
+    filas = [{"GRUPO": g, **{t: _num(c[g]) for t, c in conteos.items()}} for g in GRUPOS_UNIVERSIDAD]
+    filas.append({"GRUPO": "TOTAL", **{t: _num(sum(c.values())) for t, c in conteos.items()}})
+    return cols, pd.DataFrame(filas)
 
 
 def _resumen(res: dict, fecha: date) -> str:
-    """Resumen descriptivo de la ejecución: activos, variación, novedades y programas activos por grupo."""
+    """Resumen descriptivo de la ejecución: activos, variación, novedades y novedades por grupo de universidades."""
+    columnas, filas = _grupos(res)
     contenido = _titulo("RESUMEN DE LA EJECUCIÓN") + _subtitulo(" ".join(_frases_resumen(res, fecha, lambda t: f"<b>{t}</b>")))
-    grupos = _grupos(res, fecha)
-    if grupos:
-        contenido += (_titulo("PROGRAMAS ACTIVOS POR GRUPO DE UNIVERSIDADES", 14)
-                      + _tabla(grupos[1], grupos[0], numericas=("ANTES", "HOY", "VAR")))
+    contenido += (_titulo("NOVEDADES POR GRUPO DE UNIVERSIDADES", 14)
+                  + _subtitulo("Registros nuevos, modificados e inactivos de esta ejecución.")
+                  + _tabla(filas, columnas, numericas=("NUEVOS", "MODIFICADOS", "INACTIVOS"), negrita_ultima=True))
     return _tarjeta(contenido)
 
 
 def _descripcion(tipo: str, df: pd.DataFrame | None) -> str:
-    """Descripción de una sección; en Modificados agrega el número de cambios y de programas de la ejecución."""
+    """Descripción de una sección; en Modificados agrega el número de registros de la ejecución."""
     descripcion = SECCIONES[tipo]["descripcion"]
     if tipo == "modificados" and df is not None and len(df):
-        descripcion += (f" En esta ejecución: {_plural(len(df), 'cambio', 'cambios')} en "
-                        f"{_plural(df['CODIGO_SNIES_DEL_PROGRAMA'].nunique(), 'programa', 'programas')}.")
+        descripcion += (f" En esta ejecución: {_plural(len(df), 'registro', 'registros')} de "
+                        f"{_plural(df['CODIGO_SNIES_DEL_PROGRAMA'].nunique(), *PROGRAMA_DISTINTO)}.")
     return descripcion
 
 
-def _notas(tipo: str, df: pd.DataFrame) -> tuple[list[tuple[str, int]], int]:
-    """
-    Datos de las notas bajo la tabla de una sección: novedades de la Universidad del Norte y de las Universidades
-    de Mayor Interés [(grupo, cantidad)] y número de registros que no caben en la tabla (0 si caben todos).
-    """
-    grupos = df["CODIGO_INSTITUCION"].map(grupo_universidad)
-    interes = [(GRUPO_UNINORTE, int((grupos == GRUPO_UNINORTE).sum())),
-               (GRUPO_MAYOR_INTERES, int((grupos == GRUPO_MAYOR_INTERES).sum()))]
-    return interes, max(len(df) - MAX_FILAS, 0)
-
-
-def _texto_notas(tipo: str, df: pd.DataFrame, negrita=lambda t: t, enlace=lambda t: t) -> list[str]:
-    """Frases de las notas bajo la tabla (comunes al HTML y al texto plano)."""
+def _texto_notas(tipo: str, df: pd.DataFrame, negrita=lambda t: t) -> list[str]:
+    """Nota bajo la tabla (común al HTML y al texto plano): novedades de la Universidad del Norte y de las Universidades de Mayor Interés."""
     singular, plural = SECCIONES[tipo]["unidad"]
-    interes, fuera = _notas(tipo, df)
+    grupos = grupos_de_registros(df)
     nombres = {GRUPO_UNINORTE: "Universidad del Norte", GRUPO_MAYOR_INTERES: "Universidades de Mayor Interés"}
-    frases = [" · ".join(f"{negrita(nombres[g] + ':')} {_plural(n, singular, plural)}" for g, n in interes) + "."]
-    if fuera:
-        frases.append(f"La tabla presenta {_num(MAX_FILAS)} de {_num(len(df))} registros, con prioridad para la Universidad "
-                      f"del Norte y las Universidades de Mayor Interés. El detalle completo puede consultarse en el "
-                      f"{enlace('Dashboard')}.")
-    return frases
+    return [" · ".join(f"{negrita(nombres[g] + ':')} {_plural(int((grupos == g).sum()), singular, plural)}" for g in nombres) + "."]
 
 
 def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
-    """Tarjeta HTML de una sección (nuevos, modificados o inactivos): descripción, tabla priorizada y notas."""
+    """Tarjeta HTML de una sección (nuevos, modificados o inactivos): descripción, tabla con todos los registros y notas."""
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
     contenido = _titulo(f"{cfg['titulo']} · {_num(total)}") + _subtitulo(_descripcion(tipo, df))
@@ -289,9 +295,7 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
         contenido += (f'<p style="margin:0;font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
                       f'padding:10px 12px;border-radius:6px;">{cfg["vacio"]}</p>')
         return _tarjeta(contenido, color)
-    url = f'{DASHBOARD_URL}{cfg["pagina"]}#fecha={fecha.isoformat()}'   # sección filtrada por esta ejecución
-    frases = _texto_notas(tipo, df, negrita=lambda t: f'<b style="color:{NEGRO};">{escape(t)}</b>',
-                          enlace=lambda t: f'<a href="{url}" style="color:{ROJO};font-weight:700;">{t}</a>')
+    frases = _texto_notas(tipo, df, negrita=lambda t: f'<b style="color:{NEGRO};">{escape(t)}</b>')
     notas = (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};'
              f'background:{GRIS};padding:10px 12px;border-radius:6px;">{"<br>".join(frases)}</p>')
     return _tarjeta(contenido + _tabla(seleccionar(df), cfg["columnas"]) + notas, color)
@@ -317,7 +321,7 @@ def _indicadores(res: dict, fecha: date) -> list[tuple[str, str, str, str]]:
     prog_mod = 0 if mod is None or mod.empty else mod["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
     return [("PROGRAMAS ACTIVOS", _num(activos) if activos is not None else "–", detalle_activos, NEGRO),
             ("NUEVOS", _num(n(nue)), f"Ejecución del {_fecha(fecha)}", ESTADO["nuevos"]),
-            ("MODIFICADOS", _num(n(mod)), f"Cambios en {_plural(prog_mod, 'programa', 'programas')}", ESTADO["modificados"]),
+            ("MODIFICADOS", _num(n(mod)), f"En {_plural(prog_mod, *PROGRAMA_DISTINTO)}", ESTADO["modificados"]),
             ("INACTIVOS", _num(n(ina)), f"Ejecución del {_fecha(fecha)}", ESTADO["inactivos"])]
 
 
@@ -338,13 +342,10 @@ def construir_texto(resultados: dict, fecha: date) -> str:
               "INDICADORES"]
     lineas += [f"  {e.capitalize()}: {v} ({d})" for e, v, d, _ in _indicadores(res, fecha)]
     lineas += ["", "RESUMEN DE LA EJECUCIÓN", ajustar(" ".join(_frases_resumen(res, fecha)))]
-    grupos = _grupos(res, fecha)
-    if grupos:
-        cols, filas = grupos
-        lineas += ["", "PROGRAMAS ACTIVOS POR GRUPO DE UNIVERSIDADES"]
-        for _, r in filas.iterrows():
-            antes = f"; ejecución anterior: {r['ANTES']}" if r["ANTES"] is not None else ""
-            lineas.append(ajustar(f"{r['GRUPO']}: {r['HOY']}{antes}; variación: {r['VAR']}", "  ", "    "))
+    _, filas = _grupos(res)
+    lineas += ["", "NOVEDADES POR GRUPO DE UNIVERSIDADES"]
+    for _, r in filas.iterrows():
+        lineas.append(ajustar(f"{r['GRUPO']}: nuevos {r['NUEVOS']}; modificados {r['MODIFICADOS']}; inactivos {r['INACTIVOS']}", "  ", "    "))
     for tipo in ("nuevos", "modificados", "inactivos"):
         cfg, df = SECCIONES[tipo], res.get(tipo)
         total = 0 if df is None else len(df)
@@ -356,8 +357,6 @@ def construir_texto(resultados: dict, fecha: date) -> str:
             campos = " | ".join(f"{t}: {_texto(c, r.get(c))}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
             lineas.append(ajustar(f"{i}. {campos}", "  ", "     "))
         lineas += [ajustar(t) for t in _texto_notas(tipo, df)]
-        if len(df) > MAX_FILAS:   # dirección en su propia línea, completa
-            lineas.append(f"Detalle en el Dashboard: {DASHBOARD_URL}{cfg['pagina']}#fecha={fecha.isoformat()}")
     lineas += ["",
                ajustar("Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de "
                        "Educación Nacional · Dirección de Planeación, Universidad del Norte."),
@@ -370,9 +369,12 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
     res = resultados.get("pregrado") or {}
     nue, mod, ina = (res.get(k) for k in ("nuevos", "modificados", "inactivos"))
     kpis = "".join(_kpi(*k) for k in _indicadores(res, fecha))
+    logo = (f'<img src="cid:{LOGO_CID}" width="160" height="55" alt="Universidad del Norte" style="display:block;border:0;'
+            f'height:auto;margin:0 0 14px;font-family:{FUENTE};font-size:13px;font-weight:700;color:#FFFFFF;">') if LOGO.exists() else ""
     return f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
+  {ESTILO_TABLAS}
   /* Pantallas angostas (clientes que admiten estilos incrustados): indicadores en dos columnas, fecha bajo el título
      y tablas más compactas. Los demás clientes muestran el diseño de escritorio. */
   @media (max-width: 600px) {{
@@ -390,7 +392,7 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
   <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td class="enc-titulo" valign="top">
-        <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
+        {logo}<div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">MONITOR SNIES PREGRADO · UNIVERSITARIO</div>
         <div style="font-family:{FUENTE};font-size:13px;color:#D9D9D9;margin-top:4px;">Programas Académicos Universitarios de Pregrado en Colombia</div>
         <a href="{DASHBOARD_URL}" style="display:inline-block;margin-top:14px;background:{ROJO};color:#FFFFFF;font-family:{FUENTE};font-size:12px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:10px 22px;border-radius:8px;">VER DASHBOARD COMPLETO</a>
       </td>
@@ -441,7 +443,15 @@ def enviar_reporte(resultados: dict, fecha: date) -> None:
     msg["To"] = ", ".join(destinatarios)
     # Alternativas en orden de preferencia creciente: texto plano y luego HTML (el cliente muestra la última que admite)
     msg.attach(MIMEText(construir_texto(resultados, fecha), "plain", "utf-8"))
-    msg.attach(MIMEText(construir_cuerpo(resultados, fecha), "html", "utf-8"))
+    # El HTML y el logotipo incrustado van en un multipart/related, que es la alternativa preferida
+    html = MIMEMultipart("related")
+    html.attach(MIMEText(construir_cuerpo(resultados, fecha), "html", "utf-8"))
+    if LOGO.exists():
+        imagen = MIMEImage(LOGO.read_bytes(), "png")
+        imagen.add_header("Content-ID", f"<{LOGO_CID}>")
+        imagen.add_header("Content-Disposition", "inline", filename=LOGO.name)
+        html.attach(imagen)
+    msg.attach(html)
 
     log.info(f"Conectando a {SMTP_HOST}:{SMTP_PORT}...")
     _enviar(msg, remitente, clave, destinatarios)

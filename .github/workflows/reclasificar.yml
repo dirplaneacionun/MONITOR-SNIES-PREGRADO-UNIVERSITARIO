@@ -90,7 +90,15 @@ jobs:
 
           git add -A Historico Novedades docs Logs "Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Revision"
           git commit -m "Reclasificación de divisiones: $(TZ=America/Bogota date +'%Y-%m-%d')"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          # Si alguien publicó cambios mientras corría el flujo, los resultados se rebasan sobre ellos. Con conflicto (mismos
+          # archivos) el paso falla de forma visible y no se publica nada, en lugar de rechazarse el push sin aviso.
+          URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if ! git pull --rebase "$URL" main; then
+            git rebase --abort || true
+            echo "::error::No se pudieron integrar los cambios publicados durante la ejecución (conflicto). Los resultados no se publicaron."
+            exit 1
+          fi
+          git push "$URL" HEAD:main
 
       - name: Alerta técnica por falla
         if: failure()

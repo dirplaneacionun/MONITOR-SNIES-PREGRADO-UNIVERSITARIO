@@ -14,6 +14,10 @@ una ejecución, los grupos anteriores se vuelven a escribir con los mismos bytes
 (alrededor de 0,2 MB por ejecución). Una reclasificación solo cambia las columnas de clasificación, que Git
 también almacena como diferencia.
 
+Fecha de ejecución: FECHA_DE_OBTENCION se guarda como fecha sin hora (tipo date, AAAA-MM-DD) y en memoria se
+trabaja como datetime64 normalizado a la medianoche. migrar_fecha_a_date() convierte los archivos que aún la
+tengan como marca de tiempo.
+
 Tipos de datos: el reporte del SNIES no siempre entrega una columna con el mismo tipo (por ejemplo,
 NUMERO_CREDITOS llega como número en una descarga y como texto en otra, y una columna sin datos llega sin
 tipo). Cada ejecución adopta el esquema del archivo de su año (o, en un año nuevo, el del año anterior) y los
@@ -24,6 +28,7 @@ ejecuciones sean exactas.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import re
 from pathlib import Path
@@ -35,6 +40,7 @@ import pyarrow.parquet as pq
 HISTORICO_DIR = Path(__file__).resolve().parent.parent / "Historico"
 PREFIJO = "Historico Programas Activos"
 COL_FECHA = "FECHA_DE_OBTENCION"
+TIPO_FECHA = pa.date32()   # FECHA_DE_OBTENCION se guarda como fecha (sin hora): AAAA-MM-DD
 COMPRESION = "snappy"   # compatible con pandas, Power BI, Excel (Power Query) y la mayoría de herramientas
 _ARCHIVO_RE = re.compile(rf"^{PREFIJO} (\d{{4}})\.parquet$")
 _ENTERO_DECIMAL = re.compile(r"^-?\d+\.0+$")
@@ -73,6 +79,25 @@ def fechas() -> list[dt.date]:
     return sorted(encontradas)
 
 
+def con_fecha_date(esquema: pa.Schema) -> pa.Schema:
+    """
+    `esquema` con la fecha de ejecución (COL_FECHA) como fecha sin hora (date32) y su anotación de pandas coherente
+    con ese tipo (fecha, no fecha y hora); los demás campos y anotaciones no cambian.
+    """
+    if COL_FECHA not in esquema.names:
+        return esquema
+    if esquema.field(COL_FECHA).type != TIPO_FECHA:
+        esquema = esquema.set(esquema.get_field_index(COL_FECHA), pa.field(COL_FECHA, TIPO_FECHA))
+    bruto = (esquema.metadata or {}).get(b"pandas")
+    if not bruto:
+        return esquema
+    anotacion = json.loads(bruto)
+    for columna in anotacion.get("columns", []):
+        if columna.get("name") == COL_FECHA:
+            columna["pandas_type"], columna["numpy_type"] = "date", "object"
+    return esquema.with_metadata({**esquema.metadata, b"pandas": json.dumps(anotacion).encode()})
+
+
 def _texto(v):
     """Representación textual única de un valor: 180.0 y "180.0" → "180"; vacíos se conservan como nulos."""
     if v is None or (not isinstance(v, str) and pd.isna(v)):
@@ -86,7 +111,7 @@ def _texto(v):
 def alinear(df: pd.DataFrame, esquema_ref: pa.Schema | None) -> pd.DataFrame:
     """
     Ajusta los tipos de `df` a `esquema_ref`: columnas de texto → texto con representación única, columnas de
-    fecha → fecha con la misma precisión y columnas numéricas → número. Las conversiones a fecha y a número
+    fecha → fecha (marca de tiempo con la misma precisión, o fecha sin hora) y columnas numéricas → número. Las conversiones a fecha y a número
     se aplican solo si todos los valores se pueden convertir; si alguno no, la columna no se modifica para no
     perder datos (la escritura posterior falla y la ejecución se detiene con alerta técnica). Las columnas que
     no están en el esquema no cambian.
@@ -104,6 +129,10 @@ def alinear(df: pd.DataFrame, esquema_ref: pa.Schema | None) -> pd.DataFrame:
             fechas_c = pd.to_datetime(df[c], errors="coerce")
             if (fechas_c.isna() == df[c].isna()).all():
                 df[c] = fechas_c.astype(f"datetime64[{tipo.unit}]")
+        elif pa.types.is_date(tipo):   # fecha sin hora: en memoria se trabaja como datetime64 normalizado a la medianoche
+            fechas_c = pd.to_datetime(df[c], errors="coerce")
+            if (fechas_c.isna() == df[c].isna()).all():
+                df[c] = fechas_c.dt.normalize()
         elif pa.types.is_null(tipo):   # columna sin datos en el archivo: se conserva sin tipo si sigue vacía
             if df[c].isna().all():
                 df[c] = pd.Series([None] * len(df), index=df.index, dtype=object)
@@ -142,19 +171,23 @@ def leer(columnas: list[str] | None = None, antes_de: dt.date | None = None,
     los registros de ese año. Con `codigos_snies`, solo los registros de esos programas: el filtro se aplica al
     leer, así que la memoria depende de los programas pedidos y no del tamaño del histórico.
     """
-    filtros = []
-    if codigos_snies is not None:
-        filtros.append(("CODIGO_SNIES_DEL_PROGRAMA", "in", [int(c) for c in codigos_snies]))
-    if antes_de is not None:
-        filtros.append((COL_FECHA, "<", pd.Timestamp(antes_de)))
-    if fecha is not None:
-        filtros.append((COL_FECHA, "==", pd.Timestamp(fecha)))
     partes = []
     for anio, path in archivos():
         if (fecha is not None and anio != fecha.year) or (antes_de is not None and anio > antes_de.year):
             continue   # el año no puede contener las fechas pedidas
-        nombres = pq.read_schema(path).names
+        esquema_archivo = pq.read_schema(path)
+        nombres = esquema_archivo.names
         leidas = None if columnas is None else [c for c in columnas if c in nombres]
+        # El literal de la fecha depende del tipo de la columna en el archivo (fecha sin hora o marca de tiempo)
+        como_fecha = pa.types.is_date(esquema_archivo.field(COL_FECHA).type)
+        literal = (lambda d: pd.Timestamp(d).date()) if como_fecha else pd.Timestamp
+        filtros = []
+        if codigos_snies is not None:
+            filtros.append(("CODIGO_SNIES_DEL_PROGRAMA", "in", [int(c) for c in codigos_snies]))
+        if antes_de is not None:
+            filtros.append((COL_FECHA, "<", literal(antes_de)))
+        if fecha is not None:
+            filtros.append((COL_FECHA, "==", literal(fecha)))
         parte = pq.read_table(path, columns=leidas, filters=filtros or None).to_pandas()
         if len(parte):
             partes.append(parte)
@@ -177,7 +210,11 @@ def leer(columnas: list[str] | None = None, antes_de: dt.date | None = None,
 def leer_anio(anio: int) -> pd.DataFrame:
     """Todas las ejecuciones del año `anio`, con todas sus columnas (vacío si el año no tiene archivo)."""
     path = ruta(anio)
-    return pq.read_table(path).to_pandas() if path.exists() else pd.DataFrame()
+    if not path.exists():
+        return pd.DataFrame()
+    df = pq.read_table(path).to_pandas()
+    df[COL_FECHA] = pd.to_datetime(df[COL_FECHA])
+    return df
 
 
 def ejecucion_anterior(fecha: dt.date) -> tuple[dt.date, pd.DataFrame] | None:
@@ -235,8 +272,8 @@ def guardar_ejecucion(df: pd.DataFrame, fecha: dt.date) -> int:
             archivo = pq.ParquetFile(fh)
             grupos = [archivo.read_row_group(i) for i in range(archivo.num_row_groups)]
         grupos = [g for g in grupos if _fecha_grupo(g) != fecha]
-    esquema_final = _con_extra(referencia, nueva.schema) if referencia is not None else nueva.schema
-    if actual is not None and esquema_final is not actual:
+    esquema_final = con_fecha_date(_con_extra(referencia, nueva.schema) if referencia is not None else nueva.schema)
+    if actual is not None and not esquema_final.equals(actual):
         grupos = [_ajustar(g, esquema_final) for g in grupos]
     grupos.append(_ajustar(nueva, esquema_final))
     grupos.sort(key=_fecha_grupo)
@@ -267,8 +304,28 @@ def reescribir(df: pd.DataFrame) -> None:
         parte_anio = alinear(parte_anio, actual)
         tablas = [pa.Table.from_pandas(parte.reset_index(drop=True), preserve_index=False)
                   for _, parte in parte_anio.sort_values(COL_FECHA, kind="stable").groupby(COL_FECHA, sort=True)]
-        esquema_final = _con_extra(actual, tablas[0].schema) if actual is not None else tablas[0].schema
+        esquema_final = con_fecha_date(_con_extra(actual, tablas[0].schema) if actual is not None else tablas[0].schema)
         grupos = [_ajustar(t, esquema_final) for t in tablas]
         _escribir(path, grupos, esquema_final)
         if actual is None:
             _normalizar_esquema(path, grupos)
+
+
+def migrar_fecha_a_date() -> list[Path]:
+    """
+    Convierte FECHA_DE_OBTENCION de marca de tiempo a fecha sin hora, y corrige su anotación de pandas, en los archivos
+    del histórico que aún no los tienen (conserva el orden y los grupos de filas por ejecución). Es idempotente.
+    Retorna los archivos reescritos.
+    """
+    reescritos = []
+    for _, path in archivos():
+        actual = pq.read_schema(path)
+        final = con_fecha_date(actual)
+        if final.equals(actual, check_metadata=True):
+            continue
+        with open(path, "rb") as fh:   # se cierra antes de reemplazar el archivo (requisito en Windows)
+            archivo = pq.ParquetFile(fh)
+            grupos = [_ajustar(archivo.read_row_group(i), final) for i in range(archivo.num_row_groups)]
+        _escribir(path, grupos, final)
+        reescritos.append(path)
+    return reescritos

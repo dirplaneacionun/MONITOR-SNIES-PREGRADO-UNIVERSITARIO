@@ -134,7 +134,7 @@ def setup_logger(verbose=False, logs_dir=None, max_logs=10):
     if logs_dir:
         try:
             os.makedirs(logs_dir, exist_ok=True)
-            log_path = os.path.join(logs_dir, f"{_LOG_PREFIX}{datetime.now():%Y%m%d_%H%M%S}.log")
+            log_path = os.path.join(logs_dir, f"{_LOG_PREFIX}{datetime.now():%Y-%m-%d_%H-%M-%S}.log")   # mismo formato que monitor_ y etl_
             fh = logging.FileHandler(log_path, encoding="utf-8")
             fh.setLevel(logging.DEBUG)
             fh.setFormatter(_PlainAwareFormatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
