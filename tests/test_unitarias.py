@@ -602,7 +602,8 @@ class TestSeguridadDelSitio(unittest.TestCase):
             self.assertNotIn("unsafe-eval", politica.group(1))
             self.assertNotIn("script-src 'self' 'unsafe-inline'", politica.group(1))
             # El único script en línea es el mapa de importación, autorizado por su huella SHA-256
-            en_linea = re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", html, re.S)
+            # Sin distinguir mayúsculas y con cualquier espacio antes de ">" en la etiqueta de cierre
+            en_linea = re.findall(r"<script(?![^>]*src=)[^>]*>(.*?)</script\s*>", html, re.S | re.I)
             self.assertEqual(len(en_linea), 1)
             huella = "sha256-" + base64.b64encode(hashlib.sha256(en_linea[0].encode()).digest()).decode()
             self.assertIn(f"'{huella}'", politica.group(1))
