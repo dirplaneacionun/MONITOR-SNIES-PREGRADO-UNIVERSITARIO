@@ -17,6 +17,7 @@ import argparse
 import functools
 import http.server
 import json
+import os
 import re
 import sys
 import threading
@@ -26,6 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
@@ -241,7 +243,22 @@ def navegador():
     o.add_argument("--no-sandbox")              # contenedores de integración continua (GitHub Actions)
     o.add_argument("--disable-dev-shm-usage")   # memoria compartida reducida de los contenedores
     o.set_capability("goog:loggingPrefs", {"browser": "ALL"})
-    return webdriver.Chrome(options=o)
+    return webdriver.Chrome(service=_servicio_chromedriver(), options=o)
+
+
+def _servicio_chromedriver():
+    """
+    Controlador de Chrome que coincide con el navegador instalado. En GitHub Actions el equipo trae otro chromedriver
+    en el PATH, de una versión distinta a la de Chrome, y Selenium lo prefiere: se usa el indicado en CHROMEDRIVER_PATH
+    (el que instala la acción de Chrome) o, si no, el que descarga webdriver-manager. Fuera de Actions, Selenium elige solo.
+    """
+    ruta = os.environ.get("CHROMEDRIVER_PATH", "")
+    if ruta and Path(ruta).exists():
+        return Service(executable_path=ruta)
+    if os.environ.get("CI"):
+        from webdriver_manager.chrome import ChromeDriverManager
+        return Service(ChromeDriverManager().install())
+    return Service()
 
 
 class Pagina:

@@ -55,6 +55,7 @@ jobs:
           persist-credentials: false
 
       - name: Configurar Google Chrome
+        id: chrome
         uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce  # v1
         with:
           install-chromedriver: true
@@ -79,6 +80,9 @@ jobs:
       # Recorre las cuatro páginas con todos sus filtros, tablas y gráficas y compara cada valor con un cálculo
       # independiente sobre Historico/ y Novedades/ (unos 3.000 controles; tarda varios minutos).
       - name: Pruebas de punta a punta del Dashboard
+        env:
+          # El chromedriver que instala la acción de Chrome: el del equipo tiene otra versión (ver tests/e2e_dashboard.py)
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
         run: |
           # El shell de Actions se ejecuta con -e: se desactiva para conservar el código de salida y publicar el resumen
           set +e
