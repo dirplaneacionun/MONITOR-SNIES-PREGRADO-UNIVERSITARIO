@@ -9,7 +9,7 @@
 # librería, ejecute el flujo completo y confirme que no hay errores ni cambios inesperados.
 
 # Datos y archivos
-pandas==3.0.3
+pandas==3.1.1
 numpy==2.5.1
 pyarrow==25.0.1
 openpyxl==3.1.5
