@@ -719,12 +719,12 @@ class TestSeguridadDelSitio(unittest.TestCase):
         self.assertIn('package-ecosystem: "pip"', texto)
         self.assertIn('interval: "monthly"', texto)
         self.assertIn('package-ecosystem: "npm"', texto)
-        self.assertIn('directory: "/.github/librerias"', texto)
+        self.assertIn('directory: "/Librerias"', texto)
 
     def test_registro_de_librerias_incluidas_coincide_con_los_archivos(self):
         """El registro de versiones vigilado por Dependabot coincide con las librerías copiadas en docs/assets/vendor."""
         raiz = Path(__file__).resolve().parent.parent
-        dependencias = json.loads((raiz / ".github" / "librerias" / "package.json").read_text(encoding="utf-8"))["dependencies"]
+        dependencias = json.loads((raiz / "Librerias" / "package.json").read_text(encoding="utf-8"))["dependencies"]
         self.assertEqual(set(dependencias), {"plotly.js-dist-min", "flatpickr", "hyparquet", "hyparquet-writer"})
         for nombre, version in dependencias.items():
             self.assertRegex(version, r"^\d+\.\d+\.\d+$", f"{nombre}: la versión debe ser exacta (sin ^ ni ~)")
@@ -733,7 +733,7 @@ class TestSeguridadDelSitio(unittest.TestCase):
         flatpickr = (vendor / "flatpickr" / "flatpickr.min.js").read_text(encoding="utf-8")[:300]
         self.assertIn(f"plotly.js v{dependencias['plotly.js-dist-min']}", plotly)
         self.assertIn(f"flatpickr v{dependencias['flatpickr']}", flatpickr)
-        bloqueo = json.loads((raiz / ".github" / "librerias" / "package-lock.json").read_text(encoding="utf-8"))["packages"]
+        bloqueo = json.loads((raiz / "Librerias" / "package-lock.json").read_text(encoding="utf-8"))["packages"]
         for nombre, version in dependencias.items():
             self.assertEqual(bloqueo[f"node_modules/{nombre}"]["version"], version, f"package-lock.json no coincide con package.json en {nombre}")
         for carpeta in ("hyparquet", "hyparquet-writer"):   # sin la versión en sus archivos: basta con que existan y tengan licencia
