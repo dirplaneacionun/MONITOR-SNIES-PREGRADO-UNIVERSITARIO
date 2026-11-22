@@ -14,6 +14,7 @@ on:
       - "Scripts/generar_paginas.py"
       - "Scripts/catalogos.py"
       - "tests/**"
+      - "requirements.txt"
       - ".github/workflows/pruebas_dashboard.yml"
   push:
     branches: [main]
@@ -24,6 +25,7 @@ on:
       - "Scripts/generar_paginas.py"
       - "Scripts/catalogos.py"
       - "tests/**"
+      - "requirements.txt"
       - ".github/workflows/pruebas_dashboard.yml"
 
 # Solo lectura: las pruebas no modifican el repositorio.

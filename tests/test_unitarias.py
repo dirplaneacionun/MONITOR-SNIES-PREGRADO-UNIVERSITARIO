@@ -733,6 +733,9 @@ class TestSeguridadDelSitio(unittest.TestCase):
         flatpickr = (vendor / "flatpickr" / "flatpickr.min.js").read_text(encoding="utf-8")[:300]
         self.assertIn(f"plotly.js v{dependencias['plotly.js-dist-min']}", plotly)
         self.assertIn(f"flatpickr v{dependencias['flatpickr']}", flatpickr)
+        bloqueo = json.loads((raiz / ".github" / "librerias" / "package-lock.json").read_text(encoding="utf-8"))["packages"]
+        for nombre, version in dependencias.items():
+            self.assertEqual(bloqueo[f"node_modules/{nombre}"]["version"], version, f"package-lock.json no coincide con package.json en {nombre}")
         for carpeta in ("hyparquet", "hyparquet-writer"):   # sin la versión en sus archivos: basta con que existan y tengan licencia
             self.assertTrue((vendor / carpeta / "LICENSE").exists() and (vendor / carpeta / "src" / "index.js").exists())
 

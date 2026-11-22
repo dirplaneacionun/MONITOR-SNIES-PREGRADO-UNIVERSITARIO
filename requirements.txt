@@ -24,6 +24,9 @@ tqdm==4.70.0
 selenium==4.52.0
 webdriver-manager==4.1.2
 
+# Pruebas (tests/): la de los logotipos compara sus imágenes con las originales
+pillow==13.0.0
+
 # Dependencias transitivas (fijadas para que la instalación sea reproducible)
 python-dateutil==2.9.0.post0  # pandas
 six==1.17.0                   # python-dateutil
