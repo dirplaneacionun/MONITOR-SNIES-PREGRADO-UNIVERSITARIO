@@ -441,6 +441,12 @@ def leer_programas(path: Path) -> pd.DataFrame:
     sufijos ".0" en códigos y conteos guardados como texto.
     """
     df = pd.read_excel(path, engine="calamine", dtype=object)
+    # calamine entrega como hora (datetime.time) las fechas anteriores a 1900 (p. ej., 29/12/1899 en
+    # FECHA_DE_RESOLUCION del SNIES 91335), lo que convertiría toda la columna en texto: esas columnas se leen con
+    # openpyxl, que conserva la fecha exacta.
+    con_hora = [c for c in df.columns if any(isinstance(v, dt.time) for v in df[c].dropna())]
+    if con_hora:
+        df[con_hora] = pd.read_excel(path, engine="openpyxl", dtype=object, usecols=con_hora)[con_hora]
     df[COL_SNIES] = pd.to_numeric(df[COL_SNIES], errors="raise").astype("int64")
     return df
 

@@ -91,6 +91,9 @@ a { color: inherit; }
 .contenido { max-width: 1440px; margin: 0 auto; padding: 16px 24px 48px; }
 
 /* Barra de filtros */
+/* El contenedor de la barra no genera caja propia: así la barra fija (sticky) se desplaza dentro del contenido de la
+   página y permanece visible al bajar. Con una caja propia del mismo alto, la barra no podía quedarse fija. */
+#filtros { display: contents; }
 .filtros { position: sticky; top: 0; z-index: 20; background: var(--blanco); border: 1px solid var(--gris-sep); border-radius: var(--radio); box-shadow: var(--sombra); padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
 .buscar-caja { position: relative; flex: 1 1 320px; min-width: 220px; }
 .buscar { width: 100%; height: 36px; padding: 0 40px 0 12px; border: 1px solid var(--gris-sep); border-radius: 8px; font: inherit; font-size: 13px; color: var(--texto); background: var(--blanco); }
