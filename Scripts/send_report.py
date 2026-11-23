@@ -179,15 +179,6 @@ def _subtitulo(texto: str) -> str:
     return f'<p style="margin:4px 0 10px;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};">{texto}</p>'
 
 
-# Estilo de las celdas de las tablas (clases del bloque <style> del correo): mismo tipo de letra, tamaños, márgenes,
-# borde y color que las tablas del Dashboard (docs/assets/estilos.css, table.datos).
-ESTILO_TABLAS = (
-    f".tabla .c {{ font-family: {FUENTE}; font-size: 12px; color: {NEGRO}; padding: 7px 10px; border-bottom: 1px solid {BORDE}; vertical-align: top; text-align: left; }}\n"
-    "  .tabla.compacta .c { font-size: 11px; padding: 7px 6px; }\n"
-    "  .tabla .n { text-align: right; white-space: nowrap; }\n"
-    "  .tabla .b { font-weight: 800; }")
-
-
 def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> str:
     """
     Tabla HTML con encabezado negro; `columnas` = [(campo, encabezado)] y `numericas` las columnas alineadas a la
@@ -201,17 +192,24 @@ def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> st
           f"letter-spacing:.04em;padding:9px {margen};")
     alinear = lambda c: "right" if c in numericas else "left"  # noqa: E731
     cab = "".join(f'<th style="{th}text-align:{alinear(c)};">{escape(t)}</th>' for c, t in columnas)
-    # Las celdas usan clases del bloque <style> (ver ESTILO_TABLAS) y el color de fondo como atributo: sin límite de
-    # filas, repetir los estilos en cada celda superaría los 102 KB a partir de los cuales Gmail recorta el mensaje.
+    # Los estilos van en línea, no en el bloque <style>: Outlook no aplica sus reglas a las celdas, que se mostraban
+    # con la letra por defecto, sin márgenes ni líneas y con las cifras sin alinear. Tipo de letra, tamaño y color van
+    # en la fila (las celdas los heredan), y márgenes y borde en cada celda, con lo que el mensaje pesa lo mínimo para
+    # el límite de Gmail (LIMITE_HTML). Fondo, alineación vertical y alineación de las cifras van como atributos
+    # (bgcolor, valign, align), que todos los clientes respetan.
+    letra, relleno = ("11px", "6px") if compacta else ("12px", "10px")
+    estilo_fila = f"font-family:{FUENTE};font-size:{letra};color:{NEGRO};"
+    estilo_celda = f"padding:7px {relleno};border-bottom:1px solid {BORDE};"
     filas = []
     for i, (_, r) in enumerate(df.iterrows()):
         fondo = "#FFFFFF" if i % 2 == 0 else ZEBRA
-        total = negrita_ultima and i == len(df) - 1
-        filas.append("<tr>" + "".join(
-            f'<td class="c{" n" if c in numericas else ""}{" b" if total else ""}" bgcolor="{fondo}">'
-            f'{escape(_texto(c, r.get(c)))}</td>' for c, _ in columnas) + "</tr>")
+        negrita = "font-weight:800;" if negrita_ultima and i == len(df) - 1 else ""
+        celdas = "".join(
+            (f'<td align="right" style="{estilo_celda}white-space:nowrap;">' if c in numericas else f'<td style="{estilo_celda}">')
+            + f"{escape(_texto(c, r.get(c)))}</td>" for c, _ in columnas)
+        filas.append(f'<tr valign="top" bgcolor="{fondo}" style="{estilo_fila}{negrita}">{celdas}</tr>')
     # En pantallas angostas la tabla se desplaza dentro de su tarjeta, sin ensanchar el resto del correo
-    return (f'<div style="overflow-x:auto;"><table class="tabla{" compacta" if compacta else ""}" role="presentation" width="100%" cellpadding="0" '
+    return (f'<div style="overflow-x:auto;"><table class="tabla" role="presentation" width="100%" cellpadding="0" '
             f'cellspacing="0" style="border-collapse:collapse;border:1px solid {BORDE};margin:4px 0;">'
             f"<thead><tr>{cab}</tr></thead><tbody>{''.join(filas)}</tbody></table></div>")
 
@@ -443,7 +441,6 @@ def _cuerpo(res: dict, fecha: date, topes: dict[str, int] | None = None) -> str:
     return f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  {ESTILO_TABLAS}
   /* Pantallas angostas (clientes que admiten estilos incrustados): indicadores en dos columnas, fecha bajo el título
      y tablas más compactas. Los demás clientes muestran el diseño de escritorio. */
   @media (max-width: 600px) {{

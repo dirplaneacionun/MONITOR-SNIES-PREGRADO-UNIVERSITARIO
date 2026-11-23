@@ -395,6 +395,25 @@ class TestCorreo(unittest.TestCase):
         self.assertNotIn("Se muestran", html)
         self.assertEqual(html, send_report._cuerpo(res["pregrado"], dt.date(2026, 7, 28)))
 
+    def test_las_celdas_de_las_tablas_no_dependen_del_bloque_style(self):
+        # Outlook no aplica a las celdas las reglas del bloque <style> (letra por defecto, sin márgenes ni líneas y cifras
+        # sin alinear): sin ese bloque, cada fila y cada celda conserva su formato y las cifras siguen a la derecha
+        res = {"modificados": self._modificados([1713, 1711, 9999]), "total_activos": 5500, "total_anterior": 5490,
+               "fecha_anterior": dt.date(2026, 7, 21)}
+        html = re.sub(r"<style>.*?</style>", "", send_report._cuerpo(res, dt.date(2026, 7, 28)), flags=re.S)
+        filas = re.findall(r'<tr valign="top"([^>]*)>(.*?)</tr>', html, flags=re.S)
+        self.assertGreaterEqual(len(filas), 7)   # 3 de la tabla de grupos (más el total) y 3 de modificados
+        for atributos, contenido in filas:
+            self.assertIn("font-family:", atributos)
+            self.assertIn("font-size:", atributos)
+            for celda in re.findall(r"<td[^>]*>", contenido):
+                self.assertIn("padding:", celda)
+                self.assertIn("border-bottom:", celda)
+        # La tabla de grupos alinea sus cifras a la derecha con el atributo align y deja el total en negrita
+        celdas_derecha = [c for c in re.findall(r"<td[^>]*>", html) if 'align="right"' in c]
+        self.assertGreaterEqual(len(celdas_derecha), 12)
+        self.assertEqual(sum("font-weight:800" in a for a, _ in filas), 1)
+
     def test_el_recorte_reparte_entre_secciones_y_conserva_la_prioridad(self):
         nuevos = self._df([1713] + list(range(3000, 3300))).assign(TIPO_NOVEDAD="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="X",
                                                                   MODALIDAD="PRESENCIAL", DIVISION_UNINORTE="INGENIERIAS")
