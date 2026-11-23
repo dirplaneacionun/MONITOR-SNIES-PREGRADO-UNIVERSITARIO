@@ -21,6 +21,9 @@ Flujo:
 Retención: se conservan los últimos 10 logs de cada herramienta (este orquestador, ETL-PROGRAMAS-SNIES y
 CLASIFICAR-DIVISIONES-UNINORTE-SNIES).
 
+Vigilancia del repositorio: tras clasificar, se registra el tamaño de la retroalimentación del clasificador y se
+advierte (log y anotación de GitHub Actions) cuando se acerca al límite de archivo de GitHub.
+
 Si una etapa falla no se envía correo a DESTINATARIOS: se envía una alerta técnica
 solo a la cuenta remitente (SMTP_USER) y el proceso termina con código 1. Si lo que falla
 es el envío del reporte, los datos y el Dashboard ya quedan actualizados, pero el proceso
@@ -91,10 +94,15 @@ FILTROS_PORTAL = {
     "NIVEL_DE_FORMACION": "UNIVERSITARIO",
 }
 COLS_CLASIFICACION = ["DIVISION_UNINORTE", "PUNTAJE_TOTAL"]
-# Columnas que ya no se guardan (el clasificador dejó de exportar REQUIERE_REVISION: los programas por revisar
-# están en su lista de revisión). Se retiran también de los archivos acumulados.
+# Columnas obsoletas, que no se guardan: REQUIERE_REVISION (los programas por revisar se consultan en la lista de
+# revisión del clasificador). Se retiran también de los archivos acumulados.
 COLS_OBSOLETAS = ["REQUIERE_REVISION"]
 REVISION_FILE = SCRIPTS_DIR / "CLASIFICAR-DIVISIONES-UNINORTE-SNIES" / "Revision" / "Revision Programas.xlsx"
+# Retroalimentación del clasificador: crece con cada ejecución y se versiona en el repositorio. GitHub advierte desde
+# 50 MB por archivo y rechaza los de más de 100 MB; se avisa antes de llegar a esos límites.
+RETROALIMENTACION_FILE = MAP_DIR / "Retroalimentacion" / "retroalimentacion.json"
+RETRO_AVISO_MB = 40     # aviso: conviene planear la depuración o la división del archivo
+RETRO_CRITICO_MB = 80   # crítico: cerca del límite de GitHub
 
 # Columnas vigiladas para detectar modificados → valor de TIPO_CAMBIO_DETECTADO
 COLS_VIGILAR = {
@@ -548,6 +556,29 @@ def avisar_categorias(df: pd.DataFrame) -> dict[str, list[str]]:
     return hallazgos
 
 
+def vigilar_retroalimentacion(path: Path = RETROALIMENTACION_FILE) -> str | None:
+    """
+    Registra el tamaño de la retroalimentación del clasificador y advierte cuando se acerca al límite de archivo de
+    GitHub (RETRO_AVISO_MB y RETRO_CRITICO_MB). Nunca detiene el flujo. En GitHub Actions la advertencia se publica
+    además como anotación de la ejecución, para que se vea sin abrir el log. Retorna el nivel ("aviso", "critico") o
+    None si el tamaño es normal o el archivo no existe.
+    """
+    if not path.exists():
+        return None
+    mb = path.stat().st_size / 1024 ** 2
+    nivel = "critico" if mb >= RETRO_CRITICO_MB else "aviso" if mb >= RETRO_AVISO_MB else None
+    if nivel is None:
+        log.info(f"  Retroalimentación del clasificador: {mb:.1f} MB (aviso desde {RETRO_AVISO_MB} MB)")
+        return None
+    texto = (f"La retroalimentación del clasificador pesa {mb:.1f} MB (nivel {nivel}: aviso desde {RETRO_AVISO_MB} MB, "
+             f"crítico desde {RETRO_CRITICO_MB} MB). GitHub advierte desde 50 MB y rechaza los archivos de más de 100 MB: "
+             "planee depurar o dividir Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Retroalimentacion/retroalimentacion.json.")
+    log.warning(f"  {texto}")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning title=Tamaño de la retroalimentación::{texto}", flush=True)
+    return nivel
+
+
 def validar_continuidad(n_hoy: int, fecha: dt.date, forzar: bool = False) -> None:
     """
     Protección contra descargas incompletas: una descarga truncada del SNIES conserva el esquema y pasa las
@@ -702,6 +733,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     # 3. Clasificación
     _seccion("3. CLASIFICACION (CLASIFICAR-DIVISIONES-UNINORTE-SNIES)")
     clasificado = clasificar_divisiones(normalizado)
+    vigilar_retroalimentacion()
 
     # 4. Validación del resultado
     _seccion("4. VALIDACION DEL ARCHIVO PROCESADO")
