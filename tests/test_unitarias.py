@@ -24,6 +24,7 @@ import pyarrow as pa
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Scripts"))
 
 import catalogos  # noqa: E402
+import completar_modificados  # noqa: E402
 import generar_dashboard  # noqa: E402
 import historico  # noqa: E402
 import reclasificar  # noqa: E402
@@ -360,6 +361,67 @@ class TestCorreo(unittest.TestCase):
         self.assertEqual(len(send_report.seleccionar(self._df([9999] * 150))), 150)
         self.assertTrue(send_report.seleccionar(None).empty)
 
+    def _modificados(self, codigos):
+        return self._df(codigos).assign(TIPO_CAMBIO_DETECTADO="NUMERO DE CREDITOS", CAMBIO_DETECTADO="160 → 144",
+                                        MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA", MODALIDAD="PRESENCIAL",
+                                        DIVISION_UNINORTE="INGENIERIAS")
+
+    def test_por_encima_del_limite_recorta_por_prioridad_y_enlaza_al_dashboard(self):
+        fecha = dt.date(2026, 7, 28)
+        mod = self._modificados([1713] * 3 + [1711] * 4 + list(range(2000, 2500)))   # 507 registros: no caben en 95 KB
+        res = {"pregrado": {"modificados": mod, "total_activos": 5500}}
+        self.assertGreater(len(send_report._cuerpo(res["pregrado"], fecha).encode("utf-8")), send_report.LIMITE_HTML)
+        with self.assertLogs("snies_monitor.correo", level="WARNING") as capturado:
+            html = send_report.construir_cuerpo(res, fecha)
+        self.assertEqual(len(capturado.output), 1)
+        self.assertLessEqual(len(html.encode("utf-8")), send_report.LIMITE_HTML)
+        mostrados = int(re.search(r"Se muestran ([\d.]+) de 507 registros", html).group(1).replace(".", ""))
+        self.assertTrue(10 < mostrados < 507)
+        self.assertEqual(html.count("160 → 144"), mostrados)
+        # Lo recortado es lo menos prioritario: la Universidad del Norte y las de Mayor Interés siguen completas
+        self.assertEqual((html.count("INST 1713"), html.count("INST 1711")), (3, 4))
+        self.assertIn(f"{send_report.DASHBOARD_URL}modificados.html#fecha=2026-07-28", html)
+        # Las notas de Uninorte y de Mayor Interés cuentan todos los registros, no solo los mostrados
+        texto = re.sub(r"<[^>]+>", "", html)
+        self.assertIn("Universidad del Norte: 3 registros · Universidades de Mayor Interés: 4 registros.", texto)
+        # El número mostrado es el máximo que cabe: con un registro más el mensaje supera el límite
+        mas = send_report._cuerpo(res["pregrado"], fecha, send_report._topes(res["pregrado"], mostrados + 1))
+        self.assertGreater(len(mas.encode("utf-8")), send_report.LIMITE_HTML)
+
+    def test_por_debajo_del_limite_el_correo_es_completo_y_sin_aviso(self):
+        res = {"pregrado": {"modificados": self._modificados(list(range(1, 62))), "total_activos": 5500}}
+        html = send_report.construir_cuerpo(res, dt.date(2026, 7, 28))
+        self.assertEqual(html.count("160 → 144"), 61)
+        self.assertNotIn("Se muestran", html)
+        self.assertEqual(html, send_report._cuerpo(res["pregrado"], dt.date(2026, 7, 28)))
+
+    def test_el_recorte_reparte_entre_secciones_y_conserva_la_prioridad(self):
+        nuevos = self._df([1713] + list(range(3000, 3300))).assign(TIPO_NOVEDAD="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="X",
+                                                                  MODALIDAD="PRESENCIAL", DIVISION_UNINORTE="INGENIERIAS")
+        res = {"pregrado": {"nuevos": nuevos, "modificados": self._modificados(range(4000, 4300)),
+                            "inactivos": self._df(range(5000, 5300)).assign(MUNICIPIO_OFERTA_PROGRAMA="X", MODALIDAD="PRESENCIAL",
+                                                                           DIVISION_UNINORTE="INGENIERIAS"),
+                            "total_activos": 5500}}
+        topes = send_report._topes(res["pregrado"], 90)
+        self.assertEqual(sum(topes.values()), 90)
+        self.assertEqual(topes["nuevos"], 31)   # la fila de Uninorte va primero; las demás se reparten por turnos
+        self.assertEqual((topes["modificados"], topes["inactivos"]), (30, 29))   # 89 por turnos: 29 vueltas y 2 más
+        self.assertEqual(send_report._topes({"nuevos": None}, 5), {"nuevos": 0, "modificados": 0, "inactivos": 0})
+
+    def test_el_texto_plano_nunca_se_recorta(self):
+        res = {"pregrado": {"modificados": self._modificados(list(range(1, 508))), "total_activos": 5500}}
+        texto = send_report.construir_texto(res, dt.date(2026, 7, 28))
+        self.assertEqual(texto.count("160 → 144"), 507)
+        self.assertNotIn("Se muestran", texto)
+
+    def test_aviso_en_singular_y_limite_minimo(self):
+        fecha = dt.date(2026, 7, 28)
+        mod = self._modificados([1713, 9999, 9998])
+        self.assertIn("Se muestra 1 de 3 registros;", send_report._seccion("modificados", mod, fecha, 1))
+        self.assertIn("Se muestran 0 de 3 registros;", send_report._seccion("modificados", mod, fecha, 0))
+        html = send_report.construir_cuerpo({"pregrado": {"modificados": mod, "total_activos": 3}}, fecha, limite=1)   # no cabe ni sin filas
+        self.assertIn("Se muestran 0 de 3 registros;", html)
+
     def test_el_html_con_muchos_registros_no_supera_el_limite_de_gmail(self):
         # Gmail recorta los mensajes cuyo HTML supera ~102 KB: caso grande (35 nuevos y 61 cambios) con margen holgado
         nuevos = self._df(list(range(1, 36))).assign(TIPO_NOVEDAD="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA",
@@ -622,6 +684,138 @@ class TestCategoriasDesconocidas(unittest.TestCase):
         paleta = re.findall(r"#[0-9A-Fa-f]{6}", re.search(r"const CATEGORICA = \[(.*?)\];", js, re.S).group(1))
         self.assertEqual(len(paleta), catalogos.MAX_COLORES_SERIES)
         self.assertEqual(set(re.findall(r"(PRIVADO|OFICIAL)", re.search(r"const colorSector = .*", js).group(0))), set(catalogos.SECTORES))
+
+
+class TestRechazadosSmtp(unittest.TestCase):
+    """Un rechazo parcial del servidor SMTP se registra sin exponer direcciones; el correo no se da por fallido."""
+    def _smtp_falso(self, rechazados):
+        class SMTPFalso:
+            def __init__(self, host, port, timeout=None): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def ehlo(self): pass
+            def starttls(self, context=None): pass
+            def login(self, u, p): pass
+            def sendmail(self, de, para, cuerpo): return rechazados
+        return SMTPFalso
+
+    def test_enviar_retorna_los_rechazados(self):
+        rechazados = {"b@example.com": (550, b"5.1.1 usuario desconocido")}
+        with mock.patch.object(send_report.smtplib, "SMTP", self._smtp_falso(rechazados)):
+            msg = send_report.MIMEMultipart("alternative")
+            self.assertEqual(send_report._enviar(msg, "r@example.com", "x", ["a@example.com", "b@example.com"]), rechazados)
+
+    def test_advertencia_con_posicion_y_codigo_sin_direccion(self):
+        destinatarios = ["a@example.com", "b@example.com", "c@example.com"]
+        with self.assertLogs("snies_monitor.correo", level="WARNING") as capturado:
+            n = send_report._registrar_rechazados(destinatarios, {"c@example.com": (550, b"x"), "a@example.com": (553, b"y")})
+        self.assertEqual(n, 2)
+        texto = capturado.output[0]
+        self.assertIn("2 de 3", texto)
+        self.assertIn("1, 3", texto)
+        self.assertIn("550, 553", texto)
+        self.assertNotIn("example.com", texto)
+
+    def test_sin_rechazos_no_advierte(self):
+        with self.assertNoLogs("snies_monitor.correo", level="WARNING"):
+            for vacio in ({}, None, mock.MagicMock()):
+                self.assertEqual(send_report._registrar_rechazados(["a@example.com"], vacio), 0)
+
+    def test_reporte_con_rechazo_parcial_termina_y_cuenta_los_aceptados(self):
+        entorno = {"SMTP_USER": "r@example.com", "SMTP_PASS": "x", "DESTINATARIOS": "a@example.com, b@example.com"}
+        rechazados = {"b@example.com": (550, b"x")}
+        res = {"pregrado": {"total_activos": 1}}
+        with mock.patch.dict(os.environ, entorno), mock.patch.object(send_report.smtplib, "SMTP", self._smtp_falso(rechazados)), \
+                self.assertLogs("snies_monitor.correo", level="INFO") as capturado:
+            send_report.enviar_reporte(res, dt.date(2026, 11, 17))
+        self.assertTrue(any("Correo enviado a 1 de 2" in linea for linea in capturado.output))
+        self.assertTrue(any(linea.startswith("WARNING") for linea in capturado.output))
+
+
+class TestVigilanciaRetroalimentacion(unittest.TestCase):
+    """Aviso previo al límite de tamaño de archivo de GitHub para la retroalimentación del clasificador."""
+    def _archivo(self, mb):
+        carpeta = tempfile.TemporaryDirectory()
+        self.addCleanup(carpeta.cleanup)
+        path = Path(carpeta.name) / "retroalimentacion.json"
+        with open(path, "wb") as f:
+            f.truncate(int(mb * 1024 ** 2))   # archivo disperso: no ocupa ese espacio en disco
+        return path
+
+    def test_tamano_normal_solo_informa(self):
+        with self.assertLogs("snies_monitor", level="INFO") as capturado:
+            self.assertIsNone(run_snies.vigilar_retroalimentacion(self._archivo(20)))
+        self.assertIn("20.0 MB", capturado.output[0])
+        self.assertTrue(capturado.output[0].startswith("INFO"))
+
+    def test_aviso_y_critico_segun_el_umbral(self):
+        with self.assertLogs("snies_monitor", level="WARNING") as capturado:
+            self.assertEqual(run_snies.vigilar_retroalimentacion(self._archivo(run_snies.RETRO_AVISO_MB)), "aviso")
+            self.assertEqual(run_snies.vigilar_retroalimentacion(self._archivo(run_snies.RETRO_CRITICO_MB)), "critico")
+        self.assertEqual(len(capturado.output), 2)
+        self.assertIn("100 MB", capturado.output[0])
+
+    def test_archivo_inexistente_no_falla(self):
+        self.assertIsNone(run_snies.vigilar_retroalimentacion(Path(tempfile.gettempdir()) / "no_existe_retro.json"))
+
+    def test_anotacion_de_github_actions_solo_en_actions(self):
+        path = self._archivo(run_snies.RETRO_AVISO_MB)
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), mock.patch("builtins.print") as imprimir:
+            run_snies.vigilar_retroalimentacion(path)
+        self.assertTrue(imprimir.call_args[0][0].startswith("::warning title="))
+        entorno = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+        with mock.patch.dict(os.environ, entorno, clear=True), mock.patch("builtins.print") as imprimir:
+            run_snies.vigilar_retroalimentacion(path)
+        imprimir.assert_not_called()
+
+    def test_la_ruta_vigilada_es_la_del_clasificador(self):
+        self.assertEqual(run_snies.RETROALIMENTACION_FILE.name, "retroalimentacion.json")
+        self.assertEqual(run_snies.RETROALIMENTACION_FILE.parent.name, "Retroalimentacion")
+        self.assertTrue(run_snies.RETROALIMENTACION_FILE.exists())
+
+
+class TestCompletarModificados(unittest.TestCase):
+    """Completar Modificados con los cambios del histórico que la tabla no registró (sin tocar los existentes)."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        for parche in (mock.patch.object(historico, "HISTORICO_DIR", base),
+                       mock.patch.object(run_snies, "INACTIVOS_FILE", base / "inactivos.parquet")):
+            parche.start()
+            self.addCleanup(parche.stop)
+        self.path = base / "Modificados.parquet"
+        for fecha, creditos, periodos in (("2026-11-03", 160, 10), ("2026-11-10", 150, 8), ("2026-11-17", 150, 8)):
+            historico.guardar_ejecucion(pd.DataFrame([programa(1, NUMERO_CREDITOS=creditos, NUMERO_PERIODOS_DE_DURACION=periodos),
+                                                      programa(2)]), dt.date.fromisoformat(fecha))
+        # La tabla solo registró el cambio de créditos de la ejecución del 10/11 (falta el de periodos)
+        hoy, anterior = (historico.leer(fecha=dt.date(2026, 11, d)).drop(columns=[F]) for d in (10, 3))
+        completo = run_snies.detectar_novedades(hoy, anterior, dt.date(2026, 11, 10))[1]
+        self.registrado = completo[completo["TIPO_CAMBIO_DETECTADO"] == "NUMERO DE CREDITOS"]
+        run_snies._escribir_parquet(self.registrado, self.path)
+
+    def test_agrega_solo_el_faltante_y_conserva_los_existentes(self):
+        faltantes = completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
+        self.assertEqual(faltantes["TIPO_CAMBIO_DETECTADO"].tolist(), ["NUMERO DE PERIODOS"])
+        self.assertEqual(faltantes["CAMBIO_DETECTADO"].tolist(), ["10 → 8"])
+        tabla = pd.read_parquet(self.path)
+        self.assertEqual(sorted(tabla["TIPO_CAMBIO_DETECTADO"]), ["NUMERO DE CREDITOS", "NUMERO DE PERIODOS"])
+        original = tabla[tabla["TIPO_CAMBIO_DETECTADO"] == "NUMERO DE CREDITOS"].reset_index(drop=True)
+        pd.testing.assert_frame_equal(original, self.registrado.assign(**{F: original[F]}).reset_index(drop=True), check_dtype=False)
+        self.assertEqual(list(tabla.columns), list(self.registrado.columns))
+
+    def test_es_idempotente(self):
+        completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
+        self.assertTrue(completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path).empty)
+        self.assertEqual(len(pd.read_parquet(self.path)), 2)
+
+    def test_simulacion_no_escribe(self):
+        antes = self.path.read_bytes()
+        self.assertEqual(len(completar_modificados.completar(simular=True, desde=dt.date(2026, 11, 10), path=self.path)), 1)
+        self.assertEqual(self.path.read_bytes(), antes)
+
+    def test_no_revisa_ejecuciones_anteriores_al_inicio(self):
+        self.assertTrue(completar_modificados.completar(simular=True, desde=dt.date(2026, 11, 11), path=self.path).empty)
 
 
 class TestRegistroSeguro(unittest.TestCase):

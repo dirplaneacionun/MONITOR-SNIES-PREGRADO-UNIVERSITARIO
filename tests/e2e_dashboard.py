@@ -1465,8 +1465,9 @@ def probar_consistencia_visual(d, base):
 
 
 def probar_movil(d, base):
-    """Pantalla angosta (390 px): leyendas debajo del gráfico y etiquetas del eje X sin superposición."""
-    d.set_window_size(390, 900)
+    """Pantalla angosta (390 px): leyendas debajo del gráfico (con el total de cada serie completo) y etiquetas del eje X sin superposición."""
+    # El navegador sin interfaz no reduce la ventana por debajo de ~500 px: el ancho de 390 px se fija con la emulación de pantalla
+    d.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {"width": 390, "height": 900, "deviceScaleFactor": 2, "mobile": True})
     try:
         for pagina in ("index.html", "modificados.html"):
             d.get("about:blank")
@@ -1474,14 +1475,18 @@ def probar_movil(d, base):
             info = q.js("""return [...document.querySelectorAll('.grafica')].filter(e => e.data && e.layout && e.layout.xaxis && e.layout.xaxis.tickvals)
                 .map(e => ({ id: e.id, varias: e.data.length > 1 && e.layout.showlegend, orientacion: (e.layout.legend || {}).orientation,
                              etiquetas: e.layout.xaxis.tickvals.length, ancho: e._fullLayout._size.w,
-                             desborde: document.documentElement.scrollWidth > document.documentElement.clientWidth }));""")
+                             desborde: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                             cortadas: [...e.querySelectorAll('.legendtext')].filter(t => t.getBoundingClientRect().right > e.getBoundingClientRect().right + 1).length }));""")
             mal_leyenda = [i["id"] for i in info if i["varias"] and i["orientacion"] != "h"]
+            cortadas = [f'{i["id"]}:{i["cortadas"]}' for i in info if i["cortadas"]]
+            verificar(f"móvil · {pagina} · textos de la leyenda (con su total) completos", not cortadas, str(cortadas))
             mal_eje = [f'{i["id"]}:{i["etiquetas"]}' for i in info if i["etiquetas"] > max(2, i["ancho"] // 40)]
             verificar(f"móvil · {pagina} · leyendas debajo del gráfico", not mal_leyenda, str(mal_leyenda))
             verificar(f"móvil · {pagina} · etiquetas del eje sin superposición", not mal_eje, str(mal_eje))
             verificar(f"móvil · {pagina} · sin desplazamiento horizontal", not any(i["desborde"] for i in info))
             verificar(f"móvil · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
     finally:
+        d.execute_cdp_cmd("Emulation.clearDeviceMetricsOverride", {})
         d.set_window_size(1400, 1000)
 
 
@@ -1796,6 +1801,11 @@ def probar_unidades_y_etiquetas(d, base):
         verificar(f"unidades · {pagina} · ninguna gráfica usa programas, cambios ni acumulado como unidad",
                   all(("registros" in h or "%{" not in h) and "programas</" not in h and "cambios<" not in h for h in info["plantillas"]), str([h for h in info["plantillas"] if "registros" not in h][:2]))
         verificar(f"unidades · {pagina} · ejes en registros", all(e in ("REGISTROS", "MODALIDAD ANTERIOR") for e in info["ejes"]), str(info["ejes"]))
+        # Todas las gráficas de líneas y de barras rotulan su eje de conteo con la misma unidad (REGISTROS)
+        sin_titulo = q.js("""return [...document.querySelectorAll('.grafica')].filter(e => e.data && e.data.length && ['scatter', 'bar'].includes(e.data[0].type)).filter(e => {
+            const eje = e.data[0].orientation === 'h' ? e.layout.xaxis : e.layout.yaxis;
+            return !(eje && eje.title && eje.title.text === 'REGISTROS'); }).map(e => e.id);""")
+        verificar(f"unidades · {pagina} · todas las gráficas de líneas y barras rotulan su eje de conteo como REGISTROS", not sin_titulo, str(sin_titulo))
         hibrida = [o for o in info["opcionesMod"] if o[0] == "HIBRIDA"]
         verificar(f"etiquetas de agrupaciones · {pagina} · HÍBRIDA en el filtro de modalidades y en la leyenda (el valor sigue siendo HIBRIDA)",
                   hibrida == [["HIBRIDA", "HÍBRIDA"]] and "HÍBRIDA" in info["modal"] and "HIBRIDA" not in info["modal"], f"{hibrida} · {info['modal']}")
