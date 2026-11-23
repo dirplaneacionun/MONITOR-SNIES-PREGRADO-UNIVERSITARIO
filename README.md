@@ -126,6 +126,7 @@ En GitHub Actions, las tres primeras variables se configuran como *secrets* del 
 | `MAX_LOGS` | `Scripts/run_snies.py` | 10 | Registros de ejecución conservados por herramienta. |
 | `RETRO_AVISO_MB` / `RETRO_CRITICO_MB` | `Scripts/run_snies.py` | 40 / 80 | Umbrales de advertencia del tamaño de `retroalimentacion.json`. |
 | `SMTP_HOST` / `SMTP_PORT` | `Scripts/send_report.py` | `smtp.gmail.com` / 587 | Servidor de correo saliente. |
+| `INTENTOS_SMTP` / `ESPERA_SMTP` | `Scripts/send_report.py` | 3 / 5 y 15 s | Intentos de conexión y autenticación SMTP ante fallas transitorias, y espera antes del segundo y del tercero. |
 | `DASHBOARD_URL` | `Scripts/send_report.py` | URL del sitio | Enlace al Dashboard que se incluye en el correo. |
 | `LIMITE_HTML` | `Scripts/send_report.py` | 95 KB | Tamaño máximo del HTML del correo. |
 

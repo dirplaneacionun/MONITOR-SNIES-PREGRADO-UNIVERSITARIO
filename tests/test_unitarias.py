@@ -751,6 +751,93 @@ class TestRechazadosSmtp(unittest.TestCase):
         self.assertTrue(any(linea.startswith("WARNING") for linea in capturado.output))
 
 
+class TestReintentosSmtp(unittest.TestCase):
+    """Reintentos de la conexión SMTP ante fallas transitorias (sin red: el servidor y la espera se simulan)."""
+    def _servidor(self, fallas_login=(), error_envio=None):
+        """Clase SMTP simulada. `fallas_login` son las excepciones que lanza login() en cada intento sucesivo."""
+        estado = {"conexiones": 0, "logins": 0, "envios": 0, "cerrados": 0}
+        pendientes = list(fallas_login)
+
+        class SMTPFalso:
+            def __init__(self, *a, **k): estado["conexiones"] += 1
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def ehlo(self): pass
+            def starttls(self, context=None): pass
+            def close(self): estado["cerrados"] += 1
+
+            def login(self, u, p):
+                estado["logins"] += 1
+                if pendientes:
+                    raise pendientes.pop(0)
+
+            def sendmail(self, de, para, cuerpo):
+                estado["envios"] += 1
+                if error_envio:
+                    raise error_envio
+                return {}
+        return SMTPFalso, estado
+
+    def _enviar(self, clase):
+        """Envía un mensaje con el servidor simulado; retorna (resultado, simulacro de la espera)."""
+        with mock.patch.object(send_report.smtplib, "SMTP", clase), mock.patch.object(send_report.time, "sleep") as espera:
+            return send_report._enviar(send_report.MIMEMultipart("alternative"), "r@example.com", "x", ["a@example.com"]), espera
+
+    def test_reintenta_y_envia_tras_una_desconexion(self):
+        clase, estado = self._servidor([smtplib.SMTPServerDisconnected("Connection unexpectedly closed")])
+        with self.assertLogs("snies_monitor.correo", level="WARNING") as capturado:
+            resultado, espera = self._enviar(clase)
+        self.assertEqual(resultado, {})
+        self.assertEqual(estado, {"conexiones": 2, "logins": 2, "envios": 1, "cerrados": 1})
+        espera.assert_called_once_with(send_report.ESPERA_SMTP[0])
+        self.assertIn("intento 1 de 3", capturado.output[0])
+        self.assertNotIn("@", capturado.output[0])
+
+    def test_agota_los_intentos_y_propaga_el_error(self):
+        clase, estado = self._servidor([smtplib.SMTPServerDisconnected("x")] * 3)
+        with self.assertLogs("snies_monitor.correo", level="WARNING"), self.assertRaises(smtplib.SMTPServerDisconnected):
+            self._enviar(clase)
+        self.assertEqual((estado["conexiones"], estado["envios"], estado["cerrados"]), (3, 0, 3))
+
+    def test_esperas_crecientes_entre_intentos(self):
+        clase, estado = self._servidor([TimeoutError(), ConnectionResetError()])
+        with self.assertLogs("snies_monitor.correo", level="WARNING"):
+            resultado, espera = self._enviar(clase)
+        self.assertEqual(resultado, {})
+        self.assertEqual(estado["conexiones"], 3)
+        self.assertEqual([c.args[0] for c in espera.call_args_list], list(send_report.ESPERA_SMTP))
+
+    def test_credenciales_rechazadas_no_se_reintentan(self):
+        clase, estado = self._servidor([smtplib.SMTPAuthenticationError(535, b"5.7.8 credenciales incorrectas")])
+        with self.assertRaises(smtplib.SMTPAuthenticationError), mock.patch.object(send_report.time, "sleep") as espera,                 mock.patch.object(send_report.smtplib, "SMTP", clase):
+            send_report._enviar(send_report.MIMEMultipart("alternative"), "r@example.com", "x", ["a@example.com"])
+        self.assertEqual(estado["conexiones"], 1)
+        espera.assert_not_called()
+
+    def test_error_de_certificado_no_se_reintenta(self):
+        clase, estado = self._servidor([ssl.SSLCertVerificationError(1, "certificate verify failed")])
+        with self.assertRaises(ssl.SSLCertVerificationError), mock.patch.object(send_report.time, "sleep") as espera,                 mock.patch.object(send_report.smtplib, "SMTP", clase):
+            send_report._enviar(send_report.MIMEMultipart("alternative"), "r@example.com", "x", ["a@example.com"])
+        self.assertEqual(estado["conexiones"], 1)
+        espera.assert_not_called()
+
+    def test_error_durante_el_envio_no_se_reintenta_para_no_duplicar_el_mensaje(self):
+        clase, estado = self._servidor(error_envio=smtplib.SMTPServerDisconnected("Connection unexpectedly closed"))
+        with self.assertRaises(smtplib.SMTPServerDisconnected):
+            self._enviar(clase)
+        self.assertEqual((estado["conexiones"], estado["logins"], estado["envios"]), (1, 1, 1))
+
+    def test_la_alerta_tecnica_tambien_reintenta(self):
+        clase, estado = self._servidor([smtplib.SMTPServerDisconnected("x")])
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "monitor.log"
+            log_path.write_text("línea de registro", encoding="utf-8")
+            entorno = {"SMTP_USER": "r@example.com", "SMTP_PASS": "x"}
+            with mock.patch.dict(os.environ, entorno), mock.patch.object(send_report.smtplib, "SMTP", clase),                     mock.patch.object(send_report.time, "sleep"), self.assertLogs("snies_monitor.correo", level="WARNING"):
+                send_report.enviar_alerta_falla(dt.date(2026, 11, 17), "CORREO", "detalle", log_path)
+        self.assertEqual((estado["conexiones"], estado["envios"]), (2, 1))
+
+
 class TestVigilanciaRetroalimentacion(unittest.TestCase):
     """Aviso previo al límite de tamaño de archivo de GitHub para la retroalimentación del clasificador."""
     def _archivo(self, mb):
