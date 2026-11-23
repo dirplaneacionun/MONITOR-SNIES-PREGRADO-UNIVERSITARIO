@@ -11,7 +11,12 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
 - Orden de los registros: primero la Universidad del Norte, luego las Universidades de Mayor Interés y
   después las demás instituciones, cada grupo por institución y programa. Bajo cada tabla, una nota indica
   las novedades de la Universidad del Norte y de las Universidades de Mayor Interés.
-- La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor.
+- Tamaño: Gmail recorta los mensajes de más de ~102 KB de HTML y oculta su final. Si el HTML completo supera
+  LIMITE_HTML, cada tabla muestra solo sus primeras filas (las de mayor prioridad, por el orden anterior) hasta
+  que el mensaje cabe, y una nota indica cuántos registros se muestran y enlaza al detalle en el Dashboard. Por
+  debajo del límite el correo es completo. La versión en texto plano nunca se recorta.
+- La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor. Si el servidor rechaza solo a
+  algunos destinatarios, el correo llega a los demás y el rechazo se registra como advertencia (sin la dirección).
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
 Variables de entorno:
@@ -28,6 +33,7 @@ import smtplib
 import ssl
 import sys
 import textwrap
+from collections import Counter
 from datetime import date
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -48,6 +54,8 @@ log = logging.getLogger("snies_monitor.correo")
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 DASHBOARD_URL = "https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/"
+# Tamaño máximo del HTML del correo (bytes): Gmail recorta desde ~102 KB; el margen cubre variaciones de medición
+LIMITE_HTML = 95 * 1024
 
 # Identidad visual
 # Paleta institucional Universidad del Norte
@@ -107,10 +115,13 @@ def seleccionar(df: pd.DataFrame | None) -> pd.DataFrame:
     """
     if df is None or df.empty:
         return pd.DataFrame()
-    grupos = grupos_de_registros(df)
-    prioridad = grupos.map({GRUPO_UNINORTE: 0, GRUPO_MAYOR_INTERES: 1}).fillna(2)
     orden = ["_P", "NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA"]
-    return df.assign(_P=prioridad.values).sort_values(orden, kind="stable").drop(columns="_P")
+    return df.assign(_P=_prioridad(df).values).sort_values(orden, kind="stable").drop(columns="_P")
+
+
+def _prioridad(df: pd.DataFrame) -> pd.Series:
+    """Prioridad de cada registro: 0 la Universidad del Norte, 1 las Universidades de Mayor Interés y 2 las demás."""
+    return grupos_de_registros(df).map({GRUPO_UNINORTE: 0, GRUPO_MAYOR_INTERES: 1}).fillna(2)
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -288,8 +299,21 @@ def _texto_notas(tipo: str, df: pd.DataFrame, negrita=lambda t: t) -> list[str]:
     return [" · ".join(f"{negrita(nombres[g] + ':')} {_plural(int((grupos == g).sum()), singular, plural)}" for g in nombres) + "."]
 
 
-def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
-    """Tarjeta HTML de una sección (nuevos, modificados o inactivos): descripción, tabla con todos los registros y notas."""
+def _aviso_recorte(tipo: str, mostrados: int, total: int, fecha: date) -> str:
+    """Nota bajo una tabla recortada por tamaño: registros mostrados y enlace al detalle de esa ejecución en el Dashboard."""
+    enlace = f'{DASHBOARD_URL}{SECCIONES[tipo]["pagina"]}#fecha={fecha.isoformat()}'
+    verbo = "Se muestra" if mostrados == 1 else "Se muestran"
+    return (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};'
+            f'background:{GRIS};padding:10px 12px;border-radius:6px;border-left:3px solid {AMARILLO};">'
+            f'<b style="color:{NEGRO};">{verbo} {_num(mostrados)} de {_num(total)} registros;</b> el detalle completo está en el '
+            f'<a href="{enlace}" style="color:{ROJO};font-weight:700;">Dashboard</a>.</p>')
+
+
+def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date, maximo: int | None = None) -> str:
+    """
+    Tarjeta HTML de una sección (nuevos, modificados o inactivos): descripción, tabla y notas. La tabla muestra todos
+    los registros o, con `maximo`, solo los primeros (los de mayor prioridad) y una nota que enlaza al detalle.
+    """
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
     contenido = _titulo(f"{cfg['titulo']} · {_num(total)}") + _subtitulo(_descripcion(tipo, df))
@@ -300,7 +324,10 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date) -> str:
     frases = _texto_notas(tipo, df, negrita=lambda t: f'<b style="color:{NEGRO};">{escape(t)}</b>')
     notas = (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};'
              f'background:{GRIS};padding:10px 12px;border-radius:6px;">{"<br>".join(frases)}</p>')
-    return _tarjeta(contenido + _tabla(seleccionar(df), cfg["columnas"]) + notas, color)
+    mostrados = seleccionar(df) if maximo is None else seleccionar(df).head(maximo)
+    tabla = _tabla(mostrados, cfg["columnas"]) if len(mostrados) else ""
+    aviso = _aviso_recorte(tipo, len(mostrados), total, fecha) if len(mostrados) < total else ""
+    return _tarjeta(contenido + tabla + aviso + notas, color)
 
 
 def _kpi(etiqueta: str, valor: str, detalle: str, color: str) -> str:
@@ -366,9 +393,49 @@ def construir_texto(resultados: dict, fecha: date) -> str:
     return "\n".join(lineas) + "\n"
 
 
-def construir_cuerpo(resultados: dict, fecha: date) -> str:
-    """Versión HTML del reporte (estilos en línea para los clientes de correo)."""
+def _topes(res: dict, filas: int) -> dict[str, int]:
+    """
+    Reparte `filas` registros entre las tablas, en orden de prioridad: primero los de la Universidad del Norte, luego los
+    de las Universidades de Mayor Interés y después los demás; dentro de cada prioridad, por turnos entre las secciones.
+    Retorna cuántos registros muestra cada sección (siempre sus primeros, según el orden de `seleccionar`).
+    """
+    candidatos = []
+    for orden, tipo in enumerate(SECCIONES):
+        df = res.get(tipo)
+        if df is None or df.empty:
+            continue
+        contados: dict[int, int] = {}
+        for prioridad in _prioridad(seleccionar(df)):
+            posicion = contados.get(prioridad, 0)
+            contados[prioridad] = posicion + 1
+            candidatos.append((prioridad, posicion, orden, tipo))
+    elegidos = Counter(tipo for *_, tipo in sorted(candidatos)[:filas])
+    return {tipo: elegidos.get(tipo, 0) for tipo in SECCIONES}
+
+
+def construir_cuerpo(resultados: dict, fecha: date, limite: int = LIMITE_HTML) -> str:
+    """
+    Versión HTML del reporte (estilos en línea para los clientes de correo). Si el HTML completo supera `limite` bytes,
+    recorta las tablas al mayor número de registros con el que el mensaje cabe (ver _topes).
+    """
     res = resultados.get("pregrado") or {}
+    completo = _cuerpo(res, fecha)
+    if len(completo.encode("utf-8")) <= limite:
+        return completo
+    total = sum(len(res[t]) for t in SECCIONES if res.get(t) is not None)
+    cabe = lambda filas: len(_cuerpo(res, fecha, _topes(res, filas)).encode("utf-8")) <= limite  # noqa: E731
+    bajo, alto = 0, total   # `bajo` cabe (o es el mínimo posible) y `alto` no cabe: búsqueda binaria del máximo que cabe
+    while alto - bajo > 1:
+        medio = (bajo + alto) // 2
+        bajo, alto = (medio, alto) if cabe(medio) else (bajo, medio)
+    log.warning(f"El HTML del correo superaba {limite // 1024} KB (Gmail recorta desde ~102 KB): se muestran "
+                f"{bajo:,} de {total:,} registros y el detalle completo queda en el Dashboard.")
+    return _cuerpo(res, fecha, _topes(res, bajo))
+
+
+def _cuerpo(res: dict, fecha: date, topes: dict[str, int] | None = None) -> str:
+    """HTML del reporte; `topes` limita los registros que muestra cada sección (por defecto, todos)."""
+    topes = topes or {}
     nue, mod, ina = (res.get(k) for k in ("nuevos", "modificados", "inactivos"))
     kpis = "".join(_kpi(*k) for k in _indicadores(res, fecha))
     logo = (f'<img src="cid:{LOGO_CID}" width="160" height="55" alt="Universidad del Norte" style="display:block;border:0;'
@@ -409,9 +476,9 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
   <tr><td style="padding:16px 0 0;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;"><tr>{kpis}</tr></table>
     {_resumen(res, fecha)}
-    {_seccion("nuevos", nue, fecha)}
-    {_seccion("modificados", mod, fecha)}
-    {_seccion("inactivos", ina, fecha)}
+    {_seccion("nuevos", nue, fecha, topes.get("nuevos"))}
+    {_seccion("modificados", mod, fecha, topes.get("modificados"))}
+    {_seccion("inactivos", ina, fecha, topes.get("inactivos"))}
   </td></tr>
   <tr><td align="center" style="padding:8px 12px 4px;font-family:{FUENTE};font-size:11px;line-height:1.5;color:{TEXTO3};">
     Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte.<br>
@@ -423,14 +490,33 @@ def construir_cuerpo(resultados: dict, fecha: date) -> str:
 
 # ── Envío ─────────────────────────────────────────────────────────────────────
 
-def _enviar(msg: MIMEMultipart, remitente: str, clave: str, destinatarios: list[str]) -> None:
-    """Envía `msg` por SMTP con STARTTLS y autenticación de la cuenta remitente."""
+def _enviar(msg: MIMEMultipart, remitente: str, clave: str, destinatarios: list[str]) -> dict:
+    """
+    Envía `msg` por SMTP con STARTTLS y autenticación de la cuenta remitente. Retorna los destinatarios que el
+    servidor rechazó ({dirección: (código, respuesta)}; vacío si aceptó a todos): smtplib solo lanza una excepción
+    cuando rechaza a todos, de modo que un rechazo parcial debe revisarse en el valor de retorno.
+    """
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as server:
         server.ehlo()
         # Contexto TLS que verifica el certificado y el nombre del servidor (el de smtplib por defecto no lo hace)
         server.starttls(context=ssl.create_default_context())
         server.login(remitente, clave)
-        server.sendmail(remitente, destinatarios, msg.as_bytes())
+        return server.sendmail(remitente, destinatarios, msg.as_bytes())
+
+
+def _registrar_rechazados(destinatarios: list[str], rechazados) -> int:
+    """
+    Registra una advertencia cuando el servidor SMTP rechazó a algún destinatario y retorna cuántos fueron. Se informa
+    su posición en la lista de destinatarios y el código de respuesta, no la dirección: el log del flujo es público.
+    """
+    if not isinstance(rechazados, dict) or not rechazados:
+        return 0
+    posiciones = [str(i) for i, d in enumerate(destinatarios, 1) if d in rechazados]
+    codigos = sorted({str(r[0]) for r in rechazados.values() if r})
+    log.warning(f"El servidor SMTP rechazó a {len(rechazados)} de {len(destinatarios)} destinatario(s) "
+                f"(posición en DESTINATARIOS: {', '.join(posiciones) or 'desconocida'}; código SMTP: {', '.join(codigos) or 'desconocido'}). "
+                "El correo llegó a los demás: revise esas direcciones en el secreto DESTINATARIOS.")
+    return len(rechazados)
 
 
 def enviar_reporte(resultados: dict, fecha: date) -> None:
@@ -456,8 +542,8 @@ def enviar_reporte(resultados: dict, fecha: date) -> None:
     msg.attach(html)
 
     log.info(f"Conectando a {SMTP_HOST}:{SMTP_PORT}...")
-    _enviar(msg, remitente, clave, destinatarios)
-    log.info(f"Correo enviado a {len(destinatarios)} destinatario(s).")
+    rechazados = _registrar_rechazados(destinatarios, _enviar(msg, remitente, clave, destinatarios))
+    log.info(f"Correo enviado a {len(destinatarios) - rechazados} de {len(destinatarios)} destinatario(s).")
 
 
 def enviar_alerta_falla(fecha: date, etapa: str, detalle: str, log_path: Path) -> None:
