@@ -543,6 +543,15 @@ Después, el flujo de GitHub Actions publica en el repositorio los cambios en `N
 
 El flujo **SNIES Monitor** (`.github/workflows/snies_daily.yml`) no se programa dentro de GitHub: lo activa un servicio externo de programación (cron-job.org) mediante una llamada a la API de GitHub (`workflow_dispatch`) con un *token* de acceso de alcance mínimo (limitado a este repositorio, con permiso de lectura y escritura de Actions). La frecuencia y la hora se administran en ese servicio (configuración semanal: martes, 8:00 a. m., hora de Colombia). Cuando el flujo se activa sin parámetros, envía el correo y aplica la protección contra descargas incompletas.
 
+La llamada que realiza el servicio de programación es:
+
+```
+POST https://api.github.com/repos/dirplaneacionun/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/actions/workflows/snies_daily.yml/dispatches
+Cuerpo: {"ref": "main"}
+```
+
+Debe incluir el encabezado `Authorization: Bearer <token>` y `Accept: application/vnd.github+json`. El nombre del archivo del flujo forma parte de la dirección: no debe cambiarse sin actualizar el servicio de programación.
+
 ### 14.2 Pasos del flujo
 
 | Paso | Descripción |
