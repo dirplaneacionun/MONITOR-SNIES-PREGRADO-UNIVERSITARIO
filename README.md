@@ -19,12 +19,13 @@ Cada ejecución descarga el reporte oficial, lo normaliza, clasifica cada progra
 4. [Instalación](#4-instalación)
 5. [Configuración](#5-configuración)
 6. [Ejecución](#6-ejecución)
-7. [Estructura del proyecto](#7-estructura-del-proyecto)
-8. [Datos generados](#8-datos-generados)
-9. [Consideraciones operativas y de seguridad](#9-consideraciones-operativas-y-de-seguridad)
-10. [Pruebas](#10-pruebas)
-11. [Solución de problemas](#11-solución-de-problemas)
-12. [Preguntas frecuentes](#12-preguntas-frecuentes)
+7. [Guía de uso del Dashboard](#7-guía-de-uso-del-dashboard)
+8. [Estructura del proyecto](#8-estructura-del-proyecto)
+9. [Datos generados](#9-datos-generados)
+10. [Consideraciones operativas y de seguridad](#10-consideraciones-operativas-y-de-seguridad)
+11. [Pruebas](#11-pruebas)
+12. [Solución de problemas](#12-solución-de-problemas)
+13. [Preguntas frecuentes](#13-preguntas-frecuentes)
 
 ---
 
@@ -77,6 +78,18 @@ El orquestador ejecuta las etapas en orden. Si una etapa falla, las siguientes n
 | Repositorio | GitHub con Actions y Pages habilitados para la operación automatizada. |
 
 Las dependencias de Python están fijadas con versiones exactas en [`requirements.txt`](requirements.txt). El clasificador verifica sus salidas con las versiones fijadas de `pandas` y `openpyxl`; no se deben actualizar sin ejecutar antes el flujo completo.
+
+### Dependencias principales
+
+| Biblioteca | Uso |
+|---|---|
+| `pandas`, `numpy`, `pyarrow` | Procesamiento de datos y archivos Parquet. |
+| `openpyxl`, `python-calamine`, `xlsxwriter` | Lectura y escritura de archivos Excel. |
+| `selenium`, `webdriver-manager` | Descarga automatizada del portal del SNIES. |
+| `rich`, `tqdm` | Consola y progreso de las herramientas de normalización y clasificación. |
+| `pillow` | Pruebas (comparación de los logotipos). |
+
+El Dashboard incluye en `docs/assets/vendor` las librerías de JavaScript Plotly (gráficas), flatpickr (calendarios), hyparquet y hyparquet-writer (generación de archivos Parquet en el navegador); sus versiones se registran en `Librerias/package.json`.
 
 ## 4. Instalación
 
@@ -161,7 +174,30 @@ python -m http.server 8766 --directory docs
 
 El Dashboard queda disponible en <http://localhost:8766>. Debe servirse por HTTP: abrir los archivos directamente desde el sistema de archivos no habilita la exportación a Parquet.
 
-## 7. Estructura del proyecto
+## 7. Guía de uso del Dashboard
+
+El Dashboard no requiere inicio de sesión ni instalación. Sus cuatro apartados se acceden desde el menú superior:
+
+| Apartado | Contenido |
+|---|---|
+| **Inicio** | Indicadores de la última ejecución, evolución y distribución de los programas activos, y tablas de novedades. |
+| **Nuevos** | Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados). |
+| **Modificados** | Un registro por cada cambio detectado en créditos, municipio de oferta, nombre, número de periodos o modalidad. |
+| **Inactivos** | Programas que estaban activos en la ejecución anterior y ya no figuran en el reporte. |
+
+**Filtros.** La barra superior es común a los cuatro apartados y permanece visible al desplazarse en pantallas de más de 640 px. Contiene, de izquierda a derecha: buscador por código de programa o institución, universidades, programas académicos, departamentos, municipios, sectores, modalidades, campos de CINE específico, divisiones, tipos de cambio (solo en Modificados) y fechas. Los filtros se combinan con la condición **Y**, se encadenan (cada lista solo ofrece los valores que tienen resultados) y actualizan de inmediato los indicadores, las gráficas y las tablas.
+
+**Uso básico**
+
+1. Abrir **Inicio** y revisar los indicadores de la última ejecución: programas activos, nuevos, modificados e inactivos.
+2. Acotar la información con los filtros. En las listas desplegables, **AISLAR** deja marcada una sola opción; **LIMPIAR FILTROS** restablece todos los filtros.
+3. Consultar las gráficas: al pasar el cursor se muestra el valor exacto; en las leyendas, un clic oculta una serie y un doble clic la aísla.
+4. Revisar las tablas: un clic en un encabezado ordena la columna; **DESCARGAR** exporta a Parquet los registros filtrados.
+5. Compartir una vista: los filtros se guardan en la dirección de la página, de modo que copiarla comparte la selección.
+
+El [MANUAL](MANUAL.md#parte-2-dashboard) describe cada filtro, indicador, gráfica y tabla, y los flujos de uso paso a paso.
+
+## 8. Estructura del proyecto
 
 ```
 MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
@@ -198,7 +234,7 @@ MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
 └── requirements.txt                    Dependencias de Python con versiones fijas
 ```
 
-## 8. Datos generados
+## 9. Datos generados
 
 | Archivo | Contenido |
 |---|---|
@@ -211,7 +247,7 @@ MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
 
 Los archivos Parquet pueden abrirse con `pandas`, Power BI, Excel (Power Query) y la mayoría de herramientas analíticas. El diccionario de datos y los criterios de detección están en el [MANUAL](MANUAL.md#anexo-a-diccionario-de-datos).
 
-## 9. Consideraciones operativas y de seguridad
+## 10. Consideraciones operativas y de seguridad
 
 - **Repositorio público:** los registros de ejecución se publican en el repositorio. El formato de registro oculta rutas personales y direcciones de correo antes de escribirlos.
 - **Credenciales:** residen únicamente en los *secrets* de GitHub. El flujo declara permisos mínimos (`contents: write`) y no conserva el *token* en la configuración de Git durante la ejecución.
@@ -221,7 +257,7 @@ Los archivos Parquet pueden abrirse con `pandas`, Power BI, Excel (Power Query) 
 - **Tamaño del repositorio:** `retroalimentacion.json` crece con cada ejecución. La herramienta registra su tamaño y advierte al superar 40 MB (GitHub advierte desde 50 MB y rechaza archivos de más de 100 MB).
 - **Primera ejecución:** si el histórico no contiene una ejecución anterior, la ejecución queda como línea base: se guarda sin detectar novedades y no se envía correo.
 
-## 10. Pruebas
+## 11. Pruebas
 
 ```powershell
 python -m unittest discover -s tests          # pruebas unitarias (segundos)
@@ -232,7 +268,7 @@ python tests/e2e_dashboard.py --rapida        # una muestra de opciones por filt
 - Las **pruebas unitarias** se ejecutan antes de cada ejecución semanal y de cada reclasificación: si alguna falla, no se modifica ningún dato.
 - Las **pruebas de punta a punta** operan el Dashboard con un navegador real y comparan cada indicador, gráfica y tabla con un cálculo independiente sobre los archivos de `Historico/` y `Novedades/`. Se ejecutan automáticamente en las solicitudes de cambios y al publicar cambios en `main` que afecten al Dashboard, sus generadores o las pruebas.
 
-## 11. Solución de problemas
+## 12. Solución de problemas
 
 | Síntoma | Causa probable | Acción |
 |---|---|---|
@@ -248,7 +284,7 @@ python tests/e2e_dashboard.py --rapida        # una muestra de opciones por filt
 
 Los registros detallados se encuentran en `Logs/` y, para cada herramienta, en su carpeta `Logs/`. La página de cada ejecución en GitHub Actions muestra además el resumen de la ejecución.
 
-## 12. Preguntas frecuentes
+## 13. Preguntas frecuentes
 
 **¿Con qué periodicidad se actualiza la información?**
 Semanalmente. Cada ejecución queda identificada por su fecha de obtención.
