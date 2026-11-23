@@ -1189,6 +1189,42 @@ class TestReclasificacion(unittest.TestCase):
                 for p in parches:
                     p.stop()
 
+class TestDatosAtipicosDelSnies(unittest.TestCase):
+    """Datos atípicos del reporte del SNIES que no deben detener la ejecución ni alterar los tipos del histórico."""
+
+    def test_columna_sin_datos_un_anio_y_con_datos_el_siguiente(self):
+        # Una columna vacía en todas las ejecuciones de un año queda sin tipo; si el año siguiente trae datos, adopta su tipo
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(historico, "HISTORICO_DIR", Path(tmp)):
+            historico.guardar_ejecucion(pd.DataFrame([programa(1, JUSTIFICACION=None), programa(2, JUSTIFICACION=None)]), dt.date(2025, 12, 1))
+            historico.guardar_ejecucion(pd.DataFrame([programa(1, JUSTIFICACION="INVESTIGACION"), programa(2, JUSTIFICACION=None)]), dt.date(2026, 1, 5))
+            historico.guardar_ejecucion(pd.DataFrame([programa(1, JUSTIFICACION="PROFUNDIZACION"), programa(3, JUSTIFICACION=None)]), dt.date(2026, 1, 12))
+            self.assertTrue(pa.types.is_null(pq.read_schema(historico.ruta(2025)).field("JUSTIFICACION").type))
+            tipo_2026 = pq.read_schema(historico.ruta(2026)).field("JUSTIFICACION").type
+            self.assertTrue(pa.types.is_string(tipo_2026) or pa.types.is_large_string(tipo_2026))
+            self.assertEqual(historico.leer()["JUSTIFICACION"].fillna("").tolist(), ["", "", "INVESTIGACION", "", "PROFUNDIZACION", ""])
+            # Una reescritura sin cambios deja los archivos idénticos (las anotaciones de pandas no se alteran)
+            antes = {a: p.read_bytes() for a, p in historico.archivos()}
+            historico.reescribir(historico.leer())
+            self.assertEqual({a: p.read_bytes() for a, p in historico.archivos()}, antes)
+
+    def test_fecha_anterior_a_1900_en_el_excel(self):
+        # calamine entrega 29/12/1899 como una hora; leer_programas la conserva como fecha (vía openpyxl)
+        import openpyxl
+        with tempfile.TemporaryDirectory() as tmp:
+            ruta = Path(tmp) / "Programas.xlsx"
+            libro = openpyxl.Workbook()
+            hoja = libro.active
+            hoja.append([S, "FECHA_DE_RESOLUCION"])
+            hoja.append([1, dt.datetime(2018, 6, 19)])
+            hoja.append([2, dt.datetime(1899, 12, 29)])
+            for fila in (2, 3):
+                hoja.cell(fila, 2).number_format = "YYYY-MM-DD HH:MM:SS"
+            libro.save(ruta)
+            df = run_snies.leer_programas(ruta)
+        self.assertEqual(df["FECHA_DE_RESOLUCION"].tolist(), [dt.datetime(2018, 6, 19), dt.datetime(1899, 12, 29)])
+        self.assertTrue(str(run_snies._tipos_estables(df)["FECHA_DE_RESOLUCION"].dtype).startswith("datetime64"))
+
 
 if __name__ == "__main__":
     unittest.main()

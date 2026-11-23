@@ -248,9 +248,31 @@ def _ajustar(tabla: pa.Table, esquema_final: pa.Schema) -> pa.Table:
 
 
 def _con_extra(base: pa.Schema, otro: pa.Schema) -> pa.Schema:
-    """`base` más las columnas de `otro` que no tiene, al final (nunca se descartan datos)."""
+    """
+    `base` más las columnas de `otro` que no tiene, al final (nunca se descartan datos). Una columna sin tipo en
+    `base` (sin datos hasta ahora; por ejemplo, JUSTIFICACION en 2025) adopta el tipo que trae `otro`: los registros
+    anteriores quedan como nulos de ese tipo.
+    """
+    originales = list(base)
+    campos = [otro.field(f.name) if pa.types.is_null(f.type) and f.name in otro.names
+              and not pa.types.is_null(otro.field(f.name).type) else f for f in originales]
+    # Columnas cuyo tipo cambió (se compara por valor: pyarrow crea un objeto de campo nuevo en cada recorrido)
+    nombres = {c.name for c, f in zip(campos, originales) if not c.equals(f)}
+    promovidos = bool(nombres)
     extra = [f for f in otro if f.name not in base.names]
-    return pa.schema(list(base) + extra, metadata=base.metadata) if extra else base
+    if not extra and not promovidos:
+        return base
+    metadata = base.metadata
+    if promovidos and metadata and b"pandas" in metadata:
+        # La anotación de pandas de las columnas promovidas debe corresponder a su nuevo tipo
+        anotacion = json.loads(metadata[b"pandas"])
+        tipos_otro = {c.get("name"): c for c in json.loads((otro.metadata or {}).get(b"pandas", b"{}")).get("columns", [])}
+        for columna in anotacion.get("columns", []):
+            if columna.get("name") in nombres and columna.get("name") in tipos_otro:
+                ref = tipos_otro[columna["name"]]
+                columna["pandas_type"], columna["numpy_type"] = ref.get("pandas_type"), ref.get("numpy_type")
+        metadata = {**metadata, b"pandas": json.dumps(anotacion).encode()}
+    return pa.schema(campos + extra, metadata=metadata)
 
 
 def guardar_ejecucion(df: pd.DataFrame, fecha: dt.date) -> int:
