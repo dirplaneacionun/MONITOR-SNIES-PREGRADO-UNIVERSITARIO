@@ -1078,6 +1078,126 @@ class TestFlujosDeTrabajo(unittest.TestCase):
         self.assertNotIn("e2e_dashboard", semanal)           # la actualización semanal solo ejecuta las pruebas unitarias
 
 
+    def test_flujo_semanal_programado_por_cron_job(self):
+        semanal = (self.RAIZ / "snies_daily.yml").read_text(encoding="utf-8")   # cron-job.org lo invoca por este nombre
+        reclasificar = (self.RAIZ / "reclasificar.yml").read_text(encoding="utf-8")
+        self.assertIn("python Scripts/run_snies.py", semanal)
+        self.assertNotIn("schedule:", semanal)                # lo activa el servicio externo, no GitHub
+        # Nunca corre a la vez que la reclasificación (ambos escriben datos) y una ejecución en curso no se cancela
+        grupo = lambda texto: re.search(r"concurrency:\s*\n\s*group:\s*(\S+)", texto).group(1)  # noqa: E731
+        self.assertEqual(grupo(semanal), grupo(reclasificar))
+        for texto in (semanal, reclasificar):
+            self.assertRegex(texto, r"cancel-in-progress:\s*false")
+
+
+class TestGeneradorDePaginas(unittest.TestCase):
+    """generar_paginas.main: las cuatro páginas del Dashboard, su política de seguridad y la versión de sus recursos."""
+    RECURSOS = ("assets/estilos.css", "assets/app.js", "assets/inicio.js", "assets/detalle.js",
+                "assets/vendor/flatpickr/flatpickr.min.css", "assets/vendor/plotly/plotly.min.js",
+                "assets/vendor/flatpickr/flatpickr.min.js", "assets/vendor/flatpickr/l10n/es.min.js",
+                "data/comun.js", "data/activos.js", "data/nuevos.js", "data/modificados.js", "data/inactivos.js")
+    PAGINAS = ("index", "nuevos", "modificados", "inactivos")
+    # Contenedores de gráficas de cada página (sin las de nivel de formación y justificación, propias de posgrado)
+    GRAFICAS = {
+        "index": ["g-activos", "g-novedades", "g-sector", "g-sector-evol", "g-deptos", "g-univ", "g-modalidad", "g-periodos",
+                  "g-cine", "g-division"],
+        "nuevos": ["g-evolucion", "g-sector", "g-sector-evol", "g-deptos", "g-instituciones", "g-modalidad", "g-periodos",
+                   "g-cine", "g-division"],
+        "modificados": ["g-evolucion", "g-tipos", "g-sector", "g-sector-evol", "g-deptos", "g-instituciones", "g-modalidad",
+                        "g-periodos", "g-cine", "g-division", "g-transiciones", "g-creditos", "g-periodos-dir"],
+        "inactivos": ["g-evolucion", "g-sector", "g-sector-evol", "g-deptos", "g-instituciones", "g-modalidad", "g-periodos",
+                      "g-cine", "g-division"],
+    }
+
+    def _generar(self, docs):
+        import generar_paginas
+        with mock.patch.object(generar_paginas, "DOCS", docs), mock.patch("builtins.print"):
+            generar_paginas.main()
+
+    def setUp(self):
+        carpeta = tempfile.TemporaryDirectory()
+        self.addCleanup(carpeta.cleanup)
+        self.docs = Path(carpeta.name)
+        for rel in self.RECURSOS:
+            destino = self.docs / rel
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            destino.write_text(f"/* {rel} */", encoding="utf-8")   # contenido distinto por archivo: su versión también
+        self._generar(self.docs)
+        self.html = {p: (self.docs / f"{p}.html").read_text(encoding="utf-8") for p in self.PAGINAS}
+
+    def test_escribe_las_cuatro_paginas_con_sus_graficas(self):
+        self.assertEqual(sorted(p.name for p in self.docs.glob("*.html")), sorted(f"{p}.html" for p in self.PAGINAS))
+        for pagina, esperadas in self.GRAFICAS.items():
+            with self.subTest(pagina):
+                self.assertEqual(re.findall(r'class="grafica[^"]*" id="([^"]+)"', self.html[pagina]), esperadas)
+                self.assertNotIn("g-nivel", self.html[pagina])
+                self.assertNotIn("g-justificacion", self.html[pagina])
+
+    def test_encabezado_y_navegacion(self):
+        for pagina, html in self.html.items():
+            with self.subTest(pagina):
+                self.assertIn('<html lang="es">', html)
+                self.assertIn("MONITOR SNIES PREGRADO · UNIVERSITARIO" if pagina == "index" else "PROGRAMAS ACADÉMICOS", html)
+                self.assertIn("Programas Académicos Universitarios de Pregrado en Colombia", html)
+                self.assertEqual(re.findall(r'<a href="([a-z]+\.html)"( class="activa" aria-current="page")?>', html),
+                                 [(f"{p}.html", ' class="activa" aria-current="page"' if p == pagina else "") for p in self.PAGINAS])
+        # Las páginas de detalle se identifican por su tipo; Inicio no
+        self.assertIn("<body>", self.html["index"])
+        for tipo in ("nuevos", "modificados", "inactivos"):
+            self.assertIn(f'<body data-tipo="{tipo}">', self.html[tipo])
+
+    def test_politica_de_contenido_coincide_con_el_mapa_de_importacion(self):
+        import base64
+        import hashlib
+        for pagina, html in self.html.items():
+            with self.subTest(pagina):
+                politica = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html).group(1)
+                mapa = re.search(r'<script type="importmap">(.*?)</script>', html, re.S).group(1)
+                huella = base64.b64encode(hashlib.sha256(mapa.encode("utf-8")).digest()).decode()
+                # El único script en línea autorizado es el mapa de importación, por su huella: si cambia, la huella cambia
+                self.assertIn(f"script-src 'self' 'sha256-{huella}'", politica)
+                for directiva in ("default-src 'self'", "connect-src 'self'", "object-src 'none'", "form-action 'none'"):
+                    self.assertIn(directiva, politica)
+                self.assertNotIn("unsafe-eval", politica)
+                self.assertNotRegex(politica.split("script-src")[1].split(";")[0], "unsafe-inline")
+                self.assertNotIn("http", politica)                                   # ninguna solicitud sale del origen
+
+    def test_recursos_locales_con_version_segun_su_contenido(self):
+        import hashlib
+        for pagina, html in self.html.items():
+            with self.subTest(pagina):
+                referencias = re.findall(r'(?:src|href)="([^"]+)\?v=([0-9a-f]{10})"', html)
+                self.assertGreaterEqual(len(referencias), 9)
+                for ruta, version in referencias:
+                    self.assertFalse(ruta.startswith(("http:", "https:", "//")), f"recurso externo: {ruta}")
+                    contenido = (self.docs / ruta).read_bytes()      # el recurso existe
+                    self.assertEqual(version, hashlib.sha256(contenido).hexdigest()[:10], ruta)
+                # Sin versión, el navegador podría usar una copia anterior: ningún script propio la omite
+                self.assertEqual(re.findall(r'<script src="(?![^"]*\?v=)[^"]+"', html), [])
+
+    def test_identificadores_unicos_y_titulos_enlazados_con_sus_tarjetas(self):
+        for pagina, html in self.html.items():
+            with self.subTest(pagina):
+                ids = re.findall(r'\bid="([^"]+)"', html)
+                self.assertEqual(sorted({i for i in ids if ids.count(i) > 1}), [])
+                for referido in re.findall(r'aria-labelledby="([^"]+)"', html):
+                    self.assertIn(referido, ids)
+                for grafica in re.findall(r'class="grafica[^"]*" id="([^"]+)"', html):
+                    self.assertIn(f"t-{grafica}", ids)                              # cada gráfica tiene su título
+
+    def test_regenerar_deja_los_mismos_archivos(self):
+        antes = {p: (self.docs / f"{p}.html").read_bytes() for p in self.PAGINAS}
+        self._generar(self.docs)
+        self.assertEqual({p: (self.docs / f"{p}.html").read_bytes() for p in self.PAGINAS}, antes)
+
+    def test_un_recurso_modificado_cambia_su_version(self):
+        antes = re.search(r'estilos\.css\?v=([0-9a-f]{10})', self.html["index"]).group(1)
+        (self.docs / "assets/estilos.css").write_text("/* otro contenido */", encoding="utf-8")
+        self._generar(self.docs)
+        despues = re.search(r'estilos\.css\?v=([0-9a-f]{10})', (self.docs / "index.html").read_text(encoding="utf-8")).group(1)
+        self.assertNotEqual(antes, despues)
+
+
 class TestFechaSinHora(unittest.TestCase):
     """FECHA_DE_OBTENCION se guarda como fecha (AAAA-MM-DD, sin hora) en el histórico y en las novedades."""
 
