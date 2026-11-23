@@ -8145,4 +8145,6 @@ NOMBRE_DIVISION_OVERRIDE = {
     # --- Talento humano (headhunting y retención) y negociación → ESCUELA DE NEGOCIOS ---
     "especializacion en headhunting y retencion del talento": "ESCUELA DE NEGOCIOS",
     "especializacion en negociacion y toma de decisiones": "ESCUELA DE NEGOCIOS",
+
+    "especializacion tecnologica en gestion del riesgo de desastres": "INGENIERIAS",
 }
