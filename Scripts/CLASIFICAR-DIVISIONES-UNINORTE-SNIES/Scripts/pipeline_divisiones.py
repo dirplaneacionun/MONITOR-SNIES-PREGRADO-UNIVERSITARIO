@@ -62,7 +62,7 @@ def parse_args():
 
 
 def _parsear_seleccion(texto):
-    """Convierte '1,3,5' (0 = todos) en indices de ARCHIVOS_PROCESABLES. Retorna (indices, error)."""
+    """Convierte '1,3,5' (0 = todos) en índices de ARCHIVOS_PROCESABLES. Retorna (índices, error)."""
     try:
         nums = [int(x.strip()) for x in texto.split(",")]
     except ValueError:

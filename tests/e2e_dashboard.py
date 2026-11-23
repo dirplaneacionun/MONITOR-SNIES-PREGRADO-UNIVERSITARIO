@@ -41,8 +41,6 @@ RESULTADOS: list[tuple[str, bool, str]] = []
 
 
 def verificar(nombre: str, ok: bool, detalle: str = "") -> bool:
-
-
     """Registra y muestra el resultado de una verificación; retorna True si se cumplió."""
     RESULTADOS.append((nombre, bool(ok), detalle))
     if not ok:
@@ -53,15 +51,12 @@ def verificar(nombre: str, ok: bool, detalle: str = "") -> bool:
 # ── Datos de referencia ───────────────────────────────────────────────────────
 
 def leer_js(nombre):
-
     """Contenido (JSON) de un archivo de datos del Dashboard, sin el envoltorio window.SNIES."""
     texto = (DOCS / "data" / nombre).read_text(encoding="utf-8")
     return json.loads(texto[texto.index("]=") + 2:].rstrip().rstrip(";"))
 
 
 def decodificar(t):
-
-
     """Tabla columnar de los archivos de datos → DataFrame, con las columnas derivadas del Dashboard."""
     datos = {}
     for c in t["columnas"]:
@@ -72,8 +67,6 @@ def decodificar(t):
 
 
 def derivar(df):
-
-
     """Agrega el grupo de universidades (_GU) y la modalidad agrupada (_MG), igual que el Dashboard."""
     df["_GU"] = df["CODIGO_INSTITUCION_PADRE"].map(catalogos.grupo_universidad)   # grupos por institución padre
     df["_MG"] = df["MODALIDAD"].map(catalogos.modalidad_grupo)
@@ -210,12 +203,10 @@ class _ManejadorSilencioso(http.server.SimpleHTTPRequestHandler):
     """Sirve docs/ sin escribir cada solicitud en la consola (solo se informan las fallas de las pruebas)."""
 
     def log_message(self, *args, **kwargs):
-
         """Sin registro de solicitudes en la consola."""
         pass
 
     def handle(self):
-
         """Ignora las conexiones que el navegador cierra antes de recibir la respuesta."""
         try:
             super().handle()
@@ -224,8 +215,6 @@ class _ManejadorSilencioso(http.server.SimpleHTTPRequestHandler):
 
 
 def servidor():
-
-
     """Servidor HTTP local de docs/ en un puerto libre."""
     manejador = functools.partial(_ManejadorSilencioso, directory=str(DOCS))
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), manejador)
@@ -234,8 +223,6 @@ def servidor():
 
 
 def navegador():
-
-
     """Chrome sin interfaz con registro de la consola del navegador."""
     o = webdriver.ChromeOptions()
     o.add_argument("--headless=new")
@@ -373,8 +360,6 @@ def esperado_inicio(filtro, busqueda=None, fechas=None):
 
 
 def esperado_detalle(tipo, filtro, busqueda=None, fechas=None):
-
-
     """Registros esperados en una página de detalle, calculados en Python desde Novedades/."""
     df = NOV[tipo]
     if fechas is not None:
@@ -383,8 +368,6 @@ def esperado_detalle(tipo, filtro, busqueda=None, fechas=None):
 
 
 def comparar_inicio(p, nombre, filtro, busqueda=None, fechas=None):
-
-
     """Compara KPIs, pestañas, tablas y gráficas de Inicio con el cálculo independiente en Python."""
     e, s = esperado_inicio(filtro, busqueda, fechas), p.estado()
     ok = verificar(f"inicio · {nombre} · KPI activos", s["activos"] == e["activos"], f"{s['activos']} vs {e['activos']}")
@@ -407,8 +390,6 @@ def comparar_inicio(p, nombre, filtro, busqueda=None, fechas=None):
 
 
 def comparar_detalle(p, tipo, nombre, filtro, busqueda=None, fechas=None):
-
-
     """Compara total, tabla y gráficas de una página de detalle con el cálculo independiente en Python."""
     e, s = esperado_detalle(tipo, filtro, busqueda, fechas), p.estado()
     ok = verificar(f"{tipo} · {nombre} · TOTAL", s["total"] == e, f"{s['total']} vs {e}")
@@ -432,8 +413,6 @@ def clic_dia(p, iso):
 
 
 def abrir_fechas(p, modo):
-
-
     """Abre el selector de fechas en el modo indicado (fecha, rango, mes o anio)."""
     p.cerrar()
     p.d.find_element(By.CSS_SELECTOR, ".fs-btn").click()
@@ -441,8 +420,6 @@ def abrir_fechas(p, modo):
 
 
 def clic_valor_fecha(p, selector):
-
-
     """Clic real sobre un mes o año del selector de fechas."""
     el = p.d.find_element(By.CSS_SELECTOR, selector)
     p.js("arguments[0].scrollIntoView({block: 'center'});", el)
@@ -451,8 +428,6 @@ def clic_valor_fecha(p, selector):
 
 
 def etiqueta_fechas(p):
-
-
     """Texto del botón del selector de fechas."""
     return p.js("return document.querySelector('.fs-btn span').textContent")
 
@@ -521,8 +496,6 @@ def probar_fechas(p, comparar):
 
 
 def probar_tabla(p, filas_ref):
-
-
     """Orden por cada columna según su tipo de dato y paginación de la tabla."""
     cols = p.js("return [...document.querySelectorAll('#tabla th')].map(t => t.dataset.c)")
     for c in cols:
@@ -568,8 +541,6 @@ def probar_tabla(p, filas_ref):
 
 
 def probar_exportacion(p):
-
-
     """El archivo que descarga la tabla tiene las mismas filas y columnas que la tabla."""
     r = p.d.execute_async_script("""const listo = arguments[arguments.length - 1];
       (async () => {
@@ -608,8 +579,6 @@ def probar_sin_punteadas(p):
 
 
 def nombres_cine(p):
-
-
     """Nombres de las series de la gráfica de evolución por campo de CINE específico."""
     return p.js("return (document.getElementById('g-cine').data || []).map(t => t.name.split(' · ')[0])")
 
@@ -1287,8 +1256,6 @@ def probar_persistencia(d, base):
 
 
 def probar_rendimiento(p):
-
-
     """Tiempo de carga y de aplicación de un filtro."""
     t0 = time.time(); clic_opcion(p, 0, '[data-g="otras"]'); dt_ = time.time() - t0
     reset_filtros(p)
@@ -1315,8 +1282,6 @@ def probar_inicio_sin_tabla(d, base):
 
 
 def consistencia_datos():
-
-
     """Los datos publicados en docs/data coinciden con los archivos fuente (Historico/ y Novedades/)."""
     h = historico_fuente.leer(["FECHA_DE_OBTENCION"])
     por_fecha = h["FECHA_DE_OBTENCION"].dt.strftime("%Y-%m-%d").value_counts().to_dict()
@@ -1914,8 +1879,6 @@ def probar_botones_sin_recorte(d, base):
 
 
 def main():
-
-
     """Ejecuta todas las pruebas; retorna 0 si no hubo fallas."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--rapida", action="store_true", help="Prueba una muestra de opciones por filtro")

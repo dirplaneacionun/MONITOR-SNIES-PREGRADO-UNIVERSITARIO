@@ -15,8 +15,11 @@ Correo institucional del Monitor SNIES Pregrado · Universitario (SMTP de Gmail)
   LIMITE_HTML, cada tabla muestra solo sus primeras filas (las de mayor prioridad, por el orden anterior) hasta
   que el mensaje cabe, y una nota indica cuántos registros se muestran y enlaza al detalle en el Dashboard. Por
   debajo del límite el correo es completo. La versión en texto plano nunca se recorta.
-- La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor. Si el servidor rechaza solo a
-  algunos destinatarios, el correo llega a los demás y el rechazo se registra como advertencia (sin la dirección).
+- La conexión SMTP usa STARTTLS con verificación de certificado y nombre del servidor. Una falla transitoria al conectar
+  o autenticar (corte de la conexión, tiempo de espera, resolución de nombres) se reintenta hasta INTENTOS_SMTP veces con
+  espera creciente; un rechazo de credenciales o de certificado no se reintenta, ni tampoco un error durante el envío del
+  mensaje, para no duplicarlo. Si el servidor rechaza solo a algunos destinatarios, el correo llega a los demás y el
+  rechazo se registra como advertencia (sin la dirección).
 - enviar_alerta_falla() notifica fallas técnicas solo a la cuenta remitente.
 
 Variables de entorno:
@@ -27,12 +30,15 @@ Variables de entorno:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import smtplib
+import socket
 import ssl
 import sys
 import textwrap
+import time
 from collections import Counter
 from datetime import date
 from email.mime.image import MIMEImage
@@ -53,6 +59,12 @@ log = logging.getLogger("snies_monitor.correo")
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
+# Reintentos de la conexión y la autenticación ante fallas transitorias: número de intentos y segundos de espera antes
+# del segundo y del tercero.
+INTENTOS_SMTP = 3
+ESPERA_SMTP = (5, 15)
+_ERRORES_TRANSITORIOS = (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, ConnectionError, TimeoutError,
+                         ssl.SSLError, socket.gaierror)
 DASHBOARD_URL = "https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/"
 # Tamaño máximo del HTML del correo (bytes): Gmail recorta desde ~102 KB; el margen cubre variaciones de medición
 LIMITE_HTML = 95 * 1024
@@ -487,18 +499,46 @@ def _cuerpo(res: dict, fecha: date, topes: dict[str, int] | None = None) -> str:
 
 # ── Envío ─────────────────────────────────────────────────────────────────────
 
+def _conectar(remitente: str, clave: str) -> smtplib.SMTP:
+    """
+    Abre la conexión SMTP con STARTTLS y la autentica; retorna el servidor listo para enviar (quien lo recibe lo cierra).
+    Una falla transitoria (corte de la conexión, tiempo de espera, resolución de nombres) se reintenta hasta INTENTOS_SMTP
+    veces, con la espera de ESPERA_SMTP entre intentos, y deja una advertencia sin datos sensibles. No se reintentan el
+    rechazo de las credenciales ni los errores de certificado: repetirlos no los resuelve.
+    """
+    for intento in range(1, INTENTOS_SMTP + 1):
+        servidor = None
+        try:
+            servidor = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60)
+            servidor.ehlo()
+            # Contexto TLS que verifica el certificado y el nombre del servidor (el de smtplib por defecto no lo hace)
+            servidor.starttls(context=ssl.create_default_context())
+            servidor.login(remitente, clave)
+            return servidor
+        except Exception as exc:
+            if servidor is not None:
+                # El cierre de una conexión ya rota no debe ocultar el error original
+                with contextlib.suppress(Exception):
+                    servidor.close()
+            if (not isinstance(exc, _ERRORES_TRANSITORIOS) or isinstance(exc, ssl.SSLCertVerificationError)
+                    or intento == INTENTOS_SMTP):
+                raise
+            espera = ESPERA_SMTP[min(intento, len(ESPERA_SMTP)) - 1]
+            log.warning(f"Falla transitoria de la conexión SMTP ({type(exc).__name__}: {exc}); intento {intento} de "
+                        f"{INTENTOS_SMTP}. Se reintenta en {espera} s.")
+            time.sleep(espera)
+
+
 def _enviar(msg: MIMEMultipart, remitente: str, clave: str, destinatarios: list[str]) -> dict:
     """
-    Envía `msg` por SMTP con STARTTLS y autenticación de la cuenta remitente. Retorna los destinatarios que el
-    servidor rechazó ({dirección: (código, respuesta)}; vacío si aceptó a todos): smtplib solo lanza una excepción
-    cuando rechaza a todos, de modo que un rechazo parcial debe revisarse en el valor de retorno.
+    Envía `msg` por SMTP con STARTTLS y autenticación de la cuenta remitente (la conexión se reintenta ante fallas
+    transitorias; ver _conectar). Retorna los destinatarios que el servidor rechazó ({dirección: (código, respuesta)};
+    vacío si aceptó a todos): smtplib solo lanza una excepción cuando rechaza a todos, de modo que un rechazo parcial debe
+    revisarse en el valor de retorno. El envío del mensaje no se reintenta: si la conexión se corta durante él, el servidor
+    pudo haberlo aceptado y repetirlo lo duplicaría.
     """
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as server:
-        server.ehlo()
-        # Contexto TLS que verifica el certificado y el nombre del servidor (el de smtplib por defecto no lo hace)
-        server.starttls(context=ssl.create_default_context())
-        server.login(remitente, clave)
-        return server.sendmail(remitente, destinatarios, msg.as_bytes())
+    with _conectar(remitente, clave) as servidor:
+        return servidor.sendmail(remitente, destinatarios, msg.as_bytes())
 
 
 def _registrar_rechazados(destinatarios: list[str], rechazados) -> int:
