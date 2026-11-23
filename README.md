@@ -231,6 +231,7 @@ MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
 │   └── data/                           Datos del Dashboard generados en cada ejecución
 ├── tests/
 │   ├── test_unitarias.py               Pruebas unitarias
+│   ├── test_etl_clasificador.py        Pruebas unitarias del ETL y del clasificador
 │   └── e2e_dashboard.py                Pruebas de punta a punta del Dashboard
 └── requirements.txt                    Dependencias de Python con versiones fijas
 ```
