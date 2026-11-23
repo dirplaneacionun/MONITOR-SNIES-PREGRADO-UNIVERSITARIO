@@ -266,7 +266,7 @@ def main() -> int:
         "rangos": versiones["_RANGOS"].tolist(),
     })
 
-    # Archivos que el Dashboard ya no publica (tabla de programas activos de Inicio y copias del histórico por
+    # Archivos que el Dashboard no publica (tabla de programas activos de Inicio y copias del histórico por
     # ejecución): se eliminan si existen para que no queden datos sin uso en docs/
     for obsoleto in ("activos_tabla.js", "historico.parquet"):
         (DATA_DIR / obsoleto).unlink(missing_ok=True)
