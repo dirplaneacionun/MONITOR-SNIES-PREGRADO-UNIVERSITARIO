@@ -49,7 +49,7 @@ jobs:
     steps:
       # Acciones fijadas a un commit exacto (las mismas del workflow semanal).
       - name: Checkout del repositorio
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -57,10 +57,10 @@ jobs:
       # Solo el navegador. El chromedriver lo descarga la propia prueba (webdriver-manager) con la versión que coincide con
       # Chrome: la acción instalaba uno de otra versión (160, con Chrome 157), y Selenium lo prefería al del navegador.
       - name: Configurar Google Chrome
-        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce  # v1
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4  # v2.2.0
 
       - name: Configurar Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.14"
           cache: pip
