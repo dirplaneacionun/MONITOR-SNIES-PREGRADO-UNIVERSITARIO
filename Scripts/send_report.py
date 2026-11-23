@@ -30,6 +30,7 @@ Variables de entorno:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import smtplib
@@ -516,10 +517,9 @@ def _conectar(remitente: str, clave: str) -> smtplib.SMTP:
             return servidor
         except Exception as exc:
             if servidor is not None:
-                try:
+                # El cierre de una conexión ya rota no debe ocultar el error original
+                with contextlib.suppress(Exception):
                     servidor.close()
-                except Exception:  # noqa: BLE001 - el cierre de una conexión ya rota no debe ocultar el error original
-                    pass
             if (not isinstance(exc, _ERRORES_TRANSITORIOS) or isinstance(exc, ssl.SSLCertVerificationError)
                     or intento == INTENTOS_SMTP):
                 raise
