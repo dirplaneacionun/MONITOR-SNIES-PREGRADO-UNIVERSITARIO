@@ -199,7 +199,7 @@ def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> st
     # Tablas de novedades (5 o más columnas): letra y márgenes algo menores para que quepan en el ancho del correo;
     # las tres usan el mismo tamaño aunque difieran en número de columnas
     compacta = len(columnas) >= 5
-    letra_th, margen = ("10px", "6px") if compacta else ("11px", "10px")
+    letra_th, margen = ("10px", "4px") if compacta else ("11px", "10px")
     th = (f"background:{NEGRO};color:#FFFFFF;font-family:{FUENTE};font-size:{letra_th};font-weight:700;"
           f"letter-spacing:.04em;padding:9px {margen};")
     alinear = lambda c: "right" if c in numericas else "left"  # noqa: E731
@@ -209,7 +209,7 @@ def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> st
     # en la fila (las celdas los heredan), y márgenes y borde en cada celda, con lo que el mensaje pesa lo mínimo para
     # el límite de Gmail (LIMITE_HTML). Fondo, alineación vertical y alineación de las cifras van como atributos
     # (bgcolor, valign, align), que todos los clientes respetan.
-    letra, relleno = ("11px", "6px") if compacta else ("12px", "10px")
+    letra, relleno = ("11px", "4px") if compacta else ("12px", "10px")
     estilo_fila = f"font-family:{FUENTE};font-size:{letra};color:{NEGRO};"
     estilo_celda = f"padding:7px {relleno};border-bottom:1px solid {BORDE};"
     filas = []
