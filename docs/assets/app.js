@@ -32,6 +32,8 @@
   const colorSector = (acento = ROJO) => ({ PRIVADO: acento, OFICIAL: NEGRO });
   const SECTOR_COLOR = colorSector();
   const TINTA = NEGRO, TINTA2 = "#3E4751", REJILLA = "#E5E5E5";
+  /** Título del eje de conteo de todas las gráficas: una sola unidad de medida, "registros". */
+  const EJE_REGISTROS = { text: "REGISTROS", font: { size: 10 } };
 
   // ── Utilidades ────────────────────────────────────────────────────────────
   const fmt = (n) => (n == null || isNaN(n) ? "–" : Number(n).toLocaleString("es-CO"));
@@ -889,16 +891,20 @@
     // Pantalla angosta: la leyenda pasa debajo del gráfico (a la derecha taparía las líneas) y el contenedor crece
     const angosta = varias && div.clientWidth > 0 && div.clientWidth < 640;
     div.style.height = angosta ? `${300 + ser.length * 22}px` : "";
+    // En pantalla angosta el nombre se acorta según el ancho disponible, para que el total de cada serie (que se muestra
+    // tras el nombre) no quede cortado por el borde de la leyenda (unos 6,8 px por carácter y hasta 9 para " · 1.422")
+    const maxNombre = angosta ? Math.max(14, Math.floor((div.clientWidth - 120) / 6.8) - 9) : Infinity;
+    const recorte = (nombre) => (nombre.length > maxNombre ? nombre.slice(0, maxNombre - 1) + "…" : nombre);
     const trazas = ser.map((s) => ({
       type: "scatter", mode: fechas.length === 1 ? "lines+markers" : "lines", x: fechas, y: s.valores,   // con una sola fecha una línea no se dibuja: se muestra el punto
-      name: varias ? `${angosta && s.nombre.length > 36 ? s.nombre.slice(0, 35) + "…" : s.nombre} · ${fmt(total(s))}` : s.nombre,
+      name: varias ? `${recorte(s.nombre)} · ${fmt(total(s))}` : s.nombre,
       line: { color: colorLinea(s.color), width: 2, dash: "solid", shape: "linear" },   // siempre línea continua
       marker: { color: colorLinea(s.color), size: 9 },
       hovertemplate: `${esc(s.nombre)}: <b>%{y:,}</b> ${etiquetaHover}<extra></extra>`,
     }));
     const layout = baseLayout({
       xaxis: ejeMeses(fechas, div.clientWidth - 80),
-      yaxis: Object.assign({ rangemode: opciones.modo === "stock" && !varias ? "normal" : "tozero", gridcolor: REJILLA, zeroline: false, tickformat: ",d", automargin: true },
+      yaxis: Object.assign({ rangemode: opciones.modo === "stock" && !varias ? "normal" : "tozero", gridcolor: REJILLA, zeroline: false, tickformat: ",d", automargin: true, title: EJE_REGISTROS },
         ejeEntero(ser.flatMap((s) => s.valores), !(opciones.modo === "stock" && !varias))),
       hovermode: "x unified",
       margin: { l: 56, r: varias ? 12 : 16, t: varias ? 12 : 40, b: 48 },
@@ -928,7 +934,7 @@
     };
     const layout = baseLayout({
       margin: { l: 10, r: 40, t: 8, b: 30 }, bargap: 0.35,
-      xaxis: Object.assign({ gridcolor: REJILLA, zeroline: true, zerolinecolor: "#BDBDBD", tickformat: ",d" }, ejeEntero(valores)),
+      xaxis: Object.assign({ gridcolor: REJILLA, zeroline: true, zerolinecolor: "#BDBDBD", tickformat: ",d", automargin: true, title: EJE_REGISTROS }, ejeEntero(valores)),
       yaxis: { automargin: true, tickfont: { size: 10, color: TINTA } },
     });
     limpiarVacio(div);
@@ -945,7 +951,7 @@
     const layout = baseLayout({
       margin: { l: 56, r: 16, t: 20, b: 48 }, bargap: 0.3,
       xaxis: { type: "category", title: { text: opciones.tituloX || "", font: { size: 11 } }, tickfont: { color: TINTA } },
-      yaxis: Object.assign({ gridcolor: REJILLA, zeroline: false, tickformat: ",d", rangemode: "tozero" }, ejeEntero(y)),
+      yaxis: Object.assign({ gridcolor: REJILLA, zeroline: false, tickformat: ",d", rangemode: "tozero", automargin: true, title: EJE_REGISTROS }, ejeEntero(y)),
     });
     limpiarVacio(div);
     Plotly.react(div, [traza], layout, CONFIG_PLOTLY);
