@@ -366,6 +366,14 @@ class TestCorreo(unittest.TestCase):
                                         MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA", MODALIDAD="PRESENCIAL",
                                         DIVISION_UNINORTE="INGENIERIAS")
 
+    def test_ningun_texto_del_correo_baja_de_10_px(self):
+        # Encabezados y cuerpo de las tablas, incluida la de Modificados (la de más columnas), con al menos 10 px
+        mod = self._modificados([1713, 1711, 9999])
+        html = send_report._cuerpo({"modificados": mod, "total_activos": 100}, dt.date(2026, 11, 17))
+        tamanos = {int(n) for n in re.findall(r"font-size:(\d+)px", html)}
+        self.assertTrue(tamanos)
+        self.assertGreaterEqual(min(tamanos), 10)
+
     def test_por_encima_del_limite_recorta_por_prioridad_y_enlaza_al_dashboard(self):
         fecha = dt.date(2026, 7, 28)
         mod = self._modificados([1713] * 3 + [1711] * 4 + list(range(2000, 2500)))   # 507 registros: no caben en 95 KB
