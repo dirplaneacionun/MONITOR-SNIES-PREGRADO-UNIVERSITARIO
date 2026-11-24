@@ -339820,7 +339820,7 @@
     "origen": "HISTORICO",
     "detalle": null,
     "fecha": null,
-    "nombre": "bacteriolog¿a",
+    "nombre": "bacteriologa",
     "nombres": {
       "bacteriolog¿a": {
         "division": "CIENCIAS DE LA SALUD",
@@ -680280,15 +680280,50 @@
     "fecha": "2026-11-18",
     "nombre": "administracion de empresas"
   },
+  "119835": {
+    "division": "CIENCIAS BASICAS",
+    "origen": "OVERRIDE",
+    "detalle": "ciencia de datos",
+    "fecha": "2026-11-24",
+    "nombre": "ciencia de datos"
+  },
+  "119898": {
+    "division": "DERECHO, CIENCIA POLITICA Y RELACIONES INTERNACIONALES",
+    "origen": "OVERRIDE",
+    "detalle": "derecho",
+    "fecha": "2026-11-24",
+    "nombre": "derecho"
+  },
+  "119916": {
+    "division": "INGENIERIAS",
+    "origen": "OVERRIDE",
+    "detalle": "ingenieria en inteligencia artificial",
+    "fecha": "2026-11-24",
+    "nombre": "ingenieria en inteligencia artificial"
+  },
+  "119915": {
+    "division": "INGENIERIAS",
+    "origen": "OVERRIDE",
+    "detalle": "ingenieria en inteligencia artificial",
+    "fecha": "2026-11-24",
+    "nombre": "ingenieria en inteligencia artificial"
+  },
+  "119913": {
+    "division": "INGENIERIAS",
+    "origen": "OVERRIDE",
+    "detalle": "ingenieria industrial",
+    "fecha": "2026-11-24",
+    "nombre": "ingenieria industrial"
+  },
   "_meta": {
-    "count": 32188,
+    "count": 32193,
     "formato": 4,
     "registro_nombres": true,
     "origenes": {
       "PROGRAMAS_UN": 357,
-      "OVERRIDE": 12782,
+      "OVERRIDE": 12787,
       "HISTORICO": 19049
     },
-    "diccionario": "8087ee8fe074"
+    "diccionario": "a8da733ca192"
   }
 }
