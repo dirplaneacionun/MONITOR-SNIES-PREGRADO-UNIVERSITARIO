@@ -28,7 +28,7 @@ webdriver-manager==4.1.2
 pillow==13.0.0
 
 # Dependencias transitivas (fijadas para que la instalación sea reproducible)
-python-dateutil==2.9.0.post0  # pandas
+python-dateutil==4.0.0  # pandas
 six==1.17.0                   # python-dateutil
 tzdata==2026.6                # pandas
 et_xmlfile==2.0.0             # openpyxl
