@@ -40,6 +40,7 @@ def programa(snies, **valores):
     base = {
         S: snies, "NOMBRE_DEL_PROGRAMA": f"PROGRAMA {snies}", "NOMBRE_INSTITUCION": "UNIVERSIDAD X",
         "CODIGO_INSTITUCION": 9999, "NUMERO_CREDITOS": 160, "MUNICIPIO_OFERTA_PROGRAMA": "BARRANQUILLA",
+        "DEPARTAMENTO_OFERTA_PROGRAMA": "ATLANTICO",
         "NUMERO_PERIODOS_DE_DURACION": 10, "MODALIDAD": "PRESENCIAL", "DIVISION_UNINORTE": "INGENIERIAS",
     }
     base.update(valores)
@@ -106,9 +107,32 @@ class TestDeteccion(unittest.TestCase):
         self.assertEqual(nuevos[S].tolist(), [4])
         self.assertEqual(nuevos["TIPO_NOVEDAD"].tolist(), ["NUEVO"])
         self.assertEqual(inactivos[S].tolist(), [2])
-        cambios = dict(zip(modificados["TIPO_CAMBIO_DETECTADO"], modificados["CAMBIO_DETECTADO"]))
-        self.assertEqual(cambios, {"NUMERO DE CREDITOS": "160 → 150", "MODALIDAD": "VIRTUAL → HIBRIDA (PRESENCIAL-VIRTUAL)"})
+        # Un registro por programa con todos sus cambios, en el orden de TIPOS_CAMBIO
+        self.assertNotIn("TIPO_CAMBIO_DETECTADO", modificados.columns)
+        self.assertEqual(modificados[S].tolist(), [3])
+        self.assertEqual(modificados["CAMBIO_DETECTADO"].tolist(),
+                         ["NUMERO DE CREDITOS: 160 → 150 | MODALIDAD: VIRTUAL → HIBRIDA (PRESENCIAL-VIRTUAL)"])
         self.assertTrue((modificados[F] == pd.Timestamp(self.fecha)).all())
+
+    def test_un_registro_por_programa_con_cambios_ordenados_por_tipo(self):
+        anterior = pd.DataFrame([programa(1, MODALIDAD="VIRTUAL", NUMERO_PERIODOS_DE_DURACION=4), programa(2),
+                                 programa(3, NOMBRE_DEL_PROGRAMA="VIEJO", MUNICIPIO_OFERTA_PROGRAMA="SOLEDAD")])
+        hoy = pd.DataFrame([programa(1, MODALIDAD="PRESENCIAL", NUMERO_PERIODOS_DE_DURACION=5), programa(2, NUMERO_CREDITOS=120),
+                            programa(3, NOMBRE_DEL_PROGRAMA="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="MALAMBO", NUMERO_CREDITOS=100)])
+        modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1].set_index(S)
+        self.assertEqual(len(modificados), 3)
+        self.assertEqual(modificados.loc[1, "CAMBIO_DETECTADO"], "NUMERO DE PERIODOS: 4 → 5 | MODALIDAD: VIRTUAL → PRESENCIAL")
+        self.assertEqual(modificados.loc[2, "CAMBIO_DETECTADO"], "NUMERO DE CREDITOS: 160 → 120")
+        self.assertEqual(modificados.loc[3, "CAMBIO_DETECTADO"],
+                         "NUMERO DE CREDITOS: 160 → 100 | MUNICIPIO DE OFERTA: SOLEDAD → MALAMBO | NOMBRE DEL PROGRAMA: VIEJO → NUEVO")
+        # Los demás valores del registro son los del programa en la ejecución de hoy
+        self.assertEqual(modificados.loc[3, "NUMERO_CREDITOS"], 100)
+
+    def test_misma_fecha_distinto_programa_no_se_consolida(self):
+        anterior = pd.DataFrame([programa(1), programa(2)])
+        hoy = pd.DataFrame([programa(1, NUMERO_CREDITOS=100), programa(2, NUMERO_CREDITOS=100)])
+        modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1]
+        self.assertEqual(sorted(modificados[S].tolist()), [1, 2])
 
     def test_mismo_valor_con_otro_tipo_no_es_cambio(self):
         anterior = pd.DataFrame([programa(1, NUMERO_CREDITOS=160.0, NUMERO_PERIODOS_DE_DURACION=10.0)])
@@ -131,7 +155,7 @@ class TestDeteccion(unittest.TestCase):
         hoy = pd.DataFrame([programa(1), programa(2, MUNICIPIO_OFERTA_PROGRAMA="SOLEDAD")])
         modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1]
         self.assertEqual(modificados[S].tolist(), [2])
-        self.assertEqual(modificados["CAMBIO_DETECTADO"].tolist(), ["BARRANQUILLA → SOLEDAD"])
+        self.assertEqual(modificados["CAMBIO_DETECTADO"].tolist(), ["MUNICIPIO DE OFERTA: BARRANQUILLA → SOLEDAD"])
 
     def test_reactivado(self):
         self._historico([programa(5, **{F: "2026-10-01"})])
@@ -362,9 +386,44 @@ class TestCorreo(unittest.TestCase):
         self.assertTrue(send_report.seleccionar(None).empty)
 
     def _modificados(self, codigos):
-        return self._df(codigos).assign(TIPO_CAMBIO_DETECTADO="NUMERO DE CREDITOS", CAMBIO_DETECTADO="160 → 144",
+        return self._df(codigos).assign(CAMBIO_DETECTADO="NUMERO DE CREDITOS: 160 → 144",
                                         MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA", MODALIDAD="PRESENCIAL",
                                         DIVISION_UNINORTE="INGENIERIAS")
+
+    def test_varios_cambios_de_un_programa_van_uno_por_linea(self):
+        cambios = "NUMERO DE CREDITOS: 141 → 130 | MODALIDAD: A DISTANCIA → HIBRIDA (PRESENCIAL-VIRTUAL) | NUMERO DE PERIODOS: 4 → 5"
+        mod = self._modificados([1713]).assign(CAMBIO_DETECTADO=cambios)
+        fecha = dt.date(2026, 11, 17)
+        html = send_report._cuerpo({"modificados": mod, "total_activos": 100}, fecha)
+        self.assertIn("NUMERO DE CREDITOS: 141 → 130<br>MODALIDAD: A DISTANCIA → HIBRIDA (PRESENCIAL-VIRTUAL)<br>NUMERO DE PERIODOS: 4 → 5", html)
+        self.assertNotIn(" | MODALIDAD", html)
+        # CAMBIO DETECTADO va entre MODALIDAD y DIVISIÓN DE UNINORTE
+        self.assertLess(html.index(">MODALIDAD</th>"), html.index(">CAMBIO DETECTADO</th>"))
+        self.assertLess(html.index(">CAMBIO DETECTADO</th>"), html.index(">DIVISIÓN DE UNINORTE</th>"))
+        self.assertNotIn(">TIPO DE CAMBIO</th>", html)
+        self.assertNotIn(">MUNICIPIO</th>", html)
+        # Texto plano: el registro sigue en una línea lógica, con los cambios separados por "; "
+        texto = send_report.construir_texto({"pregrado": {"modificados": mod, "total_activos": 100}}, fecha)
+        self.assertRegex(re.sub(r"\s+", " ", texto), r"CAMBIO DETECTADO: NUMERO DE CREDITOS: 141 → 130; MODALIDAD: A DISTANCIA")
+        # Los valores con caracteres de HTML se escapan y no rompen la separación
+        raro = self._modificados([1713]).assign(CAMBIO_DETECTADO="NOMBRE DEL PROGRAMA: <B>X | Y → Z & W | MODALIDAD: A → B")
+        html = send_report._cuerpo({"modificados": raro, "total_activos": 1}, fecha)
+        self.assertIn("NOMBRE DEL PROGRAMA: &lt;B&gt;X | Y → Z &amp; W<br>MODALIDAD: A → B", html)
+
+    def test_resumen_y_descripcion_cuentan_registros_y_cambios(self):
+        mod = self._modificados([1713, 9999]).assign(CAMBIO_DETECTADO=["NUMERO DE CREDITOS: 1 → 2 | MODALIDAD: A → B", "MODALIDAD: A → B"])
+        res = {"modificados": mod, "total_activos": 10}
+        fecha = dt.date(2026, 11, 17)
+        indicadores = {e: (v, d) for e, v, d, _ in send_report._indicadores(res, fecha)}
+        self.assertEqual(indicadores["MODIFICADOS"], ("2", "Con 3 cambios"))
+        self.assertIn("2 registros modificados (con 3 cambios)", " ".join(send_report._frases_resumen(res, fecha)))
+        self.assertIn("En esta ejecución: 2 registros con 3 cambios.", send_report._descripcion("modificados", mod))
+
+    def test_ancho_del_correo(self):
+        self.assertEqual(send_report.ANCHO_CORREO, 900)
+        html = send_report._cuerpo({"total_activos": 1}, dt.date(2026, 11, 17))
+        self.assertIn(f'width="{send_report.ANCHO_CORREO}"', html)
+        self.assertIn(f"max-width:{send_report.ANCHO_CORREO}px", html)
 
     def test_ningun_texto_del_correo_baja_de_10_px(self):
         # Encabezados y cuerpo de las tablas, incluida la de Modificados (la de más columnas), con al menos 10 px
@@ -453,7 +512,7 @@ class TestCorreo(unittest.TestCase):
         # Gmail recorta los mensajes cuyo HTML supera ~102 KB: caso grande (35 nuevos y 61 cambios) con margen holgado
         nuevos = self._df(list(range(1, 36))).assign(TIPO_NOVEDAD="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA",
                                                      MODALIDAD="PRESENCIAL", DIVISION_UNINORTE="ESCUELA DE NEGOCIOS")
-        mod = self._df(list(range(1, 62))).assign(TIPO_CAMBIO_DETECTADO="NUMERO DE CREDITOS", CAMBIO_DETECTADO="160 → 144",
+        mod = self._df(list(range(1, 62))).assign(CAMBIO_DETECTADO="NUMERO DE CREDITOS: 160 → 144",
                                                   MUNICIPIO_OFERTA_PROGRAMA="BARRANQUILLA", MODALIDAD="PRESENCIAL",
                                                   DIVISION_UNINORTE="INGENIERIAS")
         html = send_report.construir_cuerpo({"pregrado": {"nuevos": nuevos, "modificados": mod, "total_activos": 5500}}, dt.date(2026, 7, 28))
@@ -462,10 +521,10 @@ class TestCorreo(unittest.TestCase):
 
     def test_columnas_de_las_tablas(self):
         titulos = {t: [c[1] for c in send_report.SECCIONES[t]["columnas"]] for t in send_report.SECCIONES}
-        self.assertEqual(titulos["nuevos"], ["INSTITUCIÓN", "PROGRAMA", "MUNICIPIO", "MODALIDAD", "TIPO DE NOVEDAD", "DIVISIÓN DE UNINORTE"])
-        self.assertEqual(titulos["modificados"], ["INSTITUCIÓN", "PROGRAMA", "MUNICIPIO", "MODALIDAD", "TIPO DE CAMBIO",
-                                                  "CAMBIO DETECTADO", "DIVISIÓN DE UNINORTE"])
-        self.assertEqual(titulos["inactivos"], ["INSTITUCIÓN", "PROGRAMA", "MUNICIPIO", "MODALIDAD", "DIVISIÓN DE UNINORTE"])
+        comunes = ["INSTITUCIÓN", "PROGRAMA", "DEPARTAMENTO", "MODALIDAD"]
+        self.assertEqual(titulos["nuevos"], comunes + ["TIPO DE NOVEDAD", "DIVISIÓN DE UNINORTE"])
+        self.assertEqual(titulos["modificados"], comunes + ["CAMBIO DETECTADO", "DIVISIÓN DE UNINORTE"])   # entre modalidad y división
+        self.assertEqual(titulos["inactivos"], comunes + ["DIVISIÓN DE UNINORTE"])
 
     def test_html_escapa_contenido(self):
         df = self._df([1713]).assign(NOMBRE_DEL_PROGRAMA="<script>alert(1)</script>", TIPO_NOVEDAD="NUEVO")
@@ -498,7 +557,7 @@ class TestCorreo(unittest.TestCase):
         self.assertNotIn(b"Content-Disposition: attachment", capturado["cuerpo"])
 
     def test_boton_arriba_y_nota_de_novedades_de_interes(self):
-        mod = self._df([1713, 9999]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B")
+        mod = self._df([1713, 9999]).assign(CAMBIO_DETECTADO="MODALIDAD: A → B")
         html = send_report.construir_cuerpo({"pregrado": {"modificados": mod, "total_activos": 2}}, dt.date(2026, 11, 17))
         self.assertLess(html.index("VER DASHBOARD COMPLETO"), html.index("PROGRAMAS ACTIVOS"))   # antes de los indicadores
         self.assertEqual(html.count("VER DASHBOARD COMPLETO"), 1)
@@ -508,7 +567,7 @@ class TestCorreo(unittest.TestCase):
 
     def test_todos_los_registros_y_nota_de_novedades_de_interes(self):
         # Caso real del 17/11/2026: 13 cambios, 2 de una universidad de mayor interés; la tabla los muestra todos
-        mod = self._df([9999] * 11 + [1711, 1711]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B")
+        mod = self._df([9999] * 11 + [1711, 1711]).assign(CAMBIO_DETECTADO="MODALIDAD: A → B")
         res = {"pregrado": {"modificados": mod, "total_activos": 13}}
         html = send_report.construir_cuerpo(res, dt.date(2026, 11, 17))
         texto = re.sub(r"<[^>]+>", "", html)
@@ -516,16 +575,16 @@ class TestCorreo(unittest.TestCase):
         self.assertEqual(html.count("A → B"), 13)
         self.assertNotIn("La tabla presenta", texto)
         plano = send_report.construir_texto(res, dt.date(2026, 11, 17))
-        self.assertEqual(" ".join(plano.split()).count("CAMBIO DETECTADO: A → B"), 13)   # el texto plano ajusta las líneas
+        self.assertEqual(" ".join(plano.split()).count("CAMBIO DETECTADO: MODALIDAD: A → B"), 13)   # el texto plano ajusta las líneas
         self.assertNotIn("La tabla presenta", plano)
 
     def test_tabla_de_novedades_por_grupo(self):
         res = {"nuevos": self._df([1713, 9999, 9999]).assign(TIPO_NOVEDAD="NUEVO"),
-               "modificados": self._df([1711, 9999]).assign(TIPO_CAMBIO_DETECTADO="MODALIDAD", CAMBIO_DETECTADO="A → B"),
+               "modificados": self._df([1711, 9999]).assign(CAMBIO_DETECTADO="MODALIDAD: A → B"),
                "inactivos": self._df([9999]), "total_activos": 4}
         columnas, filas = send_report._grupos(res)
         self.assertEqual([c[1] for c in columnas], ["GRUPO DE UNIVERSIDADES", "NUEVOS", "MODIFICADOS", "INACTIVOS"])
-        self.assertEqual(filas["GRUPO"].tolist(), ["UNIVERSIDAD DEL NORTE", "UNIVERSIDADES DE MAYOR INTERÉS", "OTRAS UNIVERSIDADES", "TOTAL"])
+        self.assertEqual(filas["GRUPO"].tolist(), ["UNIVERSIDAD DEL NORTE", "UNIVERSIDADES DE MAYOR INTERES", "OTRAS UNIVERSIDADES", "TOTAL"])
         self.assertEqual(filas["NUEVOS"].tolist(), ["1", "0", "2", "3"])
         self.assertEqual(filas["MODIFICADOS"].tolist(), ["0", "1", "1", "2"])
         self.assertEqual(filas["INACTIVOS"].tolist(), ["0", "0", "1", "1"])
@@ -652,10 +711,10 @@ class TestCorreo(unittest.TestCase):
         """Los logotipos de docs/assets/img salen de 'Recursos Uninorte' (solo recorte de márgenes) y el correo usa el blanco."""
         raiz = Path(__file__).resolve().parent.parent
         self.assertTrue(send_report.LOGO.exists())
-        self.assertEqual(send_report.LOGO.name, "logo-uninorte-blanco.png")
+        self.assertEqual(send_report.LOGO.name, "logo-uninorte-direccion-blanco.png")
         for origen, derivado in (("BLANCO", "blanco"), ("NEGRO", "negro"), ("PRINCIPAL", "principal")):
-            original = raiz / "Recursos Uninorte" / f"LOGO-UN-{origen}.png"
-            copia = raiz / "docs" / "assets" / "img" / f"logo-uninorte-{derivado}.png"
+            original = raiz / "Recursos Uninorte" / f"LOGO-UN-DIRECCION-{origen}.png"
+            copia = raiz / "docs" / "assets" / "img" / f"logo-uninorte-direccion-{derivado}.png"
             self.assertTrue(copia.exists(), f"falta {copia.name}")
             if original.exists():   # la carpeta de recursos no es indispensable para ejecutar el monitor
                 from PIL import Image
@@ -889,7 +948,7 @@ class TestVigilanciaRetroalimentacion(unittest.TestCase):
 
 
 class TestCompletarModificados(unittest.TestCase):
-    """Completar Modificados con los cambios del histórico que la tabla no registró (sin tocar los existentes)."""
+    """Completar Modificados con los cambios del histórico que la tabla no registró (sin quitar los existentes)."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -902,26 +961,28 @@ class TestCompletarModificados(unittest.TestCase):
         for fecha, creditos, periodos in (("2026-11-03", 160, 10), ("2026-11-10", 150, 8), ("2026-11-17", 150, 8)):
             historico.guardar_ejecucion(pd.DataFrame([programa(1, NUMERO_CREDITOS=creditos, NUMERO_PERIODOS_DE_DURACION=periodos),
                                                       programa(2)]), dt.date.fromisoformat(fecha))
-        # La tabla solo registró el cambio de créditos de la ejecución del 10/11 (falta el de periodos)
         hoy, anterior = (historico.leer(fecha=dt.date(2026, 11, d)).drop(columns=[F]) for d in (10, 3))
-        completo = run_snies.detectar_novedades(hoy, anterior, dt.date(2026, 11, 10))[1]
-        self.registrado = completo[completo["TIPO_CAMBIO_DETECTADO"] == "NUMERO DE CREDITOS"]
+        self.completo = run_snies.detectar_novedades(hoy, anterior, dt.date(2026, 11, 10))[1]
+        # La tabla solo registró el cambio de créditos de la ejecución del 10/11 (falta el de periodos)
+        self.registrado = self.completo.assign(CAMBIO_DETECTADO="NUMERO DE CREDITOS: 160 → 150")
         run_snies._escribir_parquet(self.registrado, self.path)
 
     def test_agrega_solo_el_faltante_y_conserva_los_existentes(self):
         faltantes = completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
-        self.assertEqual(faltantes["TIPO_CAMBIO_DETECTADO"].tolist(), ["NUMERO DE PERIODOS"])
-        self.assertEqual(faltantes["CAMBIO_DETECTADO"].tolist(), ["10 → 8"])
+        self.assertEqual(faltantes["_CAMBIOS_FALTANTES"].tolist(), ["NUMERO DE PERIODOS: 10 → 8"])
         tabla = pd.read_parquet(self.path)
-        self.assertEqual(sorted(tabla["TIPO_CAMBIO_DETECTADO"]), ["NUMERO DE CREDITOS", "NUMERO DE PERIODOS"])
-        original = tabla[tabla["TIPO_CAMBIO_DETECTADO"] == "NUMERO DE CREDITOS"].reset_index(drop=True)
-        pd.testing.assert_frame_equal(original, self.registrado.assign(**{F: original[F]}).reset_index(drop=True), check_dtype=False)
+        # Un solo registro por programa y ejecución, con el cambio registrado y el que faltaba
+        self.assertEqual(tabla["CAMBIO_DETECTADO"].tolist(), ["NUMERO DE CREDITOS: 160 → 150 | NUMERO DE PERIODOS: 10 → 8"])
         self.assertEqual(list(tabla.columns), list(self.registrado.columns))
+        resto = [c for c in tabla.columns if c != "CAMBIO_DETECTADO"]
+        pd.testing.assert_frame_equal(tabla[resto].reset_index(drop=True), self.registrado[resto].assign(**{F: tabla[F]}).reset_index(drop=True), check_dtype=False)
 
     def test_es_idempotente(self):
         completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
+        antes = self.path.read_bytes()
         self.assertTrue(completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path).empty)
-        self.assertEqual(len(pd.read_parquet(self.path)), 2)
+        self.assertEqual(len(pd.read_parquet(self.path)), 1)
+        self.assertEqual(self.path.read_bytes(), antes)
 
     def test_simulacion_no_escribe(self):
         antes = self.path.read_bytes()
@@ -930,6 +991,76 @@ class TestCompletarModificados(unittest.TestCase):
 
     def test_no_revisa_ejecuciones_anteriores_al_inicio(self):
         self.assertTrue(completar_modificados.completar(simular=True, desde=dt.date(2026, 11, 11), path=self.path).empty)
+
+    def test_un_programa_sin_registro_en_la_ejecucion_recibe_uno_nuevo(self):
+        run_snies._escribir_parquet(self.registrado.iloc[0:0], self.path)
+        faltantes = completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
+        self.assertEqual(len(faltantes), 1)
+        self.assertEqual(pd.read_parquet(self.path)["CAMBIO_DETECTADO"].tolist(),
+                         ["NUMERO DE CREDITOS: 160 → 150 | NUMERO DE PERIODOS: 10 → 8"])
+
+    def test_nunca_modifica_un_cambio_ya_registrado(self):
+        # El valor registrado de un tipo se respeta aunque el histórico dé otro: solo se agrega el tipo que falta
+        run_snies._escribir_parquet(self.completo.assign(CAMBIO_DETECTADO="NUMERO DE CREDITOS: 160 → 149"), self.path)
+        completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
+        self.assertEqual(pd.read_parquet(self.path)["CAMBIO_DETECTADO"].tolist(),
+                         ["NUMERO DE CREDITOS: 160 → 149 | NUMERO DE PERIODOS: 10 → 8"])
+
+    def test_archivo_con_el_formato_anterior_se_consolida_al_completar(self):
+        anterior = self.registrado.assign(TIPO_CAMBIO_DETECTADO="NUMERO DE CREDITOS", CAMBIO_DETECTADO="160 → 150")
+        columnas = [c for c in anterior.columns if c != "TIPO_CAMBIO_DETECTADO"]
+        anterior = anterior[columnas[:-1] + ["TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"]]
+        run_snies._escribir_parquet(anterior, self.path)
+        completar_modificados.completar(desde=dt.date(2026, 11, 10), path=self.path)
+        tabla = pd.read_parquet(self.path)
+        self.assertNotIn("TIPO_CAMBIO_DETECTADO", tabla.columns)
+        self.assertEqual(tabla["CAMBIO_DETECTADO"].tolist(), ["NUMERO DE CREDITOS: 160 → 150 | NUMERO DE PERIODOS: 10 → 8"])
+
+
+class TestCambiosDetectados(unittest.TestCase):
+    """Formato de CAMBIO_DETECTADO: "TIPO: anterior → nuevo | TIPO: anterior → nuevo"."""
+    def test_unir_ordena_por_tipo_y_separar_lo_devuelve(self):
+        texto = catalogos.unir_cambios([("MODALIDAD", "A DISTANCIA", "HIBRIDA (PRESENCIAL-VIRTUAL)"), ("NUMERO DE CREDITOS", "141", "130")])
+        self.assertEqual(texto, "NUMERO DE CREDITOS: 141 → 130 | MODALIDAD: A DISTANCIA → HIBRIDA (PRESENCIAL-VIRTUAL)")
+        self.assertEqual(catalogos.separar_cambios(texto), [("NUMERO DE CREDITOS", "141", "130"),
+                                                            ("MODALIDAD", "A DISTANCIA", "HIBRIDA (PRESENCIAL-VIRTUAL)")])
+        self.assertEqual(catalogos.tipos_de_cambio(texto), ["NUMERO DE CREDITOS", "MODALIDAD"])
+
+    def test_un_valor_con_separador_o_dos_puntos_no_parte_el_texto(self):
+        texto = catalogos.unir_cambios([("NOMBRE DEL PROGRAMA", "A | B: C", "D"), ("MODALIDAD", "X", "Y")])
+        self.assertEqual(catalogos.separar_cambios(texto), [("NOMBRE DEL PROGRAMA", "A | B: C", "D"), ("MODALIDAD", "X", "Y")])
+
+    def test_texto_vacio_nulo_o_desconocido_no_tiene_cambios(self):
+        for valor in (None, "", float("nan"), "texto sin formato", "OTRO TIPO: 1 → 2"):
+            with self.subTest(repr(valor)):
+                self.assertEqual(catalogos.separar_cambios(valor), [])
+
+    def test_unir_rechaza_tipos_repetidos_desconocidos_o_ninguno(self):
+        for cambios in ([], [("MODALIDAD", "A", "B"), ("MODALIDAD", "C", "D")], [("OTRO", "1", "2")]):
+            with self.subTest(cambios), self.assertRaises(ValueError):
+                catalogos.unir_cambios(cambios)
+
+    def test_consolidar_el_formato_anterior(self):
+        antes = pd.DataFrame({
+            S: [1, 1, 2], F: pd.to_datetime(["2026-11-10", "2026-11-10", "2026-11-10"]), "NOMBRE_DEL_PROGRAMA": ["A", "A", "B"],
+            "TIPO_CAMBIO_DETECTADO": ["MODALIDAD", "NUMERO DE CREDITOS", "MODALIDAD"], "CAMBIO_DETECTADO": ["X → Y", "10 → 8", "P → Q"]})
+        despues = catalogos.consolidar_modificados(antes)
+        self.assertEqual(list(despues.columns), [S, F, "NOMBRE_DEL_PROGRAMA", "CAMBIO_DETECTADO"])
+        self.assertEqual(despues["CAMBIO_DETECTADO"].tolist(), ["NUMERO DE CREDITOS: 10 → 8 | MODALIDAD: X → Y", "MODALIDAD: P → Q"])
+        self.assertTrue(catalogos.consolidar_modificados(despues).equals(despues))   # ya consolidado: sin cambios
+
+    def test_acumular_un_archivo_con_el_formato_anterior_lo_consolida(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ruta = Path(tmp) / "Modificados.parquet"
+            anterior = pd.DataFrame({S: [1, 1], F: pd.to_datetime(["2026-11-03"] * 2), "NOMBRE_DEL_PROGRAMA": ["A", "A"],
+                                     "TIPO_CAMBIO_DETECTADO": ["NUMERO DE CREDITOS", "MODALIDAD"], "CAMBIO_DETECTADO": ["10 → 8", "X → Y"]})
+            run_snies._escribir_parquet(anterior, ruta)
+            nuevos = pd.DataFrame({S: [2], F: pd.to_datetime(["2026-11-10"]), "NOMBRE_DEL_PROGRAMA": ["B"], "CAMBIO_DETECTADO": ["MODALIDAD: P → Q"]})
+            total = run_snies.acumular_parquet(ruta, nuevos, dt.date(2026, 11, 10), ["NOMBRE_DEL_PROGRAMA", "CAMBIO_DETECTADO"])
+            tabla = pd.read_parquet(ruta)
+        self.assertEqual(total, 2)
+        self.assertNotIn("TIPO_CAMBIO_DETECTADO", tabla.columns)
+        self.assertEqual(tabla["CAMBIO_DETECTADO"].tolist(), ["NUMERO DE CREDITOS: 10 → 8 | MODALIDAD: X → Y", "MODALIDAD: P → Q"])
 
 
 class TestRegistroSeguro(unittest.TestCase):
@@ -1033,7 +1164,7 @@ class TestSeguridadDelSitio(unittest.TestCase):
         """El registro de versiones vigilado por Dependabot coincide con las librerías copiadas en docs/assets/vendor."""
         raiz = Path(__file__).resolve().parent.parent
         dependencias = json.loads((raiz / "Librerias" / "package.json").read_text(encoding="utf-8"))["dependencies"]
-        self.assertEqual(set(dependencias), {"plotly.js-dist-min", "flatpickr", "hyparquet", "hyparquet-writer"})
+        self.assertEqual(set(dependencias), {"plotly.js-dist-min", "flatpickr", "write-excel-file", "fflate"})
         for nombre, version in dependencias.items():
             self.assertRegex(version, r"^\d+\.\d+\.\d+$", f"{nombre}: la versión debe ser exacta (sin ^ ni ~)")
         vendor = raiz / "docs" / "assets" / "vendor"
@@ -1044,8 +1175,11 @@ class TestSeguridadDelSitio(unittest.TestCase):
         bloqueo = json.loads((raiz / "Librerias" / "package-lock.json").read_text(encoding="utf-8"))["packages"]
         for nombre, version in dependencias.items():
             self.assertEqual(bloqueo[f"node_modules/{nombre}"]["version"], version, f"package-lock.json no coincide con package.json en {nombre}")
-        for carpeta in ("hyparquet", "hyparquet-writer"):   # sin la versión en sus archivos: basta con que existan y tengan licencia
-            self.assertTrue((vendor / carpeta / "LICENSE").exists() and (vendor / carpeta / "src" / "index.js").exists())
+        # Exportación a Excel: sin la versión en sus archivos, basta con que existan y tengan licencia; Parquet ya no se usa
+        for carpeta, principal in (("write-excel-file", Path("browser") / "index.js"), ("fflate", Path("esm") / "browser.js")):
+            self.assertTrue((vendor / carpeta / "LICENSE").exists() and (vendor / carpeta / principal).exists(), carpeta)
+        for retirada in ("hyparquet", "hyparquet-writer"):
+            self.assertFalse((vendor / retirada).exists(), f"{retirada} ya no se usa")
 
 
 class TestFlujosDeTrabajo(unittest.TestCase):
@@ -1314,7 +1448,7 @@ class TestCatalogosDelDashboard(unittest.TestCase):
                 "SECTOR", "MODALIDAD"]   # SECTOR inmediatamente después del municipio y antes de los créditos
         cola = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"]
         self.assertEqual(primeras["nuevos"], ["FECHA_DE_OBTENCION", "TIPO_NOVEDAD"] + base + cola)
-        self.assertEqual(primeras["modificados"], ["FECHA_DE_OBTENCION", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + base + cola)
+        self.assertEqual(primeras["modificados"], ["FECHA_DE_OBTENCION", "CAMBIO_DETECTADO"] + base + cola)   # entre la fecha y la institución
         self.assertEqual(primeras["inactivos"], ["FECHA_DE_OBTENCION"] + base + cola)
         for tipo in ("nuevos", "modificados", "inactivos"):
             cols = primeras[tipo]

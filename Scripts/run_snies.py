@@ -48,10 +48,12 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 import catalogos
@@ -104,7 +106,7 @@ RETROALIMENTACION_FILE = MAP_DIR / "Retroalimentacion" / "retroalimentacion.json
 RETRO_AVISO_MB = 40     # aviso: conviene planear la depuración o la división del archivo
 RETRO_CRITICO_MB = 80   # crítico: cerca del límite de GitHub
 
-# Columnas vigiladas para detectar modificados → valor de TIPO_CAMBIO_DETECTADO
+# Columnas vigiladas para detectar modificados → tipo de cambio con el que se registra en CAMBIO_DETECTADO
 COLS_VIGILAR = {
     "NUMERO_CREDITOS":             "NUMERO DE CREDITOS",
     "MUNICIPIO_OFERTA_PROGRAMA":   "MUNICIPIO DE OFERTA",
@@ -489,8 +491,12 @@ def acumular_parquet(path: Path, nuevos: pd.DataFrame, fecha: dt.date, orden: li
     if path.exists():
         # Los registros nuevos adoptan los tipos del archivo acumulado: los inactivos provienen del histórico,
         # donde los números pueden estar guardados como texto
-        nuevos = historico.alinear(nuevos, pq.read_schema(path))
-        existente = pd.read_parquet(path)
+        esquema = pq.read_schema(path)
+        if "TIPO_CAMBIO_DETECTADO" in esquema.names:
+            # Modificados con el formato anterior (un cambio por fila): se consolida en un registro por programa y fecha
+            esquema = pa.schema([f for f in esquema if f.name != "TIPO_CAMBIO_DETECTADO"], metadata=esquema.metadata)
+        nuevos = historico.alinear(nuevos, esquema)
+        existente = catalogos.consolidar_modificados(pd.read_parquet(path))
         existente[COL_FECHA] = pd.to_datetime(existente[COL_FECHA])   # en memoria se trabaja como datetime64
         existente = existente[existente[COL_FECHA] != marca]
         partes.append(existente)
@@ -646,8 +652,9 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
     """
     Nuevos: SNIES activos hoy que no estaban en la ejecución anterior (TIPO_NOVEDAD: NUEVO o
     REACTIVADO si ya existió antes). Inactivos: SNIES de la ejecución anterior que hoy no están.
-    Modificados: un registro por cada columna vigilada que cambió. Un dato que desaparece no es
-    un cambio; si el valor anterior estaba vacío se compara contra el último valor conocido.
+    Modificados: un registro por programa con todos sus cambios en CAMBIO_DETECTADO ("TIPO: anterior → nuevo", uno por
+    columna vigilada que cambió, separados por " | "). Un dato que desaparece no es un cambio; si el valor anterior
+    estaba vacío se compara contra el último valor conocido.
     """
     snies_hoy, snies_ant = set(hoy[COL_SNIES]), set(anterior[COL_SNIES])
     marca = pd.Timestamp(fecha)
@@ -663,7 +670,7 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
     comunes = snies_hoy & snies_ant
     hoy_c = hoy[hoy[COL_SNIES].isin(comunes)].set_index(COL_SNIES)
     ant_c = anterior[anterior[COL_SNIES].isin(comunes)].set_index(COL_SNIES)
-    filas = []
+    cambios: dict[int, list[tuple[str, str, str]]] = {}
     for col, tipo in COLS_VIGILAR.items():
         if col not in hoy_c.columns or col not in ant_c.columns:
             log.warning(f"  Columna vigilada ausente: {col}")
@@ -685,12 +692,15 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
                 viejo = ultimos.get(snies, "")
                 if viejo in ("", nuevo):
                     continue
-            registro = hoy_c.loc[snies].to_dict()
-            registro[COL_SNIES] = snies
-            registro[COL_FECHA] = marca
-            registro["TIPO_CAMBIO_DETECTADO"] = tipo
-            registro["CAMBIO_DETECTADO"] = f"{viejo} → {nuevo}"
-            filas.append(registro)
+            cambios.setdefault(snies, []).append((tipo, viejo, nuevo))
+    filas = []
+    posicion = {snies: i for i, snies in enumerate(hoy_c.index)}
+    for snies in sorted(cambios, key=posicion.get):
+        registro = hoy_c.loc[snies].to_dict()
+        registro[COL_SNIES] = snies
+        registro[COL_FECHA] = marca
+        registro["CAMBIO_DETECTADO"] = catalogos.unir_cambios(cambios[snies])
+        filas.append(registro)
     modificados = pd.DataFrame(filas)
     return nuevos, modificados, inactivos
 
@@ -781,12 +791,14 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
         nuevos, modificados, inactivos = detectar_novedades(hoy, anterior, fecha)
         reactivados = int((nuevos.get("TIPO_NOVEDAD", pd.Series(dtype=str)) == "REACTIVADO").sum())
         log.info(f"  Nuevos: {len(nuevos)} (reactivados: {reactivados}) · "
-                 f"Modificados: {len(modificados)} cambios en "
-                 f"{modificados[COL_SNIES].nunique() if not modificados.empty else 0} programas · "
-                 f"Inactivos: {len(inactivos)}")
+                 f"Modificados: {len(modificados)} programas con "
+                 f"{sum(len(catalogos.separar_cambios(c)) for c in modificados.get('CAMBIO_DETECTADO', [])) if not modificados.empty else 0} "
+                 f"cambios · Inactivos: {len(inactivos)}")
         if not modificados.empty:
-            for tipo, n in modificados["TIPO_CAMBIO_DETECTADO"].value_counts().items():
-                log.info(f"    {tipo}: {n}")
+            por_tipo = Counter(tipo for c in modificados["CAMBIO_DETECTADO"] for tipo in catalogos.tipos_de_cambio(c))
+            for tipo in catalogos.TIPOS_CAMBIO:
+                if por_tipo[tipo]:
+                    log.info(f"    {tipo}: {por_tipo[tipo]}")
 
     # 6. Guardado
     _seccion("6. GUARDADO")
@@ -798,7 +810,7 @@ def ejecutar(args: argparse.Namespace, fecha: dt.date) -> dict:
     if previo is not None:
         for path, df, extra in (
             (NUEVOS_FILE, nuevos, ["TIPO_NOVEDAD"]),
-            (MODIFICADOS_FILE, modificados, ["TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"]),
+            (MODIFICADOS_FILE, modificados, ["CAMBIO_DETECTADO"]),
             (INACTIVOS_FILE, inactivos, []),
         ):
             total = acumular_parquet(path, df, fecha, orden_base + extra)

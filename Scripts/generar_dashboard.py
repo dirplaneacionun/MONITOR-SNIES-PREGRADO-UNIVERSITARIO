@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import historico  # noqa: E402
 from catalogos import (  # noqa: E402
     GRUPOS_UNIVERSIDAD, MAYOR_INTERES, MODALIDAD_A_GRUPO, MODALIDADES_GRUPO, TIPOS_CAMBIO,
-    TIPOS_CAMBIO_ETIQUETA, UNINORTE,
+    UNINORTE, consolidar_modificados, separar_cambios,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,7 +66,7 @@ _COLS_ACADEMICAS = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICI
                     "DIVISION_UNINORTE"]
 COLS_PRIMERO = {
     "nuevos": [COL_FECHA, "TIPO_NOVEDAD"] + _COLS_BASE + _COLS_ACADEMICAS,
-    "modificados": [COL_FECHA, "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + _COLS_BASE + _COLS_ACADEMICAS,
+    "modificados": [COL_FECHA, "CAMBIO_DETECTADO"] + _COLS_BASE + _COLS_ACADEMICAS,
     "inactivos": [COL_FECHA] + _COLS_BASE + _COLS_ACADEMICAS,
     "activos": [COL_FECHA],
 }
@@ -189,6 +189,7 @@ def main() -> int:
     for tipo in ("nuevos", "modificados", "inactivos"):
         path = NOVEDADES_DIR / f"{tipo.capitalize()}.parquet"
         df = pd.read_parquet(path) if path.exists() else pd.DataFrame(columns=[COL_SNIES, COL_FECHA])
+        df = consolidar_modificados(df)   # Modificados con el formato anterior (un cambio por fila): un registro por programa
         df[COL_FECHA] = pd.to_datetime(df[COL_FECHA]).dt.normalize()
         novedades[tipo] = df.sort_values([COL_FECHA, COL_SNIES], ascending=[False, True], ignore_index=True)
 
@@ -208,7 +209,7 @@ def main() -> int:
 
     sin_grupo = sorted(set(hist["MODALIDAD"].dropna()) - set(MODALIDAD_A_GRUPO))
     if sin_grupo:
-        print(f"  AVISO: modalidades sin agrupación (se muestran como SIN INFORMACIÓN): {sin_grupo}")
+        print(f"  AVISO: modalidades sin agrupación (se muestran como SIN INFORMACION): {sin_grupo}")
 
     # Fechas
     fechas_activos = sorted(hist[COL_FECHA].unique())
@@ -228,7 +229,7 @@ def main() -> int:
         "fecha_activos": iso(fechas_activos[-1]),
         "nuevos": int(len(_en_ultima(nue))),
         "modificados": int(len(mod_u)),
-        "modificados_programas": int(mod_u[COL_SNIES].nunique()) if not mod_u.empty else 0,
+        "modificados_cambios": int(sum(len(separar_cambios(c)) for c in mod_u["CAMBIO_DETECTADO"])) if not mod_u.empty else 0,
         "inactivos": int(len(_en_ultima(ina))),
     }
 
@@ -248,7 +249,6 @@ def main() -> int:
             "modalidad_a_grupo": MODALIDAD_A_GRUPO,
             "grupos_modalidad": list(MODALIDADES_GRUPO),
             "tipos_cambio": list(TIPOS_CAMBIO),
-            "tipos_cambio_etiqueta": TIPOS_CAMBIO_ETIQUETA,
         },
     }
     escribir_js("comun.js", "comun", comun)

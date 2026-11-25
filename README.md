@@ -38,7 +38,7 @@ Cada ejecución descarga el reporte oficial, lo normaliza, clasifica cada progra
 | Clasificación por división | Asigna a cada programa una división académica de la Universidad del Norte mediante un sistema de votación ponderada de tres capas, con reglas verificables y listas de revisión. |
 | Detección de novedades | Compara cada ejecución con la anterior: programas nuevos (incluidos los reactivados), inactivos y modificados (créditos, municipio de oferta, nombre, número de periodos y modalidad). |
 | Histórico | Conserva todas las ejecuciones en archivos Parquet, uno por año, y acumula las novedades en archivos Parquet independientes. |
-| Dashboard | Sitio web estático con cuatro apartados (Inicio, Nuevos, Modificados, Inactivos), filtros encadenados, selector de fechas, gráficas interactivas, tablas ordenables y exportación a Parquet. |
+| Dashboard | Sitio web estático con cuatro apartados (Inicio, Nuevos, Modificados, Inactivos), filtros encadenados, selector de fechas, gráficas interactivas, tablas ordenables y descarga en Excel (.xlsx) de los registros filtrados. |
 | Reporte por correo | Mensaje institucional con indicadores, resumen de la ejecución, novedades por grupo de universidades y tablas de registros, en versiones HTML y texto plano. |
 | Protecciones | Detiene la ejecución sin guardar datos si la descarga es incompleta, si el portal no aplicó los filtros o si falla la descarga, la normalización, la clasificación o la validación, y avisa por correo a la cuenta remitente. |
 | Control de calidad | Pruebas unitarias y pruebas de punta a punta del Dashboard que se ejecutan en GitHub Actions. |
@@ -89,7 +89,7 @@ Las dependencias de Python están fijadas con versiones exactas en [`requirement
 | `rich`, `tqdm` | Consola y progreso de las herramientas de normalización y clasificación. |
 | `pillow` | Pruebas (comparación de los logotipos). |
 
-El Dashboard incluye en `docs/assets/vendor` las librerías de JavaScript Plotly (gráficas), flatpickr (calendarios), hyparquet y hyparquet-writer (generación de archivos Parquet en el navegador); sus versiones se registran en `Librerias/package.json`.
+El Dashboard incluye en `docs/assets/vendor` las librerías de JavaScript Plotly (gráficas), flatpickr (calendarios), write-excel-file y fflate (generación de archivos de Excel en el navegador); sus versiones se registran en `Librerias/package.json`.
 
 ## 4. Instalación
 
@@ -173,7 +173,7 @@ python Scripts/completar_modificados.py                # agrega los cambios falt
 python -m http.server 8766 --directory docs
 ```
 
-El Dashboard queda disponible en <http://localhost:8766>. Debe servirse por HTTP: abrir los archivos directamente desde el sistema de archivos no habilita la exportación a Parquet.
+El Dashboard queda disponible en <http://localhost:8766>. Debe servirse por HTTP: abrir los archivos directamente desde el sistema de archivos no habilita la descarga en Excel.
 
 ## 7. Guía de uso del Dashboard
 
@@ -183,17 +183,17 @@ El Dashboard no requiere inicio de sesión ni instalación. Sus cuatro apartados
 |---|---|
 | **Inicio** | Indicadores de la última ejecución, evolución y distribución de los programas activos, y tablas de novedades. |
 | **Nuevos** | Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados). |
-| **Modificados** | Un registro por cada cambio detectado en créditos, municipio de oferta, nombre, número de periodos o modalidad. |
+| **Modificados** | Un registro por programa y ejecución, con todos los cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad (columna `CAMBIO_DETECTADO`). |
 | **Inactivos** | Programas que estaban activos en la ejecución anterior y ya no figuran en el reporte. |
 
-**Filtros.** La barra superior es común a los cuatro apartados y permanece visible al desplazarse en pantallas de más de 640 px. Contiene, de izquierda a derecha: buscador por código de programa o institución, universidades, programas académicos, departamentos, municipios, sectores, modalidades, campos de CINE específico, divisiones, tipos de cambio (solo en Modificados) y fechas. Los filtros se combinan con la condición **Y**, se encadenan (cada lista solo ofrece los valores que tienen resultados) y actualizan de inmediato los indicadores, las gráficas y las tablas.
+**Filtros.** La barra superior es común a los cuatro apartados y permanece visible al desplazarse en pantallas de más de 640 px. Contiene, de izquierda a derecha: buscador por programa, institución o código, universidades, programas académicos, departamentos, sectores, modalidades, campos de CINE específico, divisiones, tipos de cambio (solo en Modificados) y fechas. Los filtros se combinan con la condición **Y**, se encadenan (cada lista solo ofrece los valores que tienen resultados) y actualizan de inmediato los indicadores, las gráficas y las tablas.
 
 **Uso básico**
 
 1. Abrir **Inicio** y revisar los indicadores de la última ejecución: programas activos, nuevos, modificados e inactivos.
-2. Acotar la información con los filtros. En las listas desplegables, **AISLAR** deja marcada una sola opción; **LIMPIAR FILTROS** restablece todos los filtros.
+2. Acotar la información con los filtros. En las listas desplegables se puede desmarcar **TODOS** y marcar solo las opciones de interés (sin ninguna opción marcada, el filtro actúa como TODOS); **LIMPIAR FILTROS** restablece todos los filtros.
 3. Consultar las gráficas: al pasar el cursor se muestra el valor exacto; en las leyendas, un clic oculta una serie y un doble clic la aísla.
-4. Revisar las tablas: un clic en un encabezado ordena la columna; **DESCARGAR** exporta a Parquet los registros filtrados.
+4. Revisar las tablas: un clic en un encabezado ordena la columna; **DESCARGAR** genera en el navegador un archivo de Excel (.xlsx) con los registros filtrados.
 5. Compartir una vista: los filtros se guardan en la dirección de la página, de modo que copiarla comparte la selección.
 
 El [MANUAL](MANUAL.md#parte-2-dashboard) describe cada filtro, indicador, gráfica y tabla, y los flujos de uso paso a paso.
@@ -242,7 +242,7 @@ MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
 |---|---|
 | `Historico/Historico Programas Activos AAAA.parquet` | Programas activos de todas las ejecuciones del año `AAAA`, con la columna `FECHA_DE_OBTENCION`. Cada ejecución ocupa un grupo de filas independiente. |
 | `Novedades/Nuevos.parquet` | Programas que aparecen en una ejecución y no estaban en la anterior, con `TIPO_NOVEDAD` (`NUEVO` o `REACTIVADO`). |
-| `Novedades/Modificados.parquet` | Un registro por cada cambio detectado, con `TIPO_CAMBIO_DETECTADO` y `CAMBIO_DETECTADO` (`valor anterior → valor nuevo`). |
+| `Novedades/Modificados.parquet` | Un registro por programa y ejecución; `CAMBIO_DETECTADO` reúne todos sus cambios (`TIPO: anterior → nuevo | TIPO: anterior → nuevo`). |
 | `Novedades/Inactivos.parquet` | Programas de la ejecución anterior que ya no figuran, con los datos que tenían. |
 | `docs/data/*.js` | Datos compactos que consume el Dashboard. |
 | `Scripts/*/Revision/*.xlsx` | Listas de revisión: filas excluidas por el ETL y programas que requieren revisión de su división. |

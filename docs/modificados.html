@@ -3,19 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NIeJZsl6sLTTguZcrWSnS7DTicDxO0DSIh4Z3/OGgIE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gjXxiS69dR/BRgSzjknAPkC+18MpMmNdqCZ+U6WG0dw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>PROGRAMAS ACADÉMICOS MODIFICADOS</title>
   <meta name="description" content="Programas académicos modificados · Monitor SNIES de programas universitarios de pregrado">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="icon" href="assets/img/favicon-uninorte.ico" sizes="32x32">
   <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/vendor/flatpickr/flatpickr.min.css?v=1b34a42552">
-  <link rel="stylesheet" href="assets/estilos.css?v=e5da204643">
+  <link rel="stylesheet" href="assets/estilos.css?v=924756bd10">
   <script type="importmap">
     { "imports": {
-      "hyparquet": "./assets/vendor/hyparquet/src/index.js",
-      "hyparquet/": "./assets/vendor/hyparquet/",
-      "hyparquet-writer": "./assets/vendor/hyparquet-writer/src/index.js"
+      "write-excel-file/browser": "./assets/vendor/write-excel-file/browser/index.js",
+      "fflate": "./assets/vendor/fflate/esm/browser.js"
     } }
   </script>
 </head>
@@ -24,7 +23,7 @@
     <div class="encabezado-int">
       <div class="enc-fila">
         <div class="enc-marca">
-          <img class="enc-logo" src="assets/img/logo-uninorte-blanco.png" width="198" height="68" alt="Universidad del Norte">
+          <img class="enc-logo" src="assets/img/logo-uninorte-direccion-blanco.png" width="307" height="52" alt="Universidad del Norte">
           <div class="enc-textos">
             <h1 class="enc-titulo">PROGRAMAS ACADÉMICOS MODIFICADOS</h1>
           <p class="enc-sub">Programas Académicos Universitarios de Pregrado en Colombia</p>
@@ -47,12 +46,12 @@
     <div class="fila dos">
       <section class="tarjeta" aria-labelledby="t-g-evolucion">
         <h2 class="tarjeta-tit" id="t-g-evolucion">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS MODIFICADOS</h2>
-        <p class="tarjeta-sub">Cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad, acumulados desde el inicio del periodo seleccionado (un registro por cambio).</p>
+        <p class="tarjeta-sub">Cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad, acumulados desde el inicio del periodo seleccionado.</p>
         <div class="grafica " id="g-evolucion" role="img" aria-label="Evolución de programas académicos modificados"></div>
       </section>
       <section class="tarjeta" aria-labelledby="t-g-tipos">
         <h2 class="tarjeta-tit" id="t-g-tipos">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS MODIFICADOS POR TIPO DE CAMBIO</h2>
-        <p class="tarjeta-sub">Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad.</p>
+        <p class="tarjeta-sub">Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad. Un registro con varios tipos de cambio cuenta una vez en cada tipo.</p>
         <div class="grafica " id="g-tipos" role="img" aria-label="Evolución de programas académicos modificados por tipo de cambio"></div>
       </section>
     </div>
@@ -97,7 +96,7 @@
     <div class="fila">
       <section class="tarjeta" aria-labelledby="t-g-cine">
         <h2 class="tarjeta-tit" id="t-g-cine">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS MODIFICADOS POR CAMPO DE CINE ESPECÍFICO</h2>
-        <p class="tarjeta-sub">Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con TODOS se muestran los 10 campos con más registros modificados; con una selección, los campos marcados (hasta 10: los que tengan más registros modificados).</p>
+        <p class="tarjeta-sub">Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con todos los campos seleccionados se muestran los 10 campos con más registros modificados; con una selección, los campos marcados (hasta 10: los que tengan más registros modificados).</p>
         <div id="cine-ctrl"></div>
         <div class="grafica " id="g-cine" role="img" aria-label="Evolución de programas académicos modificados por campo de cine específico"></div>
       </section>
@@ -130,19 +129,19 @@
     </div>
     <section class="tarjeta" aria-labelledby="t-tabla">
       <h2 class="tarjeta-tit" id="t-tabla">REGISTROS DE PROGRAMAS ACADÉMICOS MODIFICADOS</h2>
-      <p class="tarjeta-sub">Todos los registros de programas modificados que cumplen los filtros, con todas las columnas, ordenados desde la fecha más reciente. Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR exporta los registros filtrados.</p>
+      <p class="tarjeta-sub">Todos los registros de programas modificados que cumplen los filtros, con todas las columnas, ordenados desde la fecha más reciente. Haga clic en un encabezado para ordenar según el tipo de dato; el botón de descarga exporta a Excel los registros filtrados.</p>
       <div id="tabla"></div>
     </section>
-    <img class="pie-logo" src="assets/img/logo-uninorte-principal.png" width="107" height="40" alt="Universidad del Norte">
+    <img class="pie-logo" src="assets/img/logo-uninorte-direccion-principal.png" width="237" height="40" alt="Universidad del Norte">
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
   <script src="assets/vendor/plotly/plotly.min.js?v=6d21266ce1"></script>
   <script src="assets/vendor/flatpickr/flatpickr.min.js?v=1eeab1cb77"></script>
   <script src="assets/vendor/flatpickr/l10n/es.min.js?v=dac7fd9270"></script>
-  <script src="data/comun.js?v=fb5ac51b65"></script>
-  <script src="data/modificados.js?v=15d111801c"></script>
-  <script src="assets/app.js?v=ba90cd0a52"></script>
-  <script src="assets/detalle.js?v=d790202be6"></script>
+  <script src="data/comun.js?v=6899826882"></script>
+  <script src="data/modificados.js?v=5ff59d2046"></script>
+  <script src="assets/app.js?v=b6d0e7c836"></script>
+  <script src="assets/detalle.js?v=0dbaba0fdb"></script>
 </body>
 </html>

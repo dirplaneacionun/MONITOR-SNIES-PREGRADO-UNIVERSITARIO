@@ -12,7 +12,7 @@
   const colorUniversidades = color;
   const colorSector = A.colorSector(color);
   const registros = A.decodificar(S[tipo]);
-  const tiposCambio = C.catalogos.tipos_cambio, etqCambio = C.catalogos.tipos_cambio_etiqueta;
+  const tiposCambio = C.catalogos.tipos_cambio;
 
   const todas = (campo) => [...new Set(registros.map((v) => v[campo]).filter((x) => x != null && x !== ""))].sort((a, b) => String(a).localeCompare(String(b), "es"));
   const divisiones = todas("DIVISION_UNINORTE");
@@ -25,18 +25,16 @@
 
   // Rango temporal: cada gráfica empieza en la primera ejecución con datos de su métrica (antes no hay información)
   const inicioPagina = A.primeraFecha(registros);
-  const inicioDe = (cambio) => A.primeraFecha(registros.filter((r) => r.TIPO_CAMBIO_DETECTADO === cambio && numeros(r.CAMBIO_DETECTADO)));
+  const inicioDe = (cambio) => A.primeraFecha(registros.filter((r) => numeros(r._CB && r._CB[cambio])));
 
-  const claves = ["universidades", "programas", "departamentos", "municipios", "sectores", "modalidades", "cine", "divisiones"];
+  const claves = ["universidades", "programas", "departamentos", "sectores", "modalidades", "cine", "divisiones"];
   if (tipo === "modificados") claves.push("cambios");
   claves.push("fechas");
   const filtros = new A.Filtros($("filtros"), {
-    buscar: "Buscar por Código de Programa o Institución",
+    buscar: "Buscar por Programa, Institución o Código",
     claves, fuentes: [registros],
     opciones: { modalidades, cambios: tiposCambio, programas: programas.opciones },
-    etiquetas: { cambios: etqCambio, modalidades: A.etiquetasModalidad(modalidades) },
     valorDe: { programas: programas.valorDe },
-    camposBusqueda: ["CODIGO_INSTITUCION_PADRE", "CODIGO_SNIES_DEL_PROGRAMA"],
     fechas: C.fechas_ejecucion, fechasActivos: [],
     alCambiar: () => actualizar(),
   });
@@ -44,8 +42,10 @@
   const columnas = registros.columnas.filter((c) => !c.startsWith("_"));
   const tablaUI = new A.Tabla($("tabla"), { columnas, archivo: `Programas Academicos ${NOMBRE.charAt(0)}${NOMBRE.slice(1).toLowerCase()}` });
 
-  const numeros = (cambio) => {
-    const [a, b] = String(cambio).split(" → ").map(Number);
+  /** [anterior, nuevo] como números a partir del par de valores de un cambio (`_CB[tipo]`); null si no son numéricos. */
+  const numeros = (par) => {
+    if (!par || par.some((x) => String(x).trim() === "")) return null;
+    const [a, b] = par.map(Number);
     return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
   };
 
@@ -53,12 +53,13 @@
   function direccion(div, filas, tipoCambio) {
     // La gráfica empieza en el primer cambio válido de esta métrica, no en la primera ejecución del apartado
     const fechas = filtros.enRango(A.desdeFecha(C.fechas_ejecucion, inicioDe(tipoCambio)));
-    const sel = filas.filter((r) => r.TIPO_CAMBIO_DETECTADO === tipoCambio);
+    // Cada registro tiene todos los cambios de un programa: se toma el de este tipo, aunque el filtro sea de otro tipo
+    const sel = filas.filter((r) => r._CB && r._CB[tipoCambio]);
     const idx = new Map(fechas.map((f, i) => [f, i]));
     const sube = new Array(fechas.length).fill(0), baja = new Array(fechas.length).fill(0);
     let validos = 0;
     sel.forEach((r) => {
-      const i = idx.get(r.FECHA_DE_OBTENCION), n = numeros(r.CAMBIO_DETECTADO);
+      const i = idx.get(r.FECHA_DE_OBTENCION), n = numeros(r._CB[tipoCambio]);
       if (i == null || !n) return;
       validos++;
       if (n[1] > n[0]) sube[i]++; else if (n[1] < n[0]) baja[i]--;
@@ -78,17 +79,17 @@
   }
 
   function transiciones(div, filas) {
-    const sel = filas.filter((r) => r.TIPO_CAMBIO_DETECTADO === "MODALIDAD");
+    const sel = filas.filter((r) => r._CB && r._CB.MODALIDAD);
     if (!sel.length) return A.vacio(div);
     const g = modalidades;
     const z = g.map(() => g.map(() => 0));
     sel.forEach((r) => {
-      const [a, b] = String(r.CAMBIO_DETECTADO).split(" → ");
+      const [a, b] = r._CB.MODALIDAD;
       const i = g.indexOf(A.grupoModalidad(a)), j = g.indexOf(A.grupoModalidad(b));
       if (i >= 0 && j >= 0) z[i][j]++;
     });
     const filasUsadas = g.map((_, i) => i).filter((i) => z[i].some((v) => v) || z.some((f) => f[i]));
-    const etq = filasUsadas.map((i) => A.etqModalidad(g[i]));
+    const etq = filasUsadas.map((i) => g[i]);
     const zz = filasUsadas.map((i) => filasUsadas.map((j) => z[i][j]));
     A.plotly(div, [{
       type: "heatmap", x: etq, y: etq, z: zz, xgap: 2, ygap: 2,
@@ -110,19 +111,18 @@
     // Total del encabezado y conteo: una sola unidad, "registros"
     $("total").textContent = A.fmt(filas.length);
     $("total-s").textContent = filas.length === 1 ? "registro" : "registros";
-    // En Modificados un programa puede tener varios registros de cambio: se informa también el número de programas distintos
-    const distintos = new Set(filas.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size;
-    filtros.conteo.textContent = A.plural(filas.length, "registro", "registros") + (tipo === "modificados" ? ` · ${A.plural(distintos, "programa distinto", "programas distintos")}` : "");
+    filtros.conteo.textContent = A.plural(filas.length, "registro", "registros");
 
     A.lineas($("g-evolucion"), fechas, [{ nombre: NOMBRE, valores: A.contarPorFecha(filas, fechas), color }], { modo: "acumulado" });
     if (tipo === "modificados") {
-      const porTipo = A.contarPorFecha(filas, fechas, "TIPO_CAMBIO_DETECTADO");
-      A.lineas($("g-tipos"), fechas, tiposCambio.filter((t) => porTipo[t]).map((t) => ({ nombre: etqCambio[t], valores: porTipo[t], color: colCambio[t].color })), { modo: "acumulado" });
+      // Un registro con varios tipos de cambio cuenta una vez en cada tipo
+      const porTipo = A.contarPorFechaMulti(filas, fechas, (r) => r._TC || []);
+      A.lineas($("g-tipos"), fechas, tiposCambio.filter((t) => porTipo[t]).map((t) => ({ nombre: t, valores: porTipo[t], color: colCambio[t].color })), { modo: "acumulado" });
     }
     const porDiv = A.contarPorFecha(filas, fechas, "DIVISION_UNINORTE");
     A.lineas($("g-division"), fechas, A.seriesPorCategoria(porDiv, divisiones, colDiv), { modo: "acumulado" });
     const porMod = A.contarPorFecha(filas, fechas, "_MG");
-    A.lineas($("g-modalidad"), fechas, A.seriesPorCategoria(porMod, modalidades, colMod, A.etiquetasModalidad(modalidades)), { modo: "acumulado" });
+    A.lineas($("g-modalidad"), fechas, A.seriesPorCategoria(porMod, modalidades, colMod), { modo: "acumulado" });
 
     const sec = A.contar(filas, "SECTOR");
     A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => colorSector[s[0]] || A.GRIS));

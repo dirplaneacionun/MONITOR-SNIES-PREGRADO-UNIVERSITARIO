@@ -3,19 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-NIeJZsl6sLTTguZcrWSnS7DTicDxO0DSIh4Z3/OGgIE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gjXxiS69dR/BRgSzjknAPkC+18MpMmNdqCZ+U6WG0dw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>PROGRAMAS ACADÉMICOS ACTIVOS</title>
   <meta name="description" content="Monitor de programas académicos universitarios de pregrado en Colombia (SNIES)">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="icon" href="assets/img/favicon-uninorte.ico" sizes="32x32">
   <link rel="preload" href="assets/fuentes/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/vendor/flatpickr/flatpickr.min.css?v=1b34a42552">
-  <link rel="stylesheet" href="assets/estilos.css?v=e5da204643">
+  <link rel="stylesheet" href="assets/estilos.css?v=924756bd10">
   <script type="importmap">
     { "imports": {
-      "hyparquet": "./assets/vendor/hyparquet/src/index.js",
-      "hyparquet/": "./assets/vendor/hyparquet/",
-      "hyparquet-writer": "./assets/vendor/hyparquet-writer/src/index.js"
+      "write-excel-file/browser": "./assets/vendor/write-excel-file/browser/index.js",
+      "fflate": "./assets/vendor/fflate/esm/browser.js"
     } }
   </script>
 </head>
@@ -24,7 +23,7 @@
     <div class="encabezado-int">
       <div class="enc-fila">
         <div class="enc-marca">
-          <img class="enc-logo" src="assets/img/logo-uninorte-blanco.png" width="198" height="68" alt="Universidad del Norte">
+          <img class="enc-logo" src="assets/img/logo-uninorte-direccion-blanco.png" width="307" height="52" alt="Universidad del Norte">
           <div class="enc-textos">
             <h1 class="enc-titulo">MONITOR SNIES PREGRADO · UNIVERSITARIO</h1>
           <p class="enc-sub">Programas Académicos Universitarios de Pregrado en Colombia</p>
@@ -104,7 +103,7 @@
     <div class="fila">
       <section class="tarjeta" aria-labelledby="t-g-cine">
         <h2 class="tarjeta-tit" id="t-g-cine">EVOLUCIÓN DE PROGRAMAS ACADÉMICOS ACTIVOS POR CAMPO DE CINE ESPECÍFICO</h2>
-        <p class="tarjeta-sub">Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con TODOS se muestran los 10 campos con más registros activos; con una selección, los campos marcados (hasta 10: los que tengan más registros activos).</p>
+        <p class="tarjeta-sub">Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con todos los campos seleccionados se muestran los 10 campos con más registros activos; con una selección, los campos marcados (hasta 10: los que tengan más registros activos).</p>
         <div id="cine-ctrl"></div>
         <div class="grafica " id="g-cine" role="img" aria-label="Evolución de programas académicos activos por campo de cine específico"></div>
       </section>
@@ -118,25 +117,25 @@
     </div>
     <section class="tarjeta" aria-labelledby="t-novedades">
       <h2 class="tarjeta-tit" id="t-novedades">REGISTROS DE PROGRAMAS ACADÉMICOS NUEVOS, MODIFICADOS E INACTIVOS</h2>
-      <p class="tarjeta-sub">Novedades del periodo filtrado, con todas las columnas y ordenadas desde la fecha más reciente. Seleccione la pestaña de cada tipo de novedad: los filtros de esta página afectan siempre las tres tablas. Haga clic en un encabezado para ordenar; DESCARGAR exporta los registros filtrados de la tabla visible.</p>
+      <p class="tarjeta-sub">Novedades del periodo filtrado, con todas las columnas y ordenadas desde la fecha más reciente. Seleccione la pestaña de cada tipo de novedad: los filtros de esta página afectan siempre las tres tablas. Haga clic en un encabezado para ordenar; el botón de descarga exporta a Excel los registros filtrados de la tabla visible.</p>
       <div class="tabs" role="tablist" aria-label="Tipo de novedad"><button type="button" role="tab" class="tab t-nuevos" id="tab-nuevos" data-tab="nuevos" aria-controls="panel-nuevos" aria-selected="true" tabindex="0">NUEVOS · <span data-n-tab="nuevos">–</span></button><button type="button" role="tab" class="tab t-modificados" id="tab-modificados" data-tab="modificados" aria-controls="panel-modificados" aria-selected="false" tabindex="-1">MODIFICADOS · <span data-n-tab="modificados">–</span></button><button type="button" role="tab" class="tab t-inactivos" id="tab-inactivos" data-tab="inactivos" aria-controls="panel-inactivos" aria-selected="false" tabindex="-1">INACTIVOS · <span data-n-tab="inactivos">–</span></button></div>
       <div role="tabpanel" id="panel-nuevos" aria-labelledby="tab-nuevos"><div id="tabla-nuevos"></div></div>
       <div role="tabpanel" id="panel-modificados" aria-labelledby="tab-modificados" hidden><div id="tabla-modificados"></div></div>
       <div role="tabpanel" id="panel-inactivos" aria-labelledby="tab-inactivos" hidden><div id="tabla-inactivos"></div></div>
     </section>
-    <img class="pie-logo" src="assets/img/logo-uninorte-principal.png" width="107" height="40" alt="Universidad del Norte">
+    <img class="pie-logo" src="assets/img/logo-uninorte-direccion-principal.png" width="237" height="40" alt="Universidad del Norte">
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
   <script src="assets/vendor/plotly/plotly.min.js?v=6d21266ce1"></script>
   <script src="assets/vendor/flatpickr/flatpickr.min.js?v=1eeab1cb77"></script>
   <script src="assets/vendor/flatpickr/l10n/es.min.js?v=dac7fd9270"></script>
-  <script src="data/comun.js?v=fb5ac51b65"></script>
-  <script src="data/activos.js?v=85c10717d1"></script>
-  <script src="data/nuevos.js?v=098bb14251"></script>
-  <script src="data/modificados.js?v=15d111801c"></script>
-  <script src="data/inactivos.js?v=f0acb03cd4"></script>
-  <script src="assets/app.js?v=ba90cd0a52"></script>
-  <script src="assets/inicio.js?v=d6a708daf1"></script>
+  <script src="data/comun.js?v=6899826882"></script>
+  <script src="data/activos.js?v=04397e674d"></script>
+  <script src="data/nuevos.js?v=002092a75b"></script>
+  <script src="data/modificados.js?v=5ff59d2046"></script>
+  <script src="data/inactivos.js?v=c62c624f70"></script>
+  <script src="assets/app.js?v=b6d0e7c836"></script>
+  <script src="assets/inicio.js?v=8dbbcc8a9d"></script>
 </body>
 </html>

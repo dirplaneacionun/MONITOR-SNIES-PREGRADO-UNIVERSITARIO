@@ -14,9 +14,13 @@ Ejecución (requiere Google Chrome y las dependencias de requirements.txt):
 from __future__ import annotations
 
 import argparse
+import base64
+import datetime
 import functools
 import http.server
+import io
 import json
+import math
 import os
 import re
 import sys
@@ -25,6 +29,9 @@ import time
 import unicodedata
 from pathlib import Path
 
+import warnings
+
+import openpyxl
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -38,6 +45,7 @@ import catalogos  # noqa: E402
 import historico as historico_fuente  # noqa: E402
 
 RESULTADOS: list[tuple[str, bool, str]] = []
+warnings.filterwarnings("ignore", message="Workbook contains no default style", category=UserWarning)   # el .xlsx del Dashboard no define estilo base
 
 
 def verificar(nombre: str, ok: bool, detalle: str = "") -> bool:
@@ -67,9 +75,16 @@ def decodificar(t):
 
 
 def derivar(df):
-    """Agrega el grupo de universidades (_GU) y la modalidad agrupada (_MG), igual que el Dashboard."""
+    """
+    Agrega el grupo de universidades (_GU) y la modalidad agrupada (_MG), igual que el Dashboard. También el texto de búsqueda
+    normalizado (_B) y, en Modificados, los tipos de cambio (_TC) y el par [anterior, nuevo] de cada tipo (_CB).
+    """
     df["_GU"] = df["CODIGO_INSTITUCION_PADRE"].map(catalogos.grupo_universidad)   # grupos por institución padre
     df["_MG"] = df["MODALIDAD"].map(catalogos.modalidad_grupo)
+    df["_B"] = texto_busqueda(df)
+    if "CAMBIO_DETECTADO" in df.columns:   # un registro de Modificados reúne todos los cambios de un programa en una ejecución
+        df["_TC"] = df["CAMBIO_DETECTADO"].map(catalogos.tipos_de_cambio)
+        df["_CB"] = df["CAMBIO_DETECTADO"].map(lambda x: {c[0]: (c[1], c[2]) for c in catalogos.separar_cambios(x)})
     return df
 
 
@@ -77,6 +92,49 @@ def norm_js(s):
     """Igual que normalizar() del Dashboard: quita tildes y pasa a mayúsculas (conserva la Ñ como N)."""
     s = "" if s is None or (isinstance(s, float) and pd.isna(s)) else str(s)
     return "".join(ch for ch in unicodedata.normalize("NFD", s) if not unicodedata.combining(ch)).upper()
+
+
+CAMPOS_BUSQUEDA = ["NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_SNIES_DEL_PROGRAMA", "CODIGO_INSTITUCION_PADRE"]
+BUSCADOR = "Buscar por Programa, Institución o Código"
+MAX_BUSQUEDA = 200   # largo máximo del texto buscado
+INVISIBLES = re.compile(r"[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]")
+
+
+def codigo_texto(v):
+    """Código como lo escribe el usuario: sin decimales ('1713' y no '1713.0')."""
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return str(v)
+
+
+@functools.lru_cache(maxsize=None)
+def norm_busqueda(s):
+    """Igual que normalizarBusqueda() del Dashboard: minúsculas, sin tildes (la Ñ cuenta como N) y espacios colapsados."""
+    s = "" if s is None or (isinstance(s, float) and pd.isna(s)) else str(s)
+    s = "".join(ch for ch in unicodedata.normalize("NFD", s) if not unicodedata.combining(ch)).lower()
+    return re.sub(r"\s+", " ", INVISIBLES.sub(" ", s)).strip()
+
+
+def texto_busqueda(df):
+    """Texto de búsqueda de cada registro: programa, institución y códigos del programa y de la institución padre, normalizado."""
+    def celda(v, codigo):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        return codigo_texto(v) if codigo else str(v)
+    columnas = [[celda(v, c.startswith("CODIGO")) for v in df[c]] for c in CAMPOS_BUSQUEDA]
+    return [norm_busqueda(" ".join(fila)) for fila in zip(*columnas)]
+
+
+def par_numerico(par):
+    """(anterior, nuevo) como números si ambos valores del cambio lo son (como numeros() del Dashboard); si no, None."""
+    if not par or any(str(x).strip() == "" for x in par):
+        return None
+    try:
+        a, b = (float(x) for x in par)
+    except ValueError:
+        return None
+    return (a, b) if math.isfinite(a) and math.isfinite(b) else None
 
 
 C = leer_js("comun.js")
@@ -109,11 +167,9 @@ def historico(fecha):
 
 CAMPOS = {
     "divisiones": "DIVISION_UNINORTE", "cine": "CINE_F_2013_AC_CAMPO_ESPECIFIC", "programas": "_PL",
-    "departamentos": "DEPARTAMENTO_OFERTA_PROGRAMA", "municipios": "MUNICIPIO_OFERTA_PROGRAMA", "modalidades": "_MG",
-    "sectores": "SECTOR", "cambios": "TIPO_CAMBIO_DETECTADO",
+    "departamentos": "DEPARTAMENTO_OFERTA_PROGRAMA", "modalidades": "_MG",
+    "sectores": "SECTOR", "cambios": "_TC",
 }
-CAMPOS_BUSQUEDA = ["CODIGO_INSTITUCION_PADRE", "CODIGO_SNIES_DEL_PROGRAMA"]   # la búsqueda es exacta sobre estos códigos
-BUSCADOR = "Buscar por Código de Programa o Institución"
 CINE_MAX = 10   # máximo de campos de CINE específico que muestra la gráfica
 PROG_MAPA = {}   # código SNIES → opción del filtro de programas (nombre del programa) de la página que se prueba
 
@@ -128,20 +184,14 @@ def usar_mapa_programas(frames):
     PROG_MAPA.update({c: limpio(n) for c, n in zip(todo.CODIGO_SNIES_DEL_PROGRAMA, todo.NOMBRE_DEL_PROGRAMA)})
 
 
-def codigo_texto(v):
-    """Código como lo escribe el usuario: sin decimales ('1713' y no '1713.0')."""
-    try:
-        return str(int(float(v)))
-    except (TypeError, ValueError):
-        return str(v)
-
-
 def filtrar(df, filtro, busqueda=None, campos_busqueda=(), omitir=None):
     """
     Aplica la misma regla que el Dashboard. `filtro` = {'clave': valor}; valor: una opción (solo esa), ("excepto", v),
     ("varios", [v...]); para universidades: ("grupo", g), ("codigo", c), ("codigos", [c...]), ("excepto_codigos", [c...]).
-    Los registros sin valor en el campo no cumplen un filtro con selección (igual que el Dashboard). La búsqueda es
-    una coincidencia exacta con alguno de los códigos de `campos_busqueda`. `omitir` ignora un filtro (o "buscar").
+    Los registros sin valor en el campo no cumplen un filtro con selección (igual que el Dashboard). El filtro de cambios es
+    de valores múltiples: un registro pasa si alguno de sus tipos de cambio está elegido. La búsqueda es parcial: cada palabra
+    debe estar en el nombre del programa, el de la institución o los códigos (texto `_B`, sin tildes ni mayúsculas).
+    `campos_busqueda` se conserva por compatibilidad. `omitir` ignora un filtro (o "buscar").
     """
     m = pd.Series(True, index=df.index)
     for clave, valor in filtro.items():
@@ -159,6 +209,15 @@ def filtrar(df, filtro, busqueda=None, campos_busqueda=(), omitir=None):
             else:   # excepto_codigos
                 m &= ~codigos.isin([float(c) for c in v])
             continue
+        if clave == "cambios":
+            if isinstance(valor, tuple):
+                tipo, v = valor
+                elegidos = {str(x) for x in v} if tipo == "varios" else None
+                ok = (lambda ts, e=elegidos: any(x in e for x in ts)) if elegidos is not None else (lambda ts, o=str(v): any(x != o for x in ts))
+            else:
+                ok = lambda ts, o=str(valor): o in ts   # noqa: E731
+            m &= df["_TC"].map(ok).astype(bool)
+            continue
         col = df["CODIGO_SNIES_DEL_PROGRAMA"].astype(str).map(PROG_MAPA) if clave == "programas" else df[CAMPOS[clave]]
         con_valor = col.notna() & (col.astype(str) != "")
         if isinstance(valor, tuple):
@@ -167,11 +226,8 @@ def filtrar(df, filtro, busqueda=None, campos_busqueda=(), omitir=None):
         else:
             m &= col.astype(str) == str(valor)
     if busqueda and omitir != "buscar":
-        q = str(busqueda).strip()
-        hit = pd.Series(False, index=df.index)
-        for c in campos_busqueda:
-            hit |= df[c].map(codigo_texto) == q
-        m &= hit
+        for palabra in norm_busqueda(str(busqueda)[:MAX_BUSQUEDA]).split():
+            m &= df["_B"].str.contains(palabra, regex=False)
     return df[m]
 
 
@@ -191,6 +247,8 @@ def disponibles_esperados(frames, filtro, busqueda, clave, fechas=None):
             valores |= {str(int(c)) for c in sub.CODIGO_INSTITUCION_PADRE.dropna()}
         elif clave == "programas":
             valores |= set(sub.CODIGO_SNIES_DEL_PROGRAMA.astype(str).map(PROG_MAPA).dropna())
+        elif clave == "cambios":
+            valores |= {x for ts in sub["_TC"] for x in ts}
         else:
             col = sub[CAMPOS[clave]]
             valores |= {str(v) for v in col[col.notna() & (col.astype(str) != "")]}
@@ -311,6 +369,11 @@ class Pagina:
             const div = g('g-division'); if (div && div[0].y) out.suma_division = div.reduce((a, tr) => a + ultimo(tr), 0);
             const sec = g('g-sector'); if (sec) out.suma_sector = sec[0].values.reduce((a, b) => a + b, 0);
             const per = g('g-periodos'); if (per) out.suma_periodos = per[0].y.reduce((a, b) => a + b, 0);
+            // Modificados: registros por tipo de cambio, aumentos/reducciones y transiciones de modalidad
+            const tip = g('g-tipos'); if (tip) out.tipos = Object.fromEntries(tip.map(tr => [tr.name.split(' \u00b7 ')[0], ultimo(tr)]));
+            const cre = g('g-creditos'); if (cre) out.creditos = [cre[0].y.reduce((a, b) => a + b, 0), cre[1].customdata.reduce((a, b) => a + b, 0)];
+            const pdi = g('g-periodos-dir'); if (pdi) out.periodos = [pdi[0].y.reduce((a, b) => a + b, 0), pdi[1].customdata.reduce((a, b) => a + b, 0)];
+            const tra = g('g-transiciones'); if (tra) out.transiciones = tra[0].z.reduce((a, f) => a + f.reduce((x, y) => x + y, 0), 0);
             out.vacias = [...document.querySelectorAll('.grafica')].filter(e => !e.data).map(e => e.id);
             return out;""")
 
@@ -359,12 +422,36 @@ def esperado_inicio(filtro, busqueda=None, fechas=None):
     return out
 
 
-def esperado_detalle(tipo, filtro, busqueda=None, fechas=None):
-    """Registros esperados en una página de detalle, calculados en Python desde Novedades/."""
+def filas_detalle(tipo, filtro, busqueda=None, fechas=None):
+    """Registros de una página de detalle que cumplen los filtros, calculados en Python desde Novedades/."""
     df = NOV[tipo]
     if fechas is not None:
         df = df[df.FECHA_DE_OBTENCION.isin(list(fechas))]
-    return len(filtrar(df, filtro, busqueda, CAMPOS_BUSQUEDA))
+    return filtrar(df, filtro, busqueda, CAMPOS_BUSQUEDA)
+
+
+def esperado_detalle(tipo, filtro, busqueda=None, fechas=None):
+    """Número de registros esperados en una página de detalle."""
+    return len(filas_detalle(tipo, filtro, busqueda, fechas))
+
+
+def esperado_cambios(df):
+    """
+    Lo que deben mostrar las gráficas de cambios de Modificados para los registros `df`, sin importar el filtro de tipo de cambio:
+    registros por tipo, aumentos y reducciones de créditos y de periodos, y transiciones de modalidad.
+    """
+    out = {"tipos": {}, "creditos": [0, 0], "periodos": [0, 0], "transiciones": 0}
+    grupos = set(C["catalogos"]["grupos_modalidad"])
+    for cb in df["_CB"]:
+        for tipo in cb:
+            out["tipos"][tipo] = out["tipos"].get(tipo, 0) + 1
+        for clave, tipo in (("creditos", "NUMERO DE CREDITOS"), ("periodos", "NUMERO DE PERIODOS")):
+            n = par_numerico(cb.get(tipo))
+            if n and n[1] != n[0]:
+                out[clave][0 if n[1] > n[0] else 1] += 1
+        if "MODALIDAD" in cb and all(catalogos.modalidad_grupo(x) in grupos for x in cb["MODALIDAD"][:2]):
+            out["transiciones"] += 1
+    return out
 
 
 def comparar_inicio(p, nombre, filtro, busqueda=None, fechas=None):
@@ -398,6 +485,13 @@ def comparar_detalle(p, tipo, nombre, filtro, busqueda=None, fechas=None):
         ok &= verificar(f"{tipo} · {nombre} · coherencia (evolución, división, torta)",
                         s.get("evolucion") == s.get("suma_division") == s.get("suma_sector") == e,
                         f"evolución {s.get('evolucion')} · división {s.get('suma_division')} · torta {s.get('suma_sector')}")
+    if tipo == "modificados":
+        # Las gráficas de tipos de cambio, créditos, periodos y modalidad usan todos los cambios de cada registro filtrado
+        c, x = esperado_cambios(filas_detalle(tipo, filtro, busqueda, fechas)), s
+        ok &= verificar(f"{tipo} · {nombre} · registros por tipo de cambio (un registro cuenta en cada uno de sus tipos)", (x.get("tipos") or {}) == c["tipos"], f"{x.get('tipos')} vs {c['tipos']}")
+        ok &= verificar(f"{tipo} · {nombre} · aumentos y reducciones de créditos", (x.get("creditos") or [0, 0]) == c["creditos"], f"{x.get('creditos')} vs {c['creditos']}")
+        ok &= verificar(f"{tipo} · {nombre} · aumentos y reducciones de periodos", (x.get("periodos") or [0, 0]) == c["periodos"], f"{x.get('periodos')} vs {c['periodos']}")
+        ok &= verificar(f"{tipo} · {nombre} · transiciones de modalidad", (x.get("transiciones") or 0) == c["transiciones"], f"{x.get('transiciones')} vs {c['transiciones']}")
     return ok
 
 
@@ -540,25 +634,71 @@ def probar_tabla(p, filas_ref):
     verificar(f"{p.nombre} · paginación", pag.startswith("PÁGINA 2") and pag2.startswith("PÁGINA 1"), f"{pag} / {pag2}")
 
 
-def probar_exportacion(p):
-    """El archivo que descarga la tabla tiene las mismas filas y columnas que la tabla."""
-    r = p.d.execute_async_script("""const listo = arguments[arguments.length - 1];
+MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def exportar_xlsx(p, selector):
+    """Pulsa el botón DESCARGAR `selector` (se intercepta el archivo que genera el navegador) y retorna lo descargado y lo que muestra la tabla."""
+    return p.d.execute_async_script("""const listo = arguments[arguments.length - 1], selector = arguments[0];
       (async () => {
-        let blob = null; const o1 = URL.createObjectURL, o2 = HTMLAnchorElement.prototype.click;
-        URL.createObjectURL = (b) => { blob = b; return 'blob:x'; }; HTMLAnchorElement.prototype.click = function () {};
-        document.querySelector('#tabla [data-pq]').click();
-        for (let i = 0; i < 150 && !blob; i++) await new Promise(r => setTimeout(r, 100));
+        let blob = null, nombre = null; const o1 = URL.createObjectURL, o2 = HTMLAnchorElement.prototype.click;
+        // Solo se intercepta el archivo de Excel: la librería de compresión también usa URL.createObjectURL para su proceso en segundo plano
+        URL.createObjectURL = (b) => { if (b.type.includes('spreadsheetml')) { blob = b; return 'blob:x'; } return o1.call(URL, b); };
+        HTMLAnchorElement.prototype.click = function () { nombre = this.download; };
+        const boton = document.querySelector(selector); boton.click();
+        for (let i = 0; i < 300 && !blob; i++) await new Promise(r => setTimeout(r, 100));
         URL.createObjectURL = o1; HTMLAnchorElement.prototype.click = o2;
-        const hp = await import('hyparquet'); const buf = await blob.arrayBuffer();
-        const filas = await hp.parquetReadObjects({ file: buf });
-        const f = hp.parquetMetadata(buf).schema.find((s) => s.name === 'FECHA_DE_OBTENCION');
-        listo({ filas: filas.length, columnas: Object.keys(filas[0] || {}).length,
-                tipoFecha: f ? f.converted_type : null, esFecha: filas[0].FECHA_DE_OBTENCION instanceof Date && filas[0].FECHA_DE_OBTENCION.getUTCHours() === 0,
-                tabla: Number(document.querySelector('#tabla [data-n]').textContent.replace(/\\./g, '').replace(/\\D/g, '')),
-                cols_tabla: document.querySelectorAll('#tabla th').length });
-      })().catch(e => listo({ error: String(e) }));""")
-    verificar(f"{p.nombre} · exportación Parquet", r.get("filas") == r.get("tabla") and r.get("columnas") == r.get("cols_tabla"), json.dumps(r))
-    verificar(f"{p.nombre} · exportación · FECHA_DE_OBTENCION como fecha sin hora (DATE)", r.get("tipoFecha") == "DATE" and r.get("esFecha") is True, json.dumps(r))
+        const tabla = boton.closest('.tabla-cab').parentElement;
+        const bytes = new Uint8Array(await blob.arrayBuffer()); let s = '';
+        for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+        listo({ nombre, tipo: blob.type, b64: btoa(s), tabla: Number(tabla.querySelector('[data-n]').textContent.replace(/\\D/g, '')),
+                encabezados: [...tabla.querySelectorAll('th')].map(th => th.dataset.c.replace(/_/g, ' ')), boton: boton.textContent.trim() });
+      })().catch(e => listo({ error: String(e) }));""", selector)
+
+
+def verificar_xlsx(nombre, r, df):
+    """
+    El .xlsx descargado se genera en el navegador con solo los registros filtrados `df`: mismas columnas y filas que la tabla,
+    fechas como fecha (sin hora), números como números y textos sin pérdida de tildes ni de la Ñ, y sin fórmulas.
+    """
+    if r.get("error") or not r.get("b64"):
+        verificar(f"{nombre} · exportación Excel", False, json.dumps(r)[:200])
+        return
+    datos = base64.b64decode(r["b64"])
+    verificar(f"{nombre} · exportación Excel · archivo .xlsx con el nombre de la ejecución y el botón vuelve a DESCARGAR",
+              datos[:2] == b"PK" and r["tipo"] == MIME_XLSX and r["nombre"].endswith(".xlsx") and C["ultima_ejecucion"] in r["nombre"] and r["boton"] == "DESCARGAR",
+              f"{r['nombre']} · {r['tipo']} · {r['boton']}")
+    hoja = openpyxl.load_workbook(io.BytesIO(datos)).active
+    filas = list(hoja.iter_rows(values_only=True))
+    enc, cuerpo = [str(x) for x in filas[0]], filas[1:]
+    verificar(f"{nombre} · exportación Excel · solo los registros filtrados ({len(df)})", len(cuerpo) == r["tabla"] == len(df), f"{len(cuerpo)} filas · tabla {r['tabla']} · esperado {len(df)}")
+    verificar(f"{nombre} · exportación Excel · mismas columnas que la tabla, en el mismo orden", enc == r["encabezados"], f"{enc[:5]} vs {r['encabezados'][:5]}")
+    col = lambda c: enc.index(c.replace("_", " "))  # noqa: E731
+    j_cod, j_fecha, j_nombre = col("CODIGO_SNIES_DEL_PROGRAMA"), col("FECHA_DE_OBTENCION"), col("NOMBRE_DEL_PROGRAMA")
+    esperado = sorted((codigo_texto(c), f, str(n)) for c, f, n in zip(df["CODIGO_SNIES_DEL_PROGRAMA"], df["FECHA_DE_OBTENCION"].astype(str), df["NOMBRE_DEL_PROGRAMA"].fillna("")))
+    obtenido = sorted((codigo_texto(f[j_cod]), f[j_fecha].strftime("%Y-%m-%d") if isinstance(f[j_fecha], datetime.datetime) else str(f[j_fecha]), str(f[j_nombre] if f[j_nombre] is not None else "")) for f in cuerpo)
+    verificar(f"{nombre} · exportación Excel · código, fecha y nombre de cada registro sin pérdida (tildes y Ñ)", obtenido == esperado, f"{obtenido[:1]} vs {esperado[:1]}")
+    verificar(f"{nombre} · exportación Excel · FECHA_DE_OBTENCION como fecha de Excel (dd/mm/yyyy, sin hora)",
+              bool(cuerpo) and all(isinstance(f[j_fecha], datetime.datetime) and f[j_fecha].hour == f[j_fecha].minute == 0 for f in cuerpo)
+              and hoja.cell(row=2, column=j_fecha + 1).number_format == "dd/mm/yyyy", f"{cuerpo[0][j_fecha]!r}" if cuerpo else "")
+    if "CAMBIO DETECTADO" in enc:
+        j = enc.index("CAMBIO DETECTADO")
+        verificar(f"{nombre} · exportación Excel · CAMBIO_DETECTADO completo (todos los cambios del programa)",
+                  sorted(str(f[j]) for f in cuerpo) == sorted(df["CAMBIO_DETECTADO"].astype(str)), "")
+    for c in ("NUMERO_CREDITOS", "COSTO_MATRICULA_ESTUD_NUEVOS"):
+        if c.replace("_", " ") in enc:
+            j = col(c)
+            verificar(f"{nombre} · exportación Excel · {c} como número", all(f[j] is None or isinstance(f[j], (int, float)) for f in cuerpo), "")
+    verificar(f"{nombre} · exportación Excel · sin fórmulas", not any(celda.data_type == "f" for fila in hoja.iter_rows() for celda in fila), "")
+
+
+def probar_exportacion(p, tipo):
+    """DESCARGAR genera en el navegador un .xlsx solo con los registros filtrados; sin filtros, con todos los de la página."""
+    aislar(p, p.claves.index("sectores"), "PRIVADO")
+    p.cerrar()
+    verificar_xlsx(f"{p.nombre} · filtrado por sector", exportar_xlsx(p, "#tabla [data-descargar]"), filas_detalle(tipo, {"sectores": "PRIVADO"}))
+    reset_filtros(p)
+    verificar_xlsx(f"{p.nombre} · sin filtros", exportar_xlsx(p, "#tabla [data-descargar]"), NOV[tipo])
 
 
 def probar_orden_leyendas(p):
@@ -655,12 +795,6 @@ def marcadas(p, indice):
         return [...ms.querySelectorAll('.ms-ops [data-op]')].filter(i => i.checked).map(i => i.dataset.op);""", indice)
 
 
-def aviso_visible(p, indice):
-    """Texto del aviso del panel de un filtro si está visible (vacío si no)."""
-    return p.js("""const a = document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector('.ms-aviso');
-        return a && !a.hidden ? a.textContent : '';""", indice)
-
-
 def texto_conteo(p):
     """Texto del conteo de registros de la barra de filtros."""
     return p.js("return document.querySelector('.conteo-filtro').textContent")
@@ -669,28 +803,46 @@ def texto_conteo(p):
 def clic_opcion(p, indice, selector):
     """Abre el filtro `indice` y hace clic real sobre el control que cumple `selector`."""
     p.abrir(indice)
+    clic_en(p, indice, selector)
+
+
+def clic_en(p, indice, selector):
+    """Clic real sobre el control `selector` del filtro `indice`, sin cerrar el panel si ya está abierto (lo abre si no lo está)."""
+    ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
+    if "abierto" not in ms.get_attribute("class"):
+        p.abrir(indice)
     el = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice].find_element(By.CSS_SELECTOR, selector)
     p.js("arguments[0].scrollIntoView({block: 'center'});", el)
     try:
         el.click()
-    except Exception:   # el botón AISLAR solo se muestra al pasar el cursor: se reintenta con un clic sobre el elemento
+    except Exception:   # un control dentro de un grupo contraído no admite el clic del navegador: se hace sobre el elemento
         p.js("arguments[0].click();", el)
     p.esperar_listo()
 
 
-def clic_op(p, indice, valor, que="op"):
-    """Clic sobre la casilla ('op'), el botón AISLAR ('aislar') o el AISLAR de un grupo ('aislar_g') de la opción `valor`."""
-    atributo = {"op": "data-op", "aislar": "data-aislar", "aislar_g": "data-aislar-g"}[que]
+def clic_op(p, indice, valor):
+    """Clic sobre la casilla de la opción `valor` del filtro `indice` (la marca o la desmarca)."""
     p.abrir(indice)
-    el = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('[' + arguments[2] + ']')].find(e => e.getAttribute(arguments[2]) === arguments[1]) || null;""", indice, valor, atributo)
-    assert el is not None, f"{p.nombre}: sin opción {valor!r} ({que}) en el filtro {indice}"
-    p.js("arguments[0].scrollIntoView({block: 'center'});", el)
-    try:
-        el.click()
-    except Exception:
-        p.js("arguments[0].click();", el)
-    p.esperar_listo()
+    existe = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
+        return [...ms.querySelectorAll('[data-op]')].some(e => e.dataset.op === arguments[1]);""", indice, valor)
+    assert existe, f"{p.nombre}: sin opción {valor!r} en el filtro {indice}"
+    clic_en(p, indice, f'[data-op="{valor}"]')
+
+
+def aislar_selector(p, indice, selector):
+    """
+    Deja marcado solo el control `selector` como lo haría una persona: abre el filtro, desmarca TODOS (queda sin ninguna opción
+    marcada) y marca la opción, que tiene prioridad. El panel queda abierto.
+    """
+    p.abrir(indice)
+    if todos_marcado(p, indice):
+        clic_en(p, indice, "[data-todos]")
+    clic_en(p, indice, selector)
+
+
+def aislar(p, indice, valor, que="op"):
+    """Deja marcada solo la opción `valor` ('op') o el grupo `valor` ('g') del filtro `indice` (desmarca TODOS y marca la opción)."""
+    aislar_selector(p, indice, f'[data-op="{valor}"]' if que == "op" else f'[data-g="{valor}"]')
 
 
 def todos_marcado(p, indice):
@@ -708,40 +860,52 @@ def reset_filtros(p):
 
 
 def probar_filtro_plano(p, comparar, indice, clave, muestra):
-    """Lista plana encadenada: orden alfabético con TODOS primero, AISLAR, TODOS sincronizado, exclusión y bloqueo de la última opción."""
+    """
+    Lista plana encadenada: orden alfabético con TODOS primero; sin botón AISLAR ni aviso de última opción; marcar una opción tras
+    desmarcar TODOS (tiene prioridad); selección vacía = TODOS, que se restablece al cerrar; exclusión de una opción.
+    """
     valores = opciones_filtro(p, indice)
     info = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
         const et = [...ms.querySelectorAll('.ms-ops .ms-op:not([hidden]) .ms-txt')].map(l => l.textContent.trim());
         const primero = ms.querySelector('.ms-panel > .ms-op, .ms-panel > input + .ms-op');
         return { alfabetico: et.every((v, i) => i === 0 || et[i - 1].localeCompare(v, 'es') <= 0), todosPrimero: !!primero && primero.classList.contains('todos'),
-                 todasMarcadas: [...ms.querySelectorAll('.ms-ops [data-op]')].every(i => i.checked) };""", indice)
+                 todasMarcadas: [...ms.querySelectorAll('.ms-ops [data-op]')].every(i => i.checked),
+                 sinAislar: !ms.querySelector('.ms-aislar, [data-aislar], [data-aislar-g], .ms-aviso') };""", indice)
     verificar(f"{p.nombre} · filtro {clave} en orden alfabético con TODOS primero", info["alfabetico"] and info["todosPrimero"], str(info))
     verificar(f"{p.nombre} · filtro {clave} inicia con TODOS y todas las opciones marcadas", todos_marcado(p, indice) and info["todasMarcadas"], str(info))
+    verificar(f"{p.nombre} · filtro {clave} sin botón AISLAR ni aviso de última opción", info["sinAislar"], str(info))
     elegidos = list(dict.fromkeys(valores if len(valores) <= 6 else valores[:2] + valores[-1:]))
+    todas = len(opciones_filtro(p, indice, False))
     for v in elegidos:
-        clic_op(p, indice, v, "aislar")
+        aislar(p, indice, v)
         comparar(f"{clave}={v}", {clave: v})
-        verificar(f"{p.nombre} · {clave}={v} · AISLAR deja una opción marcada y desmarca TODOS", marcadas(p, indice) == [v] and not todos_marcado(p, indice), str(marcadas(p, indice)[:3]))
-        antes = texto_conteo(p)
-        clic_op(p, indice, v)                                        # intenta desmarcar la última opción
-        verificar(f"{p.nombre} · {clave}={v} · no se puede desmarcar la última opción (aviso y sin cambios)",
-                  marcadas(p, indice) == [v] and texto_conteo(p) == antes and bool(aviso_visible(p, indice)), f"{marcadas(p, indice)[:2]} · {aviso_visible(p, indice)!r}")
-        clic_opcion(p, indice, "[data-todos]")                      # TODOS marcado: todas las opciones
-        verificar(f"{p.nombre} · {clave} · marcar TODOS selecciona todas",
-                  todos_marcado(p, indice) and len(marcadas(p, indice)) == len(opciones_filtro(p, indice, False)), "")
+        verificar(f"{p.nombre} · {clave}={v} · desmarcar TODOS y marcar una opción deja solo esa marcada", marcadas(p, indice) == [v] and not todos_marcado(p, indice), str(marcadas(p, indice)[:3]))
+        # La última opción marcada se puede desmarcar: sin ninguna opción el filtro actúa como TODOS
+        clic_en(p, indice, f'[data-op="{v}"]')
+        verificar(f"{p.nombre} · {clave}={v} · desmarcar la última opción deja la selección vacía, sin aviso", marcadas(p, indice) == [] and not todos_marcado(p, indice), str(marcadas(p, indice)[:3]))
+        comparar(f"{clave} sin ninguna opción marcada (actúa como TODOS)", {})
+        p.cerrar()
+        verificar(f"{p.nombre} · {clave} · al cerrar sin ninguna opción marcada vuelve TODOS con todas las opciones marcadas",
+                  todos_marcado(p, indice) and len(marcadas(p, indice)) == todas, f"{len(marcadas(p, indice))} de {todas}")
+        comparar(f"{clave} tras cerrar sin selección", {})
+        aislar(p, indice, v)
+        clic_en(p, indice, "[data-todos]")                          # marcar TODOS: todas las opciones
+        verificar(f"{p.nombre} · {clave} · marcar TODOS selecciona todas", todos_marcado(p, indice) and len(marcadas(p, indice)) == todas, "")
+        comparar(f"{clave} tras marcar TODOS", {})
     # Excluir una opción partiendo de TODOS
     v = valores[0]
     clic_op(p, indice, v)
     verificar(f"{p.nombre} · {clave} · desmarcar una opción desactiva TODOS", not todos_marcado(p, indice))
     comparar(f"{clave} excepto {v}", {clave: ("excepto", v)})
     clic_op(p, indice, v)
-    verificar(f"{p.nombre} · {clave} · marcar de nuevo la última opción activa TODOS", todos_marcado(p, indice))
+    verificar(f"{p.nombre} · {clave} · marcar de nuevo la opción activa TODOS", todos_marcado(p, indice))
     comparar(f"{clave} tras volver a marcar", {})
-    # TODOS no se puede desmarcar: dejaría el filtro sin opciones
-    antes = texto_conteo(p)
-    clic_opcion(p, indice, "[data-todos]")
-    verificar(f"{p.nombre} · {clave} · TODOS no se puede desmarcar (aviso y sin cambios)",
-              todos_marcado(p, indice) and texto_conteo(p) == antes and bool(aviso_visible(p, indice)), aviso_visible(p, indice))
+    # TODOS se puede desmarcar: sin opciones marcadas el filtro actúa como TODOS y elegir una opción tiene prioridad
+    clic_en(p, indice, "[data-todos]")
+    verificar(f"{p.nombre} · {clave} · desmarcar TODOS deja todas las opciones sin marcar, sin aviso", not todos_marcado(p, indice) and marcadas(p, indice) == [], str(marcadas(p, indice)[:3]))
+    comparar(f"{clave} con TODOS desmarcado (actúa como TODOS)", {})
+    clic_en(p, indice, f'[data-op="{valores[-1]}"]')
+    comparar(f"{clave} la opción elegida tiene prioridad", {clave: valores[-1]})
     reset_filtros(p)
 
 
@@ -762,7 +926,7 @@ def grupos_visibles(p, indice):
 
 
 def probar_filtro_universidades(p, comparar, indice, muestra):
-    """Universidades: grupos, instituciones de cada grupo (por institución padre), AISLAR, exclusión, bloqueo de la última y búsqueda."""
+    """Universidades: grupos, instituciones de cada grupo (por institución padre), selección de una, exclusión, selección vacía = TODAS y búsqueda."""
     cat = C["catalogos"]
     uninorte, mayor = str(cat["uninorte"]), [str(c) for c in cat["mayor_interes"]]
     grupos = {"uninorte": catalogos.GRUPO_UNINORTE, "mayor": catalogos.GRUPO_MAYOR_INTERES, "otras": catalogos.GRUPO_OTRAS}
@@ -770,9 +934,9 @@ def probar_filtro_universidades(p, comparar, indice, muestra):
     verificar(f"{p.nombre} · universidades · grupos y búsqueda", p.js(
         "const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return !!ms.querySelector('input[type=search]') && ms.querySelectorAll('.ms-grupo').length === 3", indice) and "otras" in visibles, str(visibles))
     for gid in [g for g in grupos if g in visibles]:
-        clic_op(p, indice, gid, "aislar_g")
+        aislar(p, indice, gid, "g")
         comparar(f"universidades={grupos[gid]}", {"universidades": ("grupo", grupos[gid])})
-        verificar(f"{p.nombre} · universidades · AISLAR {gid}: grupo marcado y TODAS desmarcada",
+        verificar(f"{p.nombre} · universidades · solo el grupo {gid}: grupo marcado y TODAS desmarcada",
                   p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return ms.querySelector(`[data-g='${arguments[1]}']`).checked && !ms.querySelector('[data-todos]').checked", indice, gid))
         reset_filtros(p)
     # Instituciones individuales (por institución padre): una muestra de cada grupo expandible
@@ -780,7 +944,7 @@ def probar_filtro_universidades(p, comparar, indice, muestra):
         codigos = [c for c in opciones_filtro(p, indice) if (c in mayor) == (gid == "mayor") and c != uninorte]
         for c in (codigos[:2] + codigos[-1:] if muestra else codigos[::18])[:4]:
             grupo_expandido(p, indice, gid)
-            clic_opcion(p, indice, f'[data-aislar="{c}"]')
+            aislar_selector(p, indice, f'[data-op="{c}"]')
             estado = p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; const g = ms.querySelector(`[data-g='${arguments[1]}']`); return { indet: g.indeterminate, marcado: g.checked };", indice, gid)
             comparar(f"universidad={c}", {"universidades": ("codigo", c)})
             verificar(f"{p.nombre} · universidad {c} · el grupo queda parcial o completo", estado["indet"] or estado["marcado"], str(estado))
@@ -793,19 +957,21 @@ def probar_filtro_universidades(p, comparar, indice, muestra):
         clic_opcion(p, indice, '[data-g="uninorte"]')
         verificar(f"{p.nombre} · universidades · al completar todas se activa TODAS", todos_marcado(p, indice))
         comparar("universidades tras volver a marcar", {})
-        # La última opción no se puede desmarcar
-        clic_op(p, indice, "uninorte", "aislar_g")
-        antes = texto_conteo(p)
-        clic_opcion(p, indice, '[data-g="uninorte"]')
-        verificar(f"{p.nombre} · universidades · la última opción no se puede desmarcar", texto_conteo(p) == antes and bool(aviso_visible(p, indice))
-                  and p.js("return document.querySelectorAll('.filtros .ms')[arguments[0]].querySelector(\"[data-g='uninorte']\").checked", indice), aviso_visible(p, indice))
+        # La última opción se puede desmarcar: sin ninguna opción marcada el filtro actúa como TODAS y se restablece al cerrar
+        aislar(p, indice, "uninorte", "g")
+        clic_en(p, indice, '[data-g="uninorte"]')
+        vacia = p.js("const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return !ms.querySelector(\"[data-g='uninorte']\").checked && ![...ms.querySelectorAll('.ms-ops [data-op]')].some(i => i.checked) && !ms.querySelector('[data-todos]').checked", indice)
+        verificar(f"{p.nombre} · universidades · desmarcar la última opción deja la selección vacía, sin aviso", vacia, "")
+        comparar("universidades sin ninguna opción marcada (actúa como TODAS)", {})
+        p.cerrar()
+        verificar(f"{p.nombre} · universidades · al cerrar sin ninguna opción marcada vuelve TODAS", todos_marcado(p, indice))
         reset_filtros(p)
     # Búsqueda dentro del filtro
     p.abrir(indice)
     ms = p.d.find_elements(By.CSS_SELECTOR, ".filtros .ms")[indice]
     caja = ms.find_element(By.CSS_SELECTOR, "input[type=search]")
     lista = """const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('.ms-op.hijo')].filter(l => l.style.display !== 'none' && !l.hidden).map(l => l.textContent.replace('AISLAR', '').trim());"""
+        return [...ms.querySelectorAll('.ms-op.hijo')].filter(l => l.style.display !== 'none' && !l.hidden).map(l => l.textContent.trim());"""
     con_norte = [v for v in p.js(lista, indice) if "NORTE" in v.upper().replace("Ó", "O")]   # instituciones disponibles que contienen "norte"
     caja.send_keys("norte")
     visibles_txt = p.js(lista, indice)
@@ -817,7 +983,7 @@ def probar_filtro_universidades(p, comparar, indice, muestra):
 
 
 def probar_filtro_programas(p, comparar, indice):
-    """PROGRAMA ACADÉMICO: una opción por nombre de programa (sin universidad ni código), búsqueda, AISLAR y dirección por exclusión."""
+    """PROGRAMA ACADÉMICO: una opción por nombre de programa (sin universidad ni código), búsqueda y dirección por exclusión."""
     probar_filtro_plano(p, comparar, indice, "programas", True)
     opciones = opciones_filtro(p, indice)
     esperadas = set(PROG_MAPA.values())
@@ -835,7 +1001,7 @@ def probar_filtro_programas(p, comparar, indice):
     caja = ms.find_element(By.CSS_SELECTOR, "input[type=search]")
     caja.send_keys(nombre[:12])
     visibles = p.js("""const ms = document.querySelectorAll('.filtros .ms')[arguments[0]];
-        return [...ms.querySelectorAll('.ms-ops .ms-op')].filter(l => l.style.display !== 'none' && !l.hidden).map(l => l.textContent.replace('AISLAR', '').trim());""", indice)
+        return [...ms.querySelectorAll('.ms-ops .ms-op')].filter(l => l.style.display !== 'none' && !l.hidden).map(l => l.textContent.trim());""", indice)
     verificar(f"{p.nombre} · programas · búsqueda por nombre", bool(visibles) and all(norm_js(nombre[:12]) in norm_js(v) for v in visibles), f"{len(visibles)} visibles")
     for _ in range(12):
         caja.send_keys(Keys.BACKSPACE)
@@ -853,7 +1019,7 @@ def probar_filtro_programas(p, comparar, indice):
 
 
 def probar_filtros(p, comparar, claves, muestra):
-    """Prueba cada filtro con clics reales: opciones, AISLAR, exclusiones, TODOS, bloqueo de la última opción y filtros jerárquicos."""
+    """Prueba cada filtro con clics reales: opciones, exclusiones, TODOS, selección vacía y filtros jerárquicos."""
     for indice, clave in enumerate(claves):
         if clave == "fechas":
             continue
@@ -869,7 +1035,7 @@ def probar_filtros(p, comparar, claves, muestra):
 
 
 def probar_filtro_cine(p, comparar, indice, muestra):
-    """CINE jerárquico: campo amplio con sus campos específicos; AISLAR por grupo y por campo; estado inicial con los 10 campos con más registros."""
+    """CINE jerárquico: campo amplio con sus campos específicos; selección de un grupo y de un campo; estado inicial con los 10 campos con más registros."""
     jerarquia = C["catalogos"]["cine_jerarquia"]
     verificar(f"{p.nombre} · CINE · primer nivel = campos amplios disponibles", p.js(
         "const ms = document.querySelectorAll('.filtros .ms')[arguments[0]]; return [...ms.querySelectorAll('.ms-grupo:not([hidden]) .ms-padre .ms-txt')].map(l => l.textContent.trim());", indice)
@@ -880,7 +1046,7 @@ def probar_filtro_cine(p, comparar, indice, muestra):
     for i, amplio, especificos in (amplios[:2] if muestra else amplios):
         if f"a{i}" not in grupos_visibles(p, indice):
             continue
-        clic_op(p, indice, f"a{i}", "aislar_g")
+        aislar(p, indice, f"a{i}", "g")
         disp = set(opciones_filtro(p, indice))
         comparar(f"CINE amplio {amplio}", {"cine": ("varios", [d for d in especificos if d in disp])})
         for d in (especificos[:1] if muestra else especificos[::3]):
@@ -888,7 +1054,7 @@ def probar_filtro_cine(p, comparar, indice, muestra):
                 continue
             reset_filtros(p)
             grupo_expandido(p, indice, f"a{i}")
-            clic_opcion(p, indice, f'.ms-hijos [data-aislar="{d}"]')
+            aislar_selector(p, indice, f'.ms-hijos [data-op="{d}"]')
             comparar(f"CINE específico {d}", {"cine": d})
         reset_filtros(p)
 
@@ -920,11 +1086,11 @@ def probar_dependencias(p, comparar):
     """Filtros encadenados: cada selección recalcula las opciones disponibles de los demás filtros, incluidas las fechas."""
     iu = p.claves.index("universidades"); ip = p.claves.index("programas")
     verificar_disponibles(p, "estado inicial", {}, claves=[c for c in p.claves if c != "fechas"] + ["fechas"])
-    # 1. Una universidad (de las "otras") restringe programas, departamentos, municipios, etc.
+    # 1. Una universidad (de las "otras") restringe programas, departamentos, sectores, etc.
     codigos = [c for c in opciones_filtro(p, iu) if c not in {str(x) for x in C["catalogos"]["mayor_interes"]} | {str(C["catalogos"]["uninorte"])}]
     u = codigos[len(codigos) // 2]
     grupo_expandido(p, iu, "otras")
-    clic_opcion(p, iu, f'[data-aislar="{u}"]')
+    aislar_selector(p, iu, f'[data-op="{u}"]')
     f1 = {"universidades": ("codigo", u)}
     comparar(f"universidad {u}", f1)
     verificar_disponibles(p, f"universidad {u}", f1)
@@ -933,7 +1099,7 @@ def probar_dependencias(p, comparar):
               0 < n_prog < len(set(PROG_MAPA.values())), f"{n_prog} programas")
     # 2. Un programa de esa universidad restringe además los demás filtros y las fechas
     prog = opciones_filtro(p, ip)[0]
-    clic_op(p, ip, prog, "aislar")
+    aislar(p, ip, prog)
     f2 = {"universidades": ("codigo", u), "programas": prog}
     comparar(f"universidad {u} + programa", f2)
     verificar_disponibles(p, "universidad + programa", f2)
@@ -946,7 +1112,7 @@ def probar_dependencias(p, comparar):
             por_prog.setdefault(PROG_MAPA.get(cod), set()).add(f)
     por_prog.pop(None, None)
     prog_poco = min(por_prog, key=lambda k: (len(por_prog[k]), k))
-    clic_op(p, ip, prog_poco, "aislar")
+    aislar(p, ip, prog_poco)
     f3 = {"programas": prog_poco}
     comparar(f"programa con pocas fechas {prog_poco[:30]}", f3)
     habil = fechas_habilitadas(p)
@@ -969,31 +1135,46 @@ def probar_dependencias(p, comparar):
 
 
 def probar_busqueda(p, comparar):
-    """Búsqueda exacta por CODIGO_INSTITUCION_PADRE y CODIGO_SNIES_DEL_PROGRAMA: se ejecuta con la lupa o con Enter."""
+    """
+    Búsqueda parcial por programa, institución o código (sin distinguir mayúsculas ni tildes; cada palabra debe estar en alguno
+    de los campos): se ejecuta con la lupa o con Enter. Casos de borde: espacios, texto largo, caracteres especiales y sin resultados.
+    """
     caja = p.d.find_element(By.CSS_SELECTOR, ".buscar")
     lupa = p.d.find_element(By.CSS_SELECTOR, ".buscar-caja .buscar-btn")
     verificar(f"{p.nombre} · búsqueda · lupa dentro del campo, como botón",
               lupa.is_displayed() and lupa.tag_name == "button" and p.js("return !!arguments[0].querySelector('svg') && arguments[0].closest('.buscar-caja') === document.querySelector('.buscar').parentElement", lupa), "")
+    verificar(f"{p.nombre} · búsqueda · texto del campo", caja.get_attribute("placeholder") == BUSCADOR, caja.get_attribute("placeholder"))
     vaciar = lambda: (caja.send_keys(Keys.CONTROL, "a"), caja.send_keys(Keys.BACKSPACE))  # noqa: E731
-    codigo_prog = str(NOV["nuevos"]["CODIGO_SNIES_DEL_PROGRAMA"].iloc[0])
+    base = p.frames[0] if len(p.frames) == 1 else NOV["nuevos"]   # un registro de la propia página (en Inicio, de Nuevos)
+    codigo_prog = codigo_texto(base["CODIGO_SNIES_DEL_PROGRAMA"].iloc[0])
     antes = texto_conteo(p)
     caja.send_keys(codigo_prog); time.sleep(0.5)
     verificar(f"{p.nombre} · búsqueda · escribir no ejecuta la búsqueda", texto_conteo(p) == antes, texto_conteo(p))
     lupa.click(); p.esperar_listo()
-    comparar(f"búsqueda exacta del programa {codigo_prog} (lupa)", {}, busqueda=codigo_prog)
+    comparar(f"búsqueda del código {codigo_prog} (lupa)", {}, busqueda=codigo_prog)
     verificar(f"{p.nombre} · búsqueda · la dirección guarda la búsqueda", f"buscar={codigo_prog}" in p.d.current_url, p.d.current_url[-60:])
     verificar_disponibles(p, f"búsqueda {codigo_prog}", {}, busqueda=codigo_prog, claves=[c for c in p.claves if c in ("sectores", "departamentos", "modalidades", "fechas")])
-    # Exacta: un prefijo del código no devuelve nada; tampoco un nombre
-    reales = {codigo_texto(v) for df in p.frames for c in CAMPOS_BUSQUEDA for v in df[c].dropna().unique()}
-    prefijo = next(codigo_prog[:n] for n in range(2, len(codigo_prog)) if codigo_prog[:n] not in reales)
-    for texto in (prefijo, "ingenieria de sistemas", codigo_prog + "0"):
+    # Búsqueda parcial: cada caso se compara con el cálculo independiente; los que deben encontrar algo se verifican además
+    nombre_prog = str(base["NOMBRE_DEL_PROGRAMA"].iloc[0]).strip()
+    institucion = str(base["NOMBRE_INSTITUCION"].iloc[0]).strip()
+    palabras = nombre_prog.split()
+    casos = [
+        ("prefijo del código", codigo_prog[:3], True), ("final del código", codigo_prog[-3:], True),
+        ("nombre del programa en mayúsculas", nombre_prog.upper(), True),
+        ("nombre del programa en minúsculas y sin tildes", norm_busqueda(nombre_prog), True),
+        ("palabras en otro orden", " ".join(reversed(palabras)), True), ("una palabra de la institución", institucion.split()[0], True),
+        ("código y palabra del programa", f"{codigo_prog} {palabras[0]}", True), ("espacios sobrantes", f"   {palabras[0]}    ", True),
+        ("código de la institución padre", codigo_texto(base["CODIGO_INSTITUCION_PADRE"].iloc[0]), True), ("solo espacios", "     ", False),
+        ("sin resultados", "zzzqxj", False), ("caracteres especiales", "%_'\"<>&\\", False), ("texto muy largo", "a" * 300, False),
+    ]
+    for etiqueta, texto, hallazgo in casos:
         vaciar(); caja.send_keys(texto, Keys.ENTER); p.esperar_listo()
-        verificar(f"{p.nombre} · búsqueda exacta: '{texto}' no coincide parcialmente", texto_conteo(p).startswith("0 "), texto_conteo(p))
-        comparar(f"búsqueda parcial '{texto}'", {}, busqueda=texto)
-    # Código de institución padre (Uninorte) con Enter
-    vaciar(); caja.send_keys(str(catalogos.UNINORTE), Keys.ENTER); p.esperar_listo()
-    comparar(f"búsqueda exacta de la institución {catalogos.UNINORTE} (Enter)", {}, busqueda=str(catalogos.UNINORTE))
-    # Código de una seccional (no padre): no coincide, porque la búsqueda usa la institución padre
+        comparar(f"búsqueda: {etiqueta}", {}, busqueda=texto[:MAX_BUSQUEDA])
+        if hallazgo:
+            verificar(f"{p.nombre} · búsqueda parcial: {etiqueta} encuentra registros", not texto_conteo(p).startswith("0 "), texto_conteo(p))
+    vaciar(); caja.send_keys("zzzqxj", Keys.ENTER); p.esperar_listo()
+    verificar(f"{p.nombre} · búsqueda sin coincidencias: 0 registros", texto_conteo(p).startswith("0 "), texto_conteo(p))
+    # Código de una seccional (no padre): coincide solo si aparece en alguno de los textos buscados
     seccionales = sorted({str(int(c)) for c in _historico_completo().CODIGO_INSTITUCION.dropna()} - {str(int(c)) for c in _historico_completo().CODIGO_INSTITUCION_PADRE.dropna()})
     if seccionales:
         vaciar(); caja.send_keys(seccionales[0], Keys.ENTER); p.esperar_listo()
@@ -1005,11 +1186,11 @@ def probar_busqueda(p, comparar):
 
 
 def probar_combinaciones(p, comparar, es_inicio):
-    """Búsqueda exacta combinada con otros filtros y restablecimiento con LIMPIAR FILTROS."""
+    """Búsqueda parcial combinada con otros filtros y restablecimiento con LIMPIAR FILTROS."""
     probar_busqueda(p, comparar)
     sectores = p.claves.index("sectores")
-    clic_op(p, 0, "mayor", "aislar_g")
-    clic_op(p, sectores, "PRIVADO", "aislar")
+    aislar(p, 0, "mayor", "g")
+    aislar(p, sectores, "PRIVADO")
     abrir_fechas(p, "anio")
     clic_valor_fecha(p, '[data-anio="2026"]')
     filtro = {"universidades": ("grupo", catalogos.GRUPO_MAYOR_INTERES), "sectores": "PRIVADO"}
@@ -1087,12 +1268,12 @@ def probar_cine_sync(p, tipo):
     verificar(f"{p.nombre} · CINE · TODOS no restringe los datos de la página", esperado == mostrado, f"{mostrado} vs {esperado}")
     # 2. Con otros filtros, la gráfica sigue mostrando los 10 campos con más registros del resultado filtrado
     sectores, modalidades = p.claves.index("sectores"), p.claves.index("modalidades")
-    clic_op(p, sectores, "PRIVADO", "aislar")
+    aislar(p, sectores, "PRIVADO")
     verificar_top_cine(p, tipo, "con sector PRIVADO", {"sectores": "PRIVADO"})
-    clic_op(p, modalidades, "PRESENCIAL", "aislar")
+    aislar(p, modalidades, "PRESENCIAL")
     f2 = {"sectores": "PRIVADO", "modalidades": "PRESENCIAL"}
     verificar_top_cine(p, tipo, "con sector y modalidad", f2)
-    clic_op(p, p.claves.index("universidades"), "mayor", "aislar_g")
+    aislar(p, p.claves.index("universidades"), "mayor", "g")
     f3 = dict(f2, universidades=("grupo", catalogos.GRUPO_MAYOR_INTERES))
     verificar_top_cine(p, tipo, "con tres filtros", f3)
     reset_filtros(p)
@@ -1116,11 +1297,11 @@ def probar_cine_sync(p, tipo):
     clic_cine_grafica(p, "[data-todos]")
     verificar(f"{p.nombre} · CINE · TODOS en la gráfica marca todos los campos en ambos desplegables", sup() == graf() == todas and boton_sup() == boton_graf() == TODOS, boton_sup())
     verificar_top_cine(p, tipo, "TODOS desde la gráfica", {})
-    # 5. Aislar un campo: la gráfica muestra solo ese campo; agregar campos desde la gráfica agrega solo esos
+    # 5. Elegir un solo campo (TODOS desmarcado): la gráfica muestra solo ese campo; agregar campos desde la gráfica agrega solo esos
     destino = visibles[1]
     grupo_expandido(p, cine, gid_de(destino))
-    clic_opcion(p, cine, f'.ms-hijos [data-aislar="{destino}"]')
-    verificar(f"{p.nombre} · CINE · AISLAR deja un solo campo marcado y graficado", sup() == graf() == {destino} and nombres_cine(p) == [destino] and boton_sup() == destino,
+    aislar_selector(p, cine, f'.ms-hijos [data-op="{destino}"]')
+    verificar(f"{p.nombre} · CINE · elegir un campo con TODOS desmarcado deja un solo campo marcado y graficado", sup() == graf() == {destino} and nombres_cine(p) == [destino] and boton_sup() == destino,
               f"{nombres_cine(p)} · {boton_sup()!r}")
     seleccion = [destino]
     for c in [c for c in visibles if c != destino][:2]:
@@ -1145,12 +1326,15 @@ def probar_cine_sync(p, tipo):
     clic_opcion(p, cine, "[data-todos]")
     verificar(f"{p.nombre} · CINE · TODOS vuelve a la selección completa", sup() == graf() == todas and boton_sup() == TODOS, boton_sup())
     verificar_top_cine(p, tipo, "TODOS desde el filtro superior", {})
-    # 8. No se puede quitar la última opción marcada
+    # 8. Se puede quitar la última opción marcada: sin ninguna opción actúa TODOS y al cerrar vuelve la selección completa
     destino = visibles[0]
     grupo_expandido(p, cine, gid_de(destino))
-    clic_opcion(p, cine, f'.ms-hijos [data-aislar="{destino}"]')
-    clic_opcion(p, cine, f'[data-op="{destino}"]')
-    verificar(f"{p.nombre} · CINE · la última opción marcada no se puede quitar", sup() == {destino} and nombres_cine(p) == [destino] and bool(aviso_visible(p, cine)), aviso_visible(p, cine))
+    aislar_selector(p, cine, f'.ms-hijos [data-op="{destino}"]')
+    clic_en(p, cine, f'[data-op="{destino}"]')
+    verificar(f"{p.nombre} · CINE · quitar la última opción marcada deja la selección vacía, sin aviso", sup() == set() and not todos_marcado(p, cine), f"{len(sup())} marcados")
+    verificar_top_cine(p, tipo, "sin ninguna opción marcada (actúa como TODOS)", {})
+    p.cerrar()
+    verificar(f"{p.nombre} · CINE · al cerrar sin ninguna opción marcada vuelve TODOS con todos los campos", sup() == todas and todos_marcado(p, cine), f"{len(sup())} marcados")
     reset_filtros(p)
     # 9. Expandir y contraer categorías, y búsqueda sobre campo amplio y específico en el desplegable de la gráfica
     expandir_cine_grafica(p, "a0")
@@ -1180,14 +1364,14 @@ def probar_cine_sync(p, tipo):
     verificar(f"{p.nombre} · CINE · al restablecer vuelve TODOS con los {CINE_MAX} campos con más registros", es_top(nombres_cine(p), base, CINE_MAX) and boton_sup() == TODOS, boton_sup())
 
 
-CLAVES_BASE = ["universidades", "programas", "departamentos", "municipios", "sectores", "modalidades", "cine", "divisiones"]
+CLAVES_BASE = ["universidades", "programas", "departamentos", "sectores", "modalidades", "cine", "divisiones"]
 CLAVES_PAGINA = {"index": CLAVES_BASE + ["fechas"], "nuevos": CLAVES_BASE + ["fechas"], "inactivos": CLAVES_BASE + ["fechas"],
                  "modificados": CLAVES_BASE + ["cambios", "fechas"]}
 
 
 def probar_orden_filtros(d, base):
-    """Barra de filtros: búsqueda con lupa y luego Universidades, Programas, Departamentos, Municipios, Sectores, Modalidades, CINE, Divisiones, (Cambios) y Fechas."""
-    claves_txt = {"universidades": "UNIVERSIDADES", "programas": "PROGRAMAS", "departamentos": "DEPARTAMENTOS", "municipios": "MUNICIPIOS", "sectores": "SECTORES",
+    """Barra de filtros: búsqueda con lupa y luego Universidades, Programas, Departamentos, Sectores, Modalidades, CINE, Divisiones, (Cambios) y Fechas."""
+    claves_txt = {"universidades": "UNIVERSIDADES", "programas": "PROGRAMAS", "departamentos": "DEPARTAMENTOS", "sectores": "SECTORES",
                   "modalidades": "MODALIDADES", "cine": "CAMPOS DE CINE", "divisiones": "DIVISIONES", "cambios": "CAMBIOS", "fechas": "FECHAS"}
     for pagina, claves in CLAVES_PAGINA.items():
         d.get("about:blank")
@@ -1207,8 +1391,8 @@ def probar_persistencia(d, base):
     d.get("about:blank")
     q = Pagina(d, base, "index.html")
     q.nombre = "persistencia"; q.claves = CLAVES_PAGINA["index"]
-    clic_op(q, q.claves.index("sectores"), "PRIVADO", "aislar")
-    clic_op(q, q.claves.index("modalidades"), "PRESENCIAL", "aislar")
+    aislar(q, q.claves.index("sectores"), "PRIVADO")
+    aislar(q, q.claves.index("modalidades"), "PRESENCIAL")
     abrir_fechas(q, "anio"); clic_valor_fecha(q, '[data-anio="2026"]')
     filtro = {"sectores": "PRIVADO", "modalidades": "PRESENCIAL"}
     recorrido = ["nuevos", "modificados", "inactivos", "index", "nuevos"]
@@ -1235,8 +1419,8 @@ def probar_persistencia(d, base):
     etiquetas_inactivos = set(PROG_MAPA.values())
     usar_mapa_programas([NOV["nuevos"]])
     solo_nuevos = sorted(etiquetas_nuevos - etiquetas_inactivos)[0]
-    clic_op(q, q.claves.index("programas"), solo_nuevos, "aislar")
-    clic_op(q, q.claves.index("sectores"), "PRIVADO", "aislar")
+    aislar(q, q.claves.index("programas"), solo_nuevos)
+    aislar(q, q.claves.index("sectores"), "PRIVADO")
     q.d.find_element(By.CSS_SELECTOR, '.nav a[href^="inactivos.html"]').click(); q.esperar_listo()
     q.claves = CLAVES_PAGINA["inactivos"]
     usar_mapa_programas([NOV["inactivos"]])
@@ -1244,7 +1428,7 @@ def probar_persistencia(d, base):
     verificar("persistencia · programa inexistente en el apartado: se restablece y el resto se conserva",
               textos[q.claves.index("programas")] == "TODOS LOS PROGRAMAS ACADÉMICOS" and "PRIVADO" in textos[q.claves.index("sectores")], str(textos[:5]))
     comparar_detalle(q, "inactivos", "persistencia · inactivos sin el programa", {"sectores": "PRIVADO"})
-    # La búsqueda por código también viaja entre apartados
+    # La búsqueda por código también viaja entre apartados (parcial)
     codigo = str(NOV["nuevos"]["CODIGO_SNIES_DEL_PROGRAMA"].iloc[0])
     caja = q.d.find_element(By.CSS_SELECTOR, ".buscar")
     caja.send_keys(codigo, Keys.ENTER); q.esperar_listo()
@@ -1312,6 +1496,15 @@ def consistencia_datos():
     verificar("datos · jerarquía de CINE cubre los campos específicos del histórico y las novedades",
               set(todo["CINE_F_2013_AC_CAMPO_ESPECIFIC"].dropna()) | {x for t in NOV for x in NOV[t]["CINE_F_2013_AC_CAMPO_ESPECIFIC"].dropna()} <= especificos, "")
     verificar("datos · columnas de las tablas sin REACTIVADO_POSTERIORMENTE", all("REACTIVADO_POSTERIORMENTE" not in NOV[t].columns for t in NOV), "")
+    # Modificados: un registro por programa y ejecución, con todos sus cambios en CAMBIO_DETECTADO (sin TIPO_CAMBIO_DETECTADO)
+    mod = NOV["modificados"]
+    fuente = pd.read_parquet(ROOT / "Novedades" / "Modificados.parquet")
+    verificar("datos · modificados · un solo registro por programa y ejecución", not mod.duplicated(["CODIGO_SNIES_DEL_PROGRAMA", "FECHA_DE_OBTENCION"]).any(), "")
+    verificar("datos · modificados · sin la columna TIPO_CAMBIO_DETECTADO ni en el archivo fuente ni en el Dashboard",
+              "TIPO_CAMBIO_DETECTADO" not in mod.columns and "TIPO_CAMBIO_DETECTADO" not in fuente.columns, "")
+    verificar("datos · modificados · CAMBIO_DETECTADO con el formato 'TIPO: anterior → nuevo | TIPO: anterior → nuevo' en el orden de los tipos",
+              all(catalogos.unir_cambios(catalogos.separar_cambios(x)) == x and len(catalogos.separar_cambios(x)) > 0 for x in mod["CAMBIO_DETECTADO"]), "")
+    verificar("datos · modificados · CAMBIO_DETECTADO del Dashboard igual al del archivo fuente", sorted(fuente["CAMBIO_DETECTADO"]) == sorted(mod["CAMBIO_DETECTADO"]), "")
 
 
 def probar_url(d, base):
@@ -1321,7 +1514,7 @@ def probar_url(d, base):
     desde_mes, hasta_mes = f"{mes}-01", str((pd.Timestamp(f"{mes}-01") + pd.offsets.MonthEnd(0)).date())
     otras = ("grupo", catalogos.GRUPO_OTRAS)
     mod_mes = NOV["modificados"][NOV["modificados"].FECHA_DE_OBTENCION.str.startswith(mes)]
-    cambio = mod_mes["TIPO_CAMBIO_DETECTADO"].value_counts().index[0]
+    cambio = mod_mes["_TC"].explode().value_counts().index[0]   # un registro puede tener varios tipos de cambio
 
     # Carga directa con filtros (incluido un valor inexistente, que debe descartarse)
     d.get("about:blank")
@@ -1415,11 +1608,15 @@ def probar_consistencia_visual(d, base):
     from selenium.webdriver.common.action_chains import ActionChains
     d.get("about:blank")
     q = Pagina(d, base, "modificados.html")
-    etiquetas = set(C["catalogos"]["tipos_cambio_etiqueta"].values())
-    celdas = q.js("const j = [...document.querySelectorAll('#tabla th')].findIndex(t => t.dataset.c === 'TIPO_CAMBIO_DETECTADO');"
+    columnas = q.js("return [...document.querySelectorAll('#tabla th')].map(t => t.dataset.c)")
+    celdas = q.js("const j = [...document.querySelectorAll('#tabla th')].findIndex(t => t.dataset.c === 'CAMBIO_DETECTADO');"
                   "return [...new Set([...document.querySelectorAll('#tabla tbody tr')].map(tr => tr.children[j].textContent))];")
-    verificar("consistencia · tipo de cambio de la tabla con la etiqueta del filtro y del correo", bool(celdas) and set(celdas) <= etiquetas, str(celdas))
-    for nombre, selector in (("filtro desplegable", ".filtros .ms-btn"), ("botón", ".filtros .btn-limpiar"), ("descarga", "#tabla [data-pq]")):
+    tipos = set(catalogos.TIPOS_CAMBIO)
+    verificar("consistencia · CAMBIO_DETECTADO de la tabla con todos los cambios del programa (tipos del filtro y del correo)",
+              "TIPO_CAMBIO_DETECTADO" not in columnas and bool(celdas) and all(set(catalogos.tipos_de_cambio(c)) and set(catalogos.tipos_de_cambio(c)) <= tipos for c in celdas), str(celdas[:2]))
+    opciones = set(q.js("const m = [...document.querySelectorAll('.filtros .ms')].find(x => x.querySelector('.ms-btn').textContent.includes('CAMBIOS')); return m ? [...m.querySelectorAll('.ms-ops [data-op]')].map(i => i.dataset.op) : [];"))
+    verificar("consistencia · el filtro de cambios ofrece los tipos de cambio de los datos", opciones == {x for ts in NOV["modificados"]["_TC"] for x in ts}, str(opciones))
+    for nombre, selector in (("filtro desplegable", ".filtros .ms-btn"), ("botón", ".filtros .btn-limpiar"), ("descarga", "#tabla [data-descargar]")):
         el = q.d.find_element(By.CSS_SELECTOR, selector)
         q.js("arguments[0].scrollIntoView({block: 'center'});", el)
         antes = q.js("return getComputedStyle(arguments[0]).backgroundColor", el)
@@ -1481,7 +1678,8 @@ def probar_filtros_plegables(d, base):
             sec = q.js("return [...document.querySelectorAll('.filtros .ms > .ms-btn')].findIndex(b => b.textContent.includes('SECTORES'))")
             antes = q.js("return document.querySelector('.conteo-filtro').textContent")
             q.d.find_elements(By.CSS_SELECTOR, ".filtros .ms > .ms-btn")[sec].click(); time.sleep(0.2)
-            op = q.d.find_element(By.CSS_SELECTOR, '.filtros .ms.abierto [data-aislar="PRIVADO"]')
+            q.js("document.querySelector('.filtros .ms.abierto [data-todos]').click();")                      # desmarca TODOS
+            op = q.d.find_element(By.CSS_SELECTOR, '.filtros .ms.abierto [data-op="PRIVADO"]')
             q.js("arguments[0].scrollIntoView({block: 'center'});", op)
             q.js("arguments[0].click();", op); q.esperar_listo()
             despues = q.js("return document.querySelector('.conteo-filtro').textContent")
@@ -1531,7 +1729,7 @@ _BASE = ["NOMBRE_INSTITUCION", "NOMBRE_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGR
 _ACAD = ["NUMERO_CREDITOS", "NUMERO_PERIODOS_DE_DURACION", "PERIODICIDAD", "COSTO_MATRICULA_ESTUD_NUEVOS", "DIVISION_UNINORTE"]
 COLUMNAS_INICIALES = {
     "nuevos": ["FECHA_DE_OBTENCION", "TIPO_NOVEDAD"] + _BASE + _ACAD,
-    "modificados": ["FECHA_DE_OBTENCION", "TIPO_CAMBIO_DETECTADO", "CAMBIO_DETECTADO"] + _BASE + _ACAD,
+    "modificados": ["FECHA_DE_OBTENCION", "CAMBIO_DETECTADO"] + _BASE + _ACAD,
     "inactivos": ["FECHA_DE_OBTENCION"] + _BASE + _ACAD,
 }
 
@@ -1569,21 +1767,21 @@ NEGRO, VERDE, AMARILLO, OCRE, ROJO = "#151515", "#1E8E5A", "#FFCC00", "#B78B1E",
 
 
 def probar_estructura(d, base):
-    """Títulos y orden de las tarjetas, subtítulo, buscador, botón DESCARGAR, columnas de las tablas, colores y gráficas retiradas."""
+    """Títulos y orden de las tarjetas, subtítulo, buscador, botón DESCARGAR (Excel), columnas de las tablas, colores y gráficas retiradas."""
     for pagina in ("index", "nuevos", "modificados", "inactivos"):
         d.get("about:blank")
         q = Pagina(d, base, f"{pagina}.html")
         info = q.js("""const g = (id) => document.getElementById(id);
             return { titulos: [...document.querySelectorAll('.tarjeta-tit')].map(t => t.textContent),
               sub: (document.querySelector('.enc-sub') || {}).textContent, buscador: document.querySelector('.buscar').placeholder,
-              descargas: [...document.querySelectorAll('[data-pq]')].map(b => b.textContent.trim()),
+              descargas: [...document.querySelectorAll('[data-descargar]')].map(b => b.textContent.trim()),
               texto: document.body.innerText, ids: [...document.querySelectorAll('.grafica')].map(e => e.id),
               logos: [...document.querySelectorAll('img')].map(i => [i.className, i.alt, i.complete && i.naturalWidth > 0, i.getAttribute('src'), Math.round(i.getBoundingClientRect().height)]) };""")
         verificar(f"estructura · {pagina} · títulos y orden de las tarjetas", info["titulos"] == titulos_esperados(pagina),
                   str([t for t in info["titulos"] if t not in titulos_esperados(pagina)][:3]) + str([t for t in titulos_esperados(pagina) if t not in info["titulos"]][:3]))
         verificar(f"estructura · {pagina} · subtítulo bajo el título principal", info["sub"] == "Programas Académicos Universitarios de Pregrado en Colombia", str(info["sub"]))
         verificar(f"estructura · {pagina} · texto del buscador", info["buscador"] == BUSCADOR, info["buscador"])
-        verificar(f"estructura · {pagina} · botón DESCARGAR", bool(info["descargas"]) and all(t == "DESCARGAR" for t in info["descargas"]) and "PARQUET" not in info["texto"].upper(), str(info["descargas"]))
+        verificar(f"estructura · {pagina} · botón DESCARGAR", bool(info["descargas"]) and all(t == "DESCARGAR" for t in info["descargas"]) and "PARQUET" not in info["texto"].upper() and "XLSX" not in info["texto"].upper(), str(info["descargas"]))
         verificar(f"estructura · {pagina} · sin 'Variación promedio' ni gráficas retiradas",
                   "Variación promedio" not in info["texto"] and not {"g-antiguedad", "g-balance"} & set(info["ids"]) and "ANTIGÜEDAD" not in info["texto"].upper()
                   and "BALANCE NETO" not in info["texto"].upper(), "")
@@ -1596,11 +1794,11 @@ def probar_estructura(d, base):
         logos = {l[0]: l for l in info["logos"]}
         verificar(f"marca · {pagina} · logotipo blanco en el encabezado y principal en el pie, con texto alternativo y carga correcta",
                   set(logos) == {"enc-logo", "pie-logo"} and all(l[1] == "Universidad del Norte" and l[2] for l in logos.values())
-                  and logos["enc-logo"][3].endswith("logo-uninorte-blanco.png") and logos["pie-logo"][3].endswith("logo-uninorte-principal.png"), str(info["logos"]))
+                  and logos["enc-logo"][3].endswith("logo-uninorte-direccion-blanco.png") and logos["pie-logo"][3].endswith("logo-uninorte-direccion-principal.png"), str(info["logos"]))
         icono = q.js("const l = document.querySelector('link[rel=icon]'); return l ? l.getAttribute('href') : null")
         estado = q.js("const l = document.querySelector('link[rel=icon]'); const x = new XMLHttpRequest(); x.open('GET', l.href, false); x.send(); return [x.status, x.responseText.length]") if icono else None
         verificar(f"marca · {pagina} · favicon institucional enlazado y disponible", icono == "assets/img/favicon-uninorte.ico" and estado and estado[0] == 200, f"{icono} {estado}")
-        verificar(f"marca · {pagina} · el logotipo del encabezado no altera la altura del encabezado", logos["enc-logo"][4] == 68, str(logos["enc-logo"]))
+        verificar(f"marca · {pagina} · el logotipo del encabezado no altera la altura del encabezado", logos["enc-logo"][4] == 52, str(logos["enc-logo"]))
         verificar(f"estructura · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
 
     # Colores por apartado
@@ -1667,7 +1865,7 @@ def probar_tablas_inicio(p):
     cols = {t: p.js("return [...document.querySelectorAll(`#tabla-${arguments[0]} th`)].map(t => t.dataset.c)", t) for t in NOV}
     verificar("inicio · columnas de las tres tablas en el orden acordado", all(cols[t][:len(COLUMNAS_INICIALES[t])] == COLUMNAS_INICIALES[t] for t in NOV), str({t: c[:8] for t, c in cols.items()}))
     # Un filtro cambia las tres tablas aunque solo una esté visible
-    clic_op(p, 0, "mayor", "aislar_g")
+    aislar(p, 0, "mayor", "g")
     esperado = {t: len(filtrar(NOV[t], {"universidades": ("grupo", catalogos.GRUPO_MAYOR_INTERES)}, None, CAMPOS_BUSQUEDA)) for t in NOV}
     estado = p.estado()
     verificar("inicio · los filtros afectan las tres tablas aunque no estén visibles", estado["tablas"] == estado["tabs"] == esperado, f"{estado['tablas']} vs {esperado}")
@@ -1678,21 +1876,12 @@ def probar_tablas_inicio(p):
         filas = p.js("return Number(document.querySelector(`#tabla-${arguments[0]} [data-n]`).textContent.replace(/\\D/g, ''))", t)
         verificar(f"inicio · pestaña {t}: solo su tabla visible y con los registros filtrados", vis == [f"panel-{t}"] and filas == esperado[t], f"{vis} · {filas} vs {esperado[t]}")
     reset_filtros(p)
-    # Exportación de la tabla visible
-    r = p.d.execute_async_script("""const listo = arguments[arguments.length - 1];
-      (async () => {
-        let blob = null; const o1 = URL.createObjectURL, o2 = HTMLAnchorElement.prototype.click;
-        URL.createObjectURL = (b) => { blob = b; return 'blob:x'; }; HTMLAnchorElement.prototype.click = function () {};
-        document.querySelector('#tabla-nuevos [data-pq]').click();
-        for (let i = 0; i < 150 && !blob; i++) await new Promise(r => setTimeout(r, 100));
-        URL.createObjectURL = o1; HTMLAnchorElement.prototype.click = o2;
-        const hp = await import('hyparquet'); const filas = await hp.parquetReadObjects({ file: await blob.arrayBuffer() });
-        const meta = hp.parquetMetadata(await blob.arrayBuffer());
-        const f = meta.schema.find((s) => s.name === 'FECHA_DE_OBTENCION');
-        listo({ filas: filas.length, columnas: Object.keys(filas[0] || {}).length, cols_tabla: document.querySelectorAll('#tabla-nuevos th').length,
-                tipoFecha: f ? f.converted_type : null, esFecha: filas[0].FECHA_DE_OBTENCION instanceof Date && filas[0].FECHA_DE_OBTENCION.getUTCHours() === 0 });
-      })().catch(e => listo({ error: String(e) }));""")
-    verificar("inicio · exportación de la tabla de nuevos", r.get("filas") == len(NOV["nuevos"]) and r.get("columnas") == r.get("cols_tabla"), json.dumps(r))
+    # Exportación de la tabla visible con los filtros aplicados: solo sus registros
+    aislar(p, 0, "mayor", "g")
+    p.cerrar()
+    verificar_xlsx("inicio · tabla de nuevos", exportar_xlsx(p, "#tabla-nuevos [data-descargar]"),
+                   filtrar(NOV["nuevos"], {"universidades": ("grupo", catalogos.GRUPO_MAYOR_INTERES)}, None, CAMPOS_BUSQUEDA))
+    reset_filtros(p)
 
 
 def probar_titulos_pestana(d, base):
@@ -1713,9 +1902,9 @@ def probar_titulos_pestana(d, base):
 def probar_rango_temporal(d, base):
     """Cada gráfica temporal empieza en la primera ejecución con datos de su métrica, no en la primera ejecución global."""
     def valido(df, tipo):
-        sel = df[df["TIPO_CAMBIO_DETECTADO"] == tipo]
-        ok = sel["CAMBIO_DETECTADO"].astype(str).str.fullmatch(r"\s*-?\d+(\.\d+)?\s*→\s*-?\d+(\.\d+)?\s*")
-        return sel[ok]["FECHA_DE_OBTENCION"].min()
+        """Primera ejecución con un cambio numérico válido (anterior y nuevo) de ese tipo en alguno de los registros."""
+        fechas = [f for f, cb in zip(df["FECHA_DE_OBTENCION"], df["_CB"]) if par_numerico(cb.get(tipo))]
+        return min(fechas) if fechas else None
     primera_global = C["fechas_ejecucion"][0]
     x0 = lambda q, gid: q.js("const g = document.getElementById(arguments[0]); return g && g.data && g.data[0] ? String(g.data[0].x[0]).slice(0, 10) : null", gid)  # noqa: E731
     for tipo in NOV:
@@ -1756,7 +1945,7 @@ def probar_rango_temporal(d, base):
 
 
 def probar_unidades_y_etiquetas(d, base):
-    """Una sola unidad de medida ("registros"), etiquetas de las agrupaciones (HÍBRIDA, SIN INFORMACIÓN), programas distintos en Modificados y un solo término para la ejecución."""
+    """Una sola unidad de medida ("registros"), opciones de datos sin tildes (HIBRIDA, SIN INFORMACION), cambios en Modificados y un solo término para la ejecución."""
     for pagina in ("index", "nuevos", "modificados", "inactivos"):
         d.get("about:blank")
         q = Pagina(d, base, f"{pagina}.html")
@@ -1765,7 +1954,7 @@ def probar_unidades_y_etiquetas(d, base):
             const modal = (document.getElementById('g-modalidad').data || []).map(tr => tr.name.split(' · ')[0]);
             const ms = [...document.querySelectorAll('.filtros .ms')].find(m => m.querySelector('.ms-btn').textContent.includes('MODALIDADES'));
             return { conteo: t('.conteo-filtro'), total: t('#total-s'), plantillas, modal, texto: document.body.innerText,
-                     opcionesMod: [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => [l.querySelector('input').dataset.op, l.textContent.replace('AISLAR', '').trim()]),
+                     opcionesMod: [...ms.querySelectorAll('.ms-ops .ms-op')].map(l => [l.querySelector('input').dataset.op, l.textContent.trim()]),
                      encabezado: t('.enc-total'), ejes: [...document.querySelectorAll('.grafica')].map(e => e.layout && e.layout.yaxis && e.layout.yaxis.title ? e.layout.yaxis.title.text : '').filter(Boolean) };""")
         verificar(f"unidades · {pagina} · conteo de filtros en registros", info["conteo"].split(" ", 1)[1].startswith("registro"), info["conteo"])
         if pagina != "index":
@@ -1779,29 +1968,29 @@ def probar_unidades_y_etiquetas(d, base):
             return !(eje && eje.title && eje.title.text === 'REGISTROS'); }).map(e => e.id);""")
         verificar(f"unidades · {pagina} · todas las gráficas de líneas y barras rotulan su eje de conteo como REGISTROS", not sin_titulo, str(sin_titulo))
         hibrida = [o for o in info["opcionesMod"] if o[0] == "HIBRIDA"]
-        verificar(f"etiquetas de agrupaciones · {pagina} · HÍBRIDA en el filtro de modalidades y en la leyenda (el valor sigue siendo HIBRIDA)",
-                  hibrida == [["HIBRIDA", "HÍBRIDA"]] and "HÍBRIDA" in info["modal"] and "HIBRIDA" not in info["modal"], f"{hibrida} · {info['modal']}")
+        verificar(f"etiquetas de agrupaciones · {pagina} · HIBRIDA sin tilde en el filtro de modalidades y en la leyenda",
+                  hibrida == [["HIBRIDA", "HIBRIDA"]] and "HIBRIDA" in info["modal"] and "HÍBRIDA" not in info["texto"], f"{hibrida} · {info['modal']}")
         verificar(f"ejecución · {pagina} · sin 'Descarga más reciente' ni 'Sin descargas'", "Descarga más reciente" not in info["texto"] and "Sin descargas" not in info["texto"], "")
     d.get("about:blank")
     q = Pagina(d, base, "modificados.html")
     ejes = q.js("const g = document.getElementById('g-transiciones'); return [g.data[0].x, g.data[0].y]")
-    verificar("etiquetas de agrupaciones · modificados · transiciones de modalidad", "HIBRIDA" not in ejes[0] + ejes[1] and (not ({"HIBRIDA", "HÍBRIDA"} & set(ejes[0] + ejes[1])) or "HÍBRIDA" in ejes[0] + ejes[1]), str(ejes))
+    verificar("etiquetas de agrupaciones · modificados · transiciones de modalidad sin tildes", "HÍBRIDA" not in ejes[0] + ejes[1] and set(ejes[0]) == set(ejes[1]) <= set(C["catalogos"]["grupos_modalidad"]), str(ejes))
     ayuda = q.js("return document.getElementById('t-g-creditos').parentElement.querySelector('.tarjeta-sub').textContent")
     verificar("colores · modificados · la descripción menciona barras amarillas", "barras amarillas" in ayuda and "naranja" not in ayuda, ayuda)
     mod = NOV["modificados"]
-    distintos = mod["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
     miles = lambda n: f"{n:,}".replace(",", ".")  # noqa: E731
     conteo = q.js("return document.querySelector('.conteo-filtro').textContent")
-    verificar("programas distintos · modificados · el contador de filtros informa registros y programas distintos",
-              conteo == f"{miles(len(mod))} registros · {miles(distintos)} programas distintos", conteo)
+    verificar("registros · modificados · el contador de filtros informa solo registros (un registro por programa y ejecución)",
+              conteo == f"{miles(len(mod))} registros", conteo)
     d.get("about:blank")
     q2 = Pagina(d, base, "index.html")
     ult = mod[mod["FECHA_DE_OBTENCION"] == C["ultima_ejecucion"]]
     sub = q2.js("return document.getElementById('k-modificados-s').textContent")
     f = C["ultima_ejecucion"]
-    esperado = f"{miles(ult['CODIGO_SNIES_DEL_PROGRAMA'].nunique())} programa{'' if ult['CODIGO_SNIES_DEL_PROGRAMA'].nunique() == 1 else 's'} distinto{'' if ult['CODIGO_SNIES_DEL_PROGRAMA'].nunique() == 1 else 's'} · {f[8:10]}/{f[5:7]}/{f[:4]}"
-    verificar("programas distintos · inicio · KPI de modificados", sub == esperado, f"{sub!r} vs {esperado!r}")
-    verificar("etiquetas de agrupaciones · catálogo de modalidades agrupadas con SIN INFORMACIÓN", "SIN INFORMACIÓN" in C["catalogos"]["grupos_modalidad"], str(C["catalogos"]["grupos_modalidad"]))
+    cambios = int(ult["_TC"].map(len).sum())
+    esperado = f"{miles(cambios)} cambio{'' if cambios == 1 else 's'} · {f[8:10]}/{f[5:7]}/{f[:4]}"
+    verificar("cambios · inicio · el KPI de modificados informa los cambios de la última ejecución", sub == esperado, f"{sub!r} vs {esperado!r}")
+    verificar("etiquetas de agrupaciones · catálogo de modalidades agrupadas con SIN INFORMACION", "SIN INFORMACION" in C["catalogos"]["grupos_modalidad"], str(C["catalogos"]["grupos_modalidad"]))
 
 
 PALETA_SERIES = ["#960A11", "#5B6770", "#60912D", "#547CD3", "#994D66", "#294C9F", "#BB6802", "#20947D",
@@ -1835,18 +2024,41 @@ def probar_colores_series(d, base):
                   f"{len(iguales)} de {len(comunes)} · distintos: {[n for n, cs in comunes if len(set(cs)) > 1][:3]}")
 
 
-def probar_etiqueta_aislar(d, base):
-    """El botón que deja una sola opción se llama AISLAR en todos los filtros y páginas (texto, descripción accesible y atributos), sin restos de SOLO."""
+def probar_interfaz_filtros(d, base):
+    """
+    Sin botón AISLAR ni aviso de última opción; sin filtro de municipios; las búsquedas de los desplegables (universidades,
+    programas, departamentos, campos específicos y la de la gráfica de CINE) miden 22 px; las tablas inferiores tienen un alto máximo de 540 px.
+    """
     for pagina in ("index", "nuevos", "modificados", "inactivos"):
         d.get("about:blank")
         q = Pagina(d, base, f"{pagina}.html")
-        info = q.js("""const bs = [...document.querySelectorAll('.filtros button.ms-aislar')];
-            const html = document.documentElement.outerHTML;
-            return { n: bs.length, textos: [...new Set(bs.map(b => b.textContent.trim()))], etiquetas: bs.every(b => /^Aislar /.test(b.getAttribute('aria-label'))),
-                     restos: /data-solo|ms-solo|>SOLO</.test(html), filtros: new Set(bs.map(b => b.closest('.ms') && [...document.querySelectorAll('.filtros .ms')].indexOf(b.closest('.ms')))).size };""")
-        verificar(f"AISLAR · {pagina} · todos los botones dicen AISLAR, con descripción accesible y sin restos de SOLO",
-                  info["n"] > 100 and info["textos"] == ["AISLAR"] and info["etiquetas"] and not info["restos"], json.dumps(info))
-        verificar(f"AISLAR · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
+        info = q.js("""const html = document.documentElement.outerHTML;
+            const ms = [...document.querySelectorAll('.filtros .ms:not(.fs)')];
+            return { aislar: document.querySelectorAll('.ms-aislar, [data-aislar], [data-aislar-g], .ms-aviso').length, restos: /AISLAR|Aislar|data-solo|ms-solo/.test(html),
+                     municipios: ms.some(m => /MUNICIPIO/i.test(m.querySelector('.ms-btn').textContent)), conBusqueda: ms.map((m, i) => m.querySelector('input[type=search]') ? i : -1).filter(i => i >= 0),
+                     envolturas: [...document.querySelectorAll('.tabla-env')].map(e => getComputedStyle(e).maxHeight) };""")
+        verificar(f"filtros · {pagina} · sin botón AISLAR ni aviso de última opción", info["aislar"] == 0 and not info["restos"], json.dumps(info))
+        verificar(f"filtros · {pagina} · sin filtro de municipios", not info["municipios"] and "municipio=" not in d.current_url, json.dumps(info))
+        verificar(f"filtros · {pagina} · tablas inferiores con alto máximo de 540 px", bool(info["envolturas"]) and set(info["envolturas"]) == {"540px"}, str(info["envolturas"]))
+        alturas = {}
+        for i in info["conBusqueda"]:
+            q.abrir(i)
+            alturas[i] = q.js("return Math.round(document.querySelector('.filtros .ms.abierto input[type=search]').getBoundingClientRect().height * 10) / 10")
+        q.cerrar()
+        verificar(f"filtros · {pagina} · las {len(alturas)} búsquedas de los desplegables miden 22 px", len(alturas) >= 4 and set(alturas.values()) == {22}, str(alturas))
+        if q.js("return !!document.querySelector('#cine-ctrl .ms-btn')"):
+            q.d.find_element(By.CSS_SELECTOR, "#cine-ctrl .ms-btn").click()
+            alto = q.js("return Math.round(document.querySelector('#cine-ctrl input[type=search]').getBoundingClientRect().height * 10) / 10")
+            q.cerrar()
+            verificar(f"filtros · {pagina} · la búsqueda del desplegable de la gráfica de CINE mide 22 px", alto == 22, str(alto))
+        # Textos descriptivos (descripciones de las tarjetas, pie, indicadores y descripciones de los botones) sin palabras en mayúsculas sostenidas
+        # (se admiten las siglas CINE y SNIES)
+        mayusculas = q.js("""const permitidas = new Set(['CINE', 'SNIES']), re = /\b[A-ZÁÉÍÓÚÑÜ]{3,}\b/g;
+            const textos = [...document.querySelectorAll('.tarjeta-sub, .pie-pagina, .kpi-s')].map(e => e.textContent)
+                .concat([...document.querySelectorAll('.fs-quitar, .buscar-btn, .filtros-toggle')].map(e => (e.getAttribute('title') || '') + ' ' + (e.getAttribute('aria-label') || '')));
+            return textos.flatMap(t => (t.match(re) || []).filter(w => !permitidas.has(w)));""")
+        verificar(f"textos · {pagina} · los textos descriptivos no usan palabras en mayúsculas sostenidas (salvo CINE y SNIES)", not mayusculas, str(sorted(set(mayusculas))[:5]))
+        verificar(f"filtros · {pagina} · errores de consola", not q.errores(), str(q.errores()[:3]))
 
 
 def probar_descripciones_graficas(d, base):
@@ -1891,7 +2103,7 @@ def main():
     try:
         probar_estructura(d, base)
         probar_alturas(d, base)
-        probar_etiqueta_aislar(d, base)
+        probar_interfaz_filtros(d, base)
         probar_botones_sin_recorte(d, base)
         probar_descripciones_graficas(d, base)
         # Inicio
@@ -1933,7 +2145,7 @@ def main():
             probar_fechas(q, comp)
             probar_combinaciones(q, comp, False)
             probar_tabla(q, NOV[tipo])
-            probar_exportacion(q)
+            probar_exportacion(q, tipo)
             probar_cine_sync(q, tipo)
             probar_sin_punteadas(q)
             probar_orden_leyendas(q)

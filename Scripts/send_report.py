@@ -51,7 +51,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalogos import (  # noqa: E402
-    GRUPO_MAYOR_INTERES, GRUPO_UNINORTE, GRUPOS_UNIVERSIDAD, TIPOS_CAMBIO_ETIQUETA, grupos_de_registros,
+    GRUPO_MAYOR_INTERES, GRUPO_UNINORTE, GRUPOS_UNIVERSIDAD, grupos_de_registros, separar_cambios,
 )
 
 # Hijo del logger del orquestador: los mensajes del correo quedan en el log consolidado.
@@ -66,6 +66,8 @@ ESPERA_SMTP = (5, 15)
 _ERRORES_TRANSITORIOS = (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, ConnectionError, TimeoutError,
                          ssl.SSLError, socket.gaierror)
 DASHBOARD_URL = "https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/"
+# Ancho máximo del mensaje (px). Gmail y Outlook web lo ajustan al panel de lectura; Outlook de escritorio lo respeta tal cual.
+ANCHO_CORREO = 900
 # Tamaño máximo del HTML del correo (bytes): Gmail recorta desde ~102 KB; el margen cubre variaciones de medición
 LIMITE_HTML = 95 * 1024
 
@@ -81,14 +83,18 @@ FUENTE = "Montserrat, 'Segoe UI', Arial, sans-serif"
 
 # Logotipo institucional (versión blanca para el encabezado negro). Va incrustado en el mensaje (Content-ID) y no
 # enlazado: se ve sin descargar imágenes remotas y no requiere que el Dashboard esté publicado.
-LOGO = Path(__file__).resolve().parent.parent / "docs" / "assets" / "img" / "logo-uninorte-blanco.png"
+LOGO = Path(__file__).resolve().parent.parent / "docs" / "assets" / "img" / "logo-uninorte-direccion-blanco.png"
 LOGO_CID = "logo-uninorte"
 
-# Columnas de las tablas: las comunes (institución, programa, municipio y modalidad) y la división de Uninorte
-# al final; nuevos y modificados agregan entre ambas el tipo de novedad o el tipo y detalle del cambio.
+# Columnas de las tablas: las comunes (institución, programa, departamento y modalidad) y la división de Uninorte
+# al final; nuevos y modificados agregan entre ambas el tipo de novedad o los cambios detectados del programa.
 _INICIO = [("NOMBRE_INSTITUCION", "INSTITUCIÓN"), ("NOMBRE_DEL_PROGRAMA", "PROGRAMA"),
-           ("MUNICIPIO_OFERTA_PROGRAMA", "MUNICIPIO"), ("MODALIDAD", "MODALIDAD")]
+           ("DEPARTAMENTO_OFERTA_PROGRAMA", "DEPARTAMENTO"), ("MODALIDAD", "MODALIDAD")]
 _FINAL = [("DIVISION_UNINORTE", "DIVISIÓN DE UNINORTE")]
+
+# Ancho sugerido de algunas columnas de las tablas (las demás se reparten el espacio restante): el programa y los cambios
+# detectados, que van uno por línea, llevan los textos más largos.
+ANCHO_COLUMNA = {"NOMBRE_DEL_PROGRAMA": "22%", "CAMBIO_DETECTADO": "27%"}
 
 SECCIONES = {
     "nuevos": {
@@ -101,11 +107,11 @@ SECCIONES = {
     },
     "modificados": {
         "titulo": "PROGRAMAS ACADÉMICOS MODIFICADOS",
-        "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad.",
+        "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad. Cada registro reúne todos los cambios de un programa en la ejecución.",
         "vacio": "No se detectaron cambios en los programas activos en esta ejecución.",
         "unidad": ("registro", "registros"),
         "pagina": "modificados.html",
-        "columnas": _INICIO + [("TIPO_CAMBIO_DETECTADO", "TIPO DE CAMBIO"), ("CAMBIO_DETECTADO", "CAMBIO DETECTADO")] + _FINAL,
+        "columnas": _INICIO + [("CAMBIO_DETECTADO", "CAMBIO DETECTADO")] + _FINAL,
     },
     "inactivos": {
         "titulo": "PROGRAMAS ACADÉMICOS INACTIVOS",
@@ -141,7 +147,7 @@ def _prioridad(df: pd.DataFrame) -> pd.Series:
 # borde gris de separación, títulos en mayúsculas y tablas con encabezado negro. Los estilos van en línea
 # porque la mayoría de los clientes de correo ignoran las hojas de estilo. Colores, tipo de letra, pesos, interletrado,
 # radios, bordes y márgenes son los del Dashboard (docs/assets/estilos.css); solo los tamaños de letra de los
-# indicadores y del encabezado se reducen un escalón (p. ej. valor del indicador 26 px frente a 32 px) para el ancho de 720 px.
+# indicadores y del encabezado se reducen un escalón (p. ej. valor del indicador 26 px frente a 32 px) para el ancho de ANCHO_CORREO px.
 
 def _num(v) -> str:
     """Número con separador de miles institucional (punto)."""
@@ -153,7 +159,11 @@ def _fecha(d) -> str:
     return d.strftime("%d/%m/%Y")
 
 
-PROGRAMA_DISTINTO = ("programa distinto", "programas distintos")   # los registros de Modificados pueden repetir un programa
+
+
+def _cambios_de(df) -> int:
+    """Número de cambios detectados en los registros de Modificados `df` (cada registro reúne los de un programa)."""
+    return 0 if df is None or df.empty else sum(len(separar_cambios(c)) for c in df["CAMBIO_DETECTADO"])
 
 
 def _plural(n: int, singular: str, plural: str) -> str:
@@ -162,11 +172,14 @@ def _plural(n: int, singular: str, plural: str) -> str:
 
 
 def _texto(col: str, v) -> str:
-    """Texto de una celda de las tablas: vacío para nulos, etiqueta legible para el tipo de cambio y enteros sin decimales."""
+    """
+    Texto de una celda de las tablas: vacío para nulos y enteros sin decimales. Los cambios detectados de un programa
+    van uno por línea ("TIPO: anterior → nuevo").
+    """
     if v is None or (not isinstance(v, str) and pd.isna(v)):
         return ""
-    if col == "TIPO_CAMBIO_DETECTADO":
-        return TIPOS_CAMBIO_ETIQUETA.get(v, v)
+    if col == "CAMBIO_DETECTADO" and (cambios := separar_cambios(v)):
+        return "\n".join(f"{tipo}: {anterior} → {nuevo}" for tipo, anterior, nuevo in cambios)
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
     return str(v)
@@ -199,17 +212,18 @@ def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> st
     # Tablas de novedades (5 o más columnas): letra y márgenes algo menores para que quepan en el ancho del correo;
     # las tres usan el mismo tamaño aunque difieran en número de columnas
     compacta = len(columnas) >= 5
-    letra_th, margen = ("10px", "4px") if compacta else ("11px", "10px")
+    letra_th, margen = ("10px", "6px") if compacta else ("11px", "10px")
     th = (f"background:{NEGRO};color:#FFFFFF;font-family:{FUENTE};font-size:{letra_th};font-weight:700;"
           f"letter-spacing:.04em;padding:9px {margen};")
     alinear = lambda c: "right" if c in numericas else "left"  # noqa: E731
-    cab = "".join(f'<th style="{th}text-align:{alinear(c)};">{escape(t)}</th>' for c, t in columnas)
+    cab = "".join(f'<th style="{th}text-align:{alinear(c)};'
+                  f'{f"width:{ANCHO_COLUMNA[c]};" if compacta and c in ANCHO_COLUMNA else ""}">{escape(t)}</th>' for c, t in columnas)
     # Los estilos van en línea, no en el bloque <style>: Outlook no aplica sus reglas a las celdas, que se mostraban
     # con la letra por defecto, sin márgenes ni líneas y con las cifras sin alinear. Tipo de letra, tamaño y color van
     # en la fila (las celdas los heredan), y márgenes y borde en cada celda, con lo que el mensaje pesa lo mínimo para
     # el límite de Gmail (LIMITE_HTML). Fondo, alineación vertical y alineación de las cifras van como atributos
     # (bgcolor, valign, align), que todos los clientes respetan.
-    letra, relleno = ("11px", "4px") if compacta else ("12px", "10px")
+    letra, relleno = ("11px", "6px") if compacta else ("12px", "10px")
     estilo_fila = f"font-family:{FUENTE};font-size:{letra};color:{NEGRO};"
     estilo_celda = f"padding:7px {relleno};border-bottom:1px solid {BORDE};"
     filas = []
@@ -218,7 +232,7 @@ def _tabla(df: pd.DataFrame, columnas, numericas=(), negrita_ultima=False) -> st
         negrita = "font-weight:800;" if negrita_ultima and i == len(df) - 1 else ""
         celdas = "".join(
             (f'<td align="right" style="{estilo_celda}white-space:nowrap;">' if c in numericas else f'<td style="{estilo_celda}">')
-            + f"{escape(_texto(c, r.get(c)))}</td>" for c, _ in columnas)
+            + f"{escape(_texto(c, r.get(c))).replace(chr(10), '<br>')}</td>" for c, _ in columnas)
         filas.append(f'<tr valign="top" bgcolor="{fondo}" style="{estilo_fila}{negrita}">{celdas}</tr>')
     # En pantallas angostas la tabla se desplaza dentro de su tarjeta, sin ensanchar el resto del correo
     return (f'<div style="overflow-x:auto;"><table class="tabla" role="presentation" width="100%" cellpadding="0" '
@@ -238,8 +252,7 @@ def _frases_resumen(res: dict, fecha: date, negrita=lambda t: t) -> list[str]:
     """Frases del resumen de la ejecución (activos, variación y novedades), comunes al HTML y al texto plano."""
     activos, antes, f_ant = res.get("total_activos"), res.get("total_anterior"), res.get("fecha_anterior")
     n = {t: 0 if res.get(t) is None else len(res[t]) for t in ("nuevos", "modificados", "inactivos")}
-    mod = res.get("modificados")
-    prog_mod = 0 if mod is None or mod.empty else mod["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
+    cambios_mod = _cambios_de(res.get("modificados"))
 
     frases = [f"El {_fecha(fecha)} se descargó del SNIES el reporte de programas académicos universitarios de "
               "pregrado con estado activo en Colombia."]
@@ -257,7 +270,7 @@ def _frases_resumen(res: dict, fecha: date, negrita=lambda t: t) -> list[str]:
         frases.append(
             f"Novedades detectadas: {_plural(n['nuevos'], 'registro nuevo', 'registros nuevos')}, "
             f"{_plural(n['modificados'], 'registro modificado', 'registros modificados')}"
-            f"{f' (de {_plural(prog_mod, *PROGRAMA_DISTINTO)})' if n['modificados'] else ''} y "
+            f"{f' (con {_plural(cambios_mod, 'cambio', 'cambios')})' if n['modificados'] else ''} y "
             f"{_plural(n['inactivos'], 'registro inactivo', 'registros inactivos')}.")
         grupos = pd.concat([grupos_de_registros(res[t]) for t in n if n[t]])
         uni, mi = int((grupos == GRUPO_UNINORTE).sum()), int((grupos == GRUPO_MAYOR_INTERES).sum())
@@ -269,7 +282,7 @@ def _frases_resumen(res: dict, fecha: date, negrita=lambda t: t) -> list[str]:
 def _grupos(res: dict):
     """
     Novedades de la ejecución por grupo de universidades (nuevos, modificados e inactivos) y su total:
-    (columnas, filas). Los modificados cuentan registros de cambio detectado, igual que el indicador MODIFICADOS.
+    (columnas, filas). Los modificados cuentan registros (un programa con todos sus cambios), igual que el indicador MODIFICADOS.
     """
     cols = [("GRUPO", "GRUPO DE UNIVERSIDADES"), ("NUEVOS", "NUEVOS"), ("MODIFICADOS", "MODIFICADOS"), ("INACTIVOS", "INACTIVOS")]
     conteos = {}
@@ -296,8 +309,7 @@ def _descripcion(tipo: str, df: pd.DataFrame | None) -> str:
     """Descripción de una sección; en Modificados agrega el número de registros de la ejecución."""
     descripcion = SECCIONES[tipo]["descripcion"]
     if tipo == "modificados" and df is not None and len(df):
-        descripcion += (f" En esta ejecución: {_plural(len(df), 'registro', 'registros')} de "
-                        f"{_plural(df['CODIGO_SNIES_DEL_PROGRAMA'].nunique(), *PROGRAMA_DISTINTO)}.")
+        descripcion += f" En esta ejecución: {_plural(len(df), 'registro', 'registros')} con {_plural(_cambios_de(df), 'cambio', 'cambios')}."
     return descripcion
 
 
@@ -357,10 +369,9 @@ def _indicadores(res: dict, fecha: date) -> list[tuple[str, str, str, str]]:
     detalle_activos = (f"{_variacion(activos, antes)} frente al {_fecha(f_ant)}"
                        if activos is not None and antes is not None and f_ant is not None
                        else f"Programas activos al {_fecha(fecha)}")
-    prog_mod = 0 if mod is None or mod.empty else mod["CODIGO_SNIES_DEL_PROGRAMA"].nunique()
     return [("PROGRAMAS ACTIVOS", _num(activos) if activos is not None else "–", detalle_activos, NEGRO),
             ("NUEVOS", _num(n(nue)), f"Ejecución del {_fecha(fecha)}", ESTADO["nuevos"]),
-            ("MODIFICADOS", _num(n(mod)), f"En {_plural(prog_mod, *PROGRAMA_DISTINTO)}", ESTADO["modificados"]),
+            ("MODIFICADOS", _num(n(mod)), f"Con {_plural(_cambios_de(mod), 'cambio', 'cambios')}", ESTADO["modificados"]),
             ("INACTIVOS", _num(n(ina)), f"Ejecución del {_fecha(fecha)}", ESTADO["inactivos"])]
 
 
@@ -393,7 +404,7 @@ def construir_texto(resultados: dict, fecha: date) -> str:
             lineas.append(cfg["vacio"])
             continue
         for i, (_, r) in enumerate(seleccionar(df).iterrows(), 1):
-            campos = " | ".join(f"{t}: {_texto(c, r.get(c))}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
+            campos = " | ".join(f"{t}: {_texto(c, r.get(c)).replace(chr(10), '; ')}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
             lineas.append(ajustar(f"{i}. {campos}", "  ", "     "))
         lineas += [ajustar(t) for t in _texto_notas(tipo, df)]
     lineas += ["",
@@ -448,7 +459,7 @@ def _cuerpo(res: dict, fecha: date, topes: dict[str, int] | None = None) -> str:
     topes = topes or {}
     nue, mod, ina = (res.get(k) for k in ("nuevos", "modificados", "inactivos"))
     kpis = "".join(_kpi(*k) for k in _indicadores(res, fecha))
-    logo = (f'<img src="cid:{LOGO_CID}" width="160" height="55" alt="Universidad del Norte" style="display:block;border:0;'
+    logo = (f'<img src="cid:{LOGO_CID}" width="240" height="41" alt="Universidad del Norte" style="display:block;border:0;'
             f'height:auto;margin:0 0 14px;font-family:{FUENTE};font-size:13px;font-weight:700;color:#FFFFFF;">') if LOGO.exists() else ""
     return f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -466,7 +477,7 @@ def _cuerpo(res: dict, fecha: date, topes: dict[str, int] | None = None) -> str:
 </head>
 <body style="margin:0;padding:0;background:{GRIS};">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{GRIS};"><tr><td align="center" style="padding:20px 10px;">
-<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;table-layout:fixed;">
+<table role="presentation" width="{ANCHO_CORREO}" cellpadding="0" cellspacing="0" style="max-width:{ANCHO_CORREO}px;width:100%;table-layout:fixed;">
   <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td class="enc-titulo" valign="top">
@@ -620,7 +631,7 @@ def enviar_alerta_falla(fecha: date, etapa: str, detalle: str, log_path: Path) -
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="margin:0;padding:0;background:{GRIS};">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{GRIS};"><tr><td align="center" style="padding:20px 10px;">
-<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="max-width:720px;width:100%;table-layout:fixed;">
+<table role="presentation" width="{ANCHO_CORREO}" cellpadding="0" cellspacing="0" style="max-width:{ANCHO_CORREO}px;width:100%;table-layout:fixed;">
   <tr><td style="background:{NEGRO};border-bottom:4px solid {ROJO};border-radius:10px 10px 0 0;padding:20px 24px;">
     <div style="font-family:{FUENTE};font-size:20px;font-weight:800;letter-spacing:.04em;color:#FFFFFF;">ALERTA TÉCNICA · MONITOR SNIES PREGRADO</div>
     <div style="font-family:{FUENTE};font-size:13px;color:{TEXTO_SOBRE_NEGRO};margin-top:4px;">Aviso para la cuenta remitente</div>

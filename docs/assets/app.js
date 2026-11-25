@@ -45,10 +45,6 @@
     const d = hoy - antes;
     return d === 0 ? "Sin variación" : `${d > 0 ? "+" : "−"}${fmt(Math.abs(d))}`;
   };
-  /** Etiquetas visibles de las modalidades agrupadas (los datos y la dirección conservan su valor sin tilde: HIBRIDA). */
-  const ETIQUETA_MODALIDAD = { HIBRIDA: "HÍBRIDA" };
-  const etqModalidad = (m) => ETIQUETA_MODALIDAD[m] || m;
-  const etiquetasModalidad = (lista) => Object.fromEntries(lista.map((m) => [m, etqModalidad(m)]));
   const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
   const normalizar = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -61,12 +57,32 @@
     return CAT.grupos_universidad[2];
   }
   function grupoModalidad(m) {
-    if (m == null || m === "") return "SIN INFORMACIÓN";
-    return CAT.modalidad_a_grupo[normalizar(m).trim()] || "SIN INFORMACIÓN";
+    if (m == null || m === "") return "SIN INFORMACION";
+    return CAT.modalidad_a_grupo[normalizar(m).trim()] || "SIN INFORMACION";
+  }
+  // ── Cambios detectados (Modificados): "TIPO: anterior → nuevo | TIPO: anterior → nuevo" ────────────────────────────
+  // Un registro reúne todos los cambios de un programa en una ejecución. Cada cambio empieza al principio del texto o
+  // tras " | " con uno de los tipos conocidos (catálogo `tipos_cambio`) y ": ": buscar los tipos, y no cortar por el
+  // separador, evita partir el texto si un nombre de programa contiene " | " o ": ". Igual que catalogos.separar_cambios.
+  const INICIO_CAMBIO = new RegExp(`(?:^|\\s\\|\\s)(${(CAT.tipos_cambio || []).map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}): `, "g");
+  /** Cambios de un texto de CAMBIO_DETECTADO: [{ tipo, anterior, nuevo }] en su orden; sin texto, ninguno. */
+  function separarCambios(texto) {
+    if (typeof texto !== "string" || !texto) return [];
+    const marcas = [...texto.matchAll(INICIO_CAMBIO)];
+    return marcas.map((m, i) => {
+      const valor = texto.slice(m.index + m[0].length, i + 1 < marcas.length ? marcas[i + 1].index : texto.length);
+      const f = valor.indexOf(" → ");
+      return { tipo: m[1], anterior: f < 0 ? valor : valor.slice(0, f), nuevo: f < 0 ? "" : valor.slice(f + 3) };
+    });
   }
   function derivar(o) {
     o._GU = grupoUniversidad(o.CODIGO_INSTITUCION_PADRE ?? o.CODIGO_INSTITUCION);   // por institución padre, como el correo
     o._MG = grupoModalidad(o.MODALIDAD);
+    if (typeof o.CAMBIO_DETECTADO === "string" && o.CAMBIO_DETECTADO) {
+      const cambios = separarCambios(o.CAMBIO_DETECTADO);
+      o._TC = cambios.map((c) => c.tipo);                                              // tipos de cambio del registro
+      o._CB = Object.fromEntries(cambios.map((c) => [c.tipo, [c.anterior, c.nuevo]]));   // tipo → [valor anterior, valor nuevo]
+    }
     return o;
   }
 
@@ -85,12 +101,12 @@
     return filas;
   }
 
-  /** Color estable por entidad: orden fijo de la paleta de 15 colores; OTRO/SIN INFORMACIÓN en gris. Siempre línea continua. */
+  /** Color estable por entidad: orden fijo de la paleta de 15 colores; OTRO/SIN INFORMACION en gris. Siempre línea continua. */
   function asignarColores(valores) {
     const mapa = {};
     let k = 0;
     valores.forEach((v) => {
-      if (v === "OTRO" || v === "SIN INFORMACIÓN") { mapa[v] = { color: GRIS }; return; }
+      if (v === "OTRO" || v === "SIN INFORMACION") { mapa[v] = { color: GRIS }; return; }
       mapa[v] = { color: CATEGORICA[k % CATEGORICA.length] };
       k++;
     });
@@ -103,15 +119,14 @@
     universidades: { etiqueta: "TODAS LAS UNIVERSIDADES", plural: "INSTITUCIONES", param: "universidad", buscar: true },
     programas: { etiqueta: "TODOS LOS PROGRAMAS ACADÉMICOS", plural: "PROGRAMAS", param: "programa", buscar: true, complemento: true },
     departamentos: { etiqueta: "TODOS LOS DEPARTAMENTOS", campo: "DEPARTAMENTO_OFERTA_PROGRAMA", plural: "DEPARTAMENTOS", buscar: true, param: "departamento" },
-    municipios: { etiqueta: "TODOS LOS MUNICIPIOS", campo: "MUNICIPIO_OFERTA_PROGRAMA", plural: "MUNICIPIOS", buscar: true, param: "municipio" },
     sectores: { etiqueta: "TODOS LOS SECTORES", campo: "SECTOR", plural: "SECTORES", param: "sector" },
     modalidades: { etiqueta: "TODAS LAS MODALIDADES", campo: "_MG", plural: "MODALIDADES", param: "modalidad" },
     cine: { etiqueta: "TODOS LOS CAMPOS DE CINE ESPECÍFICO", campo: "CINE_F_2013_AC_CAMPO_ESPECIFIC", plural: "CAMPOS CINE", buscar: true, param: "cine" },
     divisiones: { etiqueta: "TODAS LAS DIVISIONES", campo: "DIVISION_UNINORTE", plural: "DIVISIONES", param: "division" },
-    cambios: { etiqueta: "TODOS LOS CAMBIOS", campo: "TIPO_CAMBIO_DETECTADO", plural: "CAMBIOS", param: "cambio", propio: true },
+    // Un registro de Modificados puede tener varios tipos de cambio (`_TC`): pasa si alguno está seleccionado
+    cambios: { etiqueta: "TODOS LOS CAMBIOS", plural: "CAMBIOS", param: "cambio", propio: true, multi: (r) => r._TC || [] },
     fechas: { etiqueta: "TODAS LAS FECHAS", tipo: "fecha" },
   };
-  const AVISO_MINIMO = "Debe permanecer al menos una opción seleccionada.";
   const alfabetico = (a, b) => String(a).localeCompare(String(b), "es");
 
   const desplegables = [];
@@ -134,16 +149,18 @@
       this.el.querySelector(".ms-panel").addEventListener("click", (e) => e.stopPropagation());
       desplegables.push(this);
     }
-    alternar() { const a = this.el.classList.toggle("abierto"); this.btn.setAttribute("aria-expanded", a); if (a) ajustarPanel(this.el); }
-    cerrar() { this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false"); }
-    /** Aviso breve dentro del panel (por ejemplo, al bloquear que se desmarque la última opción). */
-    avisar(texto) {
-      const aviso = this.el.querySelector(".ms-aviso");
-      if (!aviso) return;
-      aviso.textContent = texto; aviso.hidden = false;
-      clearTimeout(this._aviso);
-      this._aviso = setTimeout(() => { aviso.hidden = true; }, 3000);
+    alternar() {
+      const a = this.el.classList.toggle("abierto");
+      this.btn.setAttribute("aria-expanded", a);
+      if (a) ajustarPanel(this.el); else this.alCerrar();
     }
+    cerrar() {
+      const estaba = this.el.classList.contains("abierto");
+      this.el.classList.remove("abierto"); this.btn.setAttribute("aria-expanded", "false");
+      if (estaba) this.alCerrar();
+    }
+    /** Al cerrar el panel (los filtros con casillas dejan TODOS marcada si no quedó ninguna opción elegida). */
+    alCerrar() {}
   }
 
   /** Texto del botón: todas las opciones (sin restricción), una opción o la cantidad seleccionada. */
@@ -151,23 +168,26 @@
     return !activo ? def.etiqueta : n === 1 ? unica : `${n} ${def.plural}`;
   }
 
-  /** Fila de una opción: casilla, texto y el atajo AISLAR (selecciona únicamente esa opción). */
+  /** Fila de una opción: casilla y texto. */
   const filaOpcion = (valor, etiqueta, busqueda, extra = "") =>
-    `<label class="ms-op${extra}" data-v="${esc(valor)}" data-b="${esc(normalizar(`${etiqueta} ${busqueda || ""}`))}"><input type="checkbox" data-op="${esc(valor)}"> <span class="ms-txt">${esc(etiqueta)}</span>` +
-    `<button type="button" class="ms-aislar" data-aislar="${esc(valor)}" aria-label="Aislar ${esc(etiqueta)}">AISLAR</button></label>`;
+    `<label class="ms-op${extra}" data-v="${esc(valor)}" data-b="${esc(normalizar(`${etiqueta} ${busqueda || ""}`))}"><input type="checkbox" data-op="${esc(valor)}"> <span class="ms-txt">${esc(etiqueta)}</span></label>`;
 
   /**
    * Filtro de selección múltiple, dependiente de los demás filtros.
-   *  - Estado: `sel` = opciones marcadas. Todas marcadas = sin restricción (TODOS); nunca puede quedar sin ninguna
-   *    opción disponible marcada: esa acción se bloquea con un aviso.
+   *  - Estado: `sel` = opciones marcadas. Restringe solo una selección parcial (alguna opción marcada, pero no todas);
+   *    con todas marcadas o con ninguna actúa TODOS. Se puede desmarcar todo: con el panel abierto no se ve TODOS marcada,
+   *    pero el filtro sigue sin restringir; al cerrar el panel sin elegir nada vuelve a TODOS marcada. Elegir cualquier
+   *    opción tiene prioridad sobre ese estado.
    *  - `disp` = valores disponibles según los demás filtros (null = sin calcular): las demás opciones se ocultan.
-   *  - TODOS se marca solo cuando todas las opciones están marcadas; marcarla selecciona todas. AISLAR deja una sola.
+   *  - Marcar TODOS selecciona todas las opciones; desmarcarla las desmarca todas.
+   *  - Un registro puede tener varios valores (`def.multi(r)`, como los tipos de cambio): pasa si alguno está elegido.
    */
   class Multiselect extends Desplegable {
     constructor(def, opciones, etiquetas, filtros) {
       super();
       this.def = def; this.filtros = filtros; this.etiquetas = etiquetas || {};
       this.valorDe = def.valorDe || ((r) => String(r[def.campo]));
+      this.valoresDe = def.multi || ((r) => [this.valorDe(r)]);
       const etq = (o) => this.etiquetas[o] || o;
       this.lista = [...new Set(opciones.map(String))].sort((a, b) => alfabetico(etq(a), etq(b)));
       this.opciones = new Set(this.lista); this.sel = new Set(this.lista); this.disp = null;
@@ -177,7 +197,6 @@
         <div class="ms-panel" role="listbox" aria-multiselectable="true">
           ${def.buscar ? '<input type="search" placeholder="Buscar..." aria-label="Buscar opción">' : ""}
           <label class="ms-op todos"><input type="checkbox" data-todos checked> <span class="ms-txt">${esc(def.etiqueta)}</span></label>
-          <p class="ms-aviso" role="status" hidden></p>
           <div class="ms-ops">${this.lista.map((o) => filaOpcion(o, etq(o))).join("")}</div>
         </div>`;
       this.btn = el.querySelector(".ms-btn");
@@ -190,15 +209,7 @@
         const n = new Set(this.sel); cb.checked ? n.add(valor) : n.delete(valor);
         this.aplicar(n);
       });
-      el.querySelector(".ms-ops").addEventListener("click", (e) => {
-        const b = e.target.closest("[data-aislar]");
-        if (!b) return;
-        e.preventDefault(); this.aplicar(new Set([b.dataset.aislar]));
-      });
-      el.querySelector("[data-todos]").addEventListener("change", (e) => {
-        if (e.target.checked) this.aplicar(new Set(this.lista));
-        else { this.avisar(AVISO_MINIMO); this.refrescar(); }   // desmarcar TODOS dejaría el filtro sin opciones
-      });
+      el.querySelector("[data-todos]").addEventListener("change", (e) => this.aplicar(e.target.checked ? new Set(this.lista) : new Set()));
       const busq = el.querySelector("input[type=search]");
       if (busq) busq.addEventListener("input", () => {
         const q = normalizar(busq.value);
@@ -208,15 +219,12 @@
     }
     /** ¿Queda alguna opción disponible marcada en `sel`? */
     conDisponible(sel) { for (const v of sel) if (!this.disp || this.disp.has(v)) return true; return false; }
-    /** Aplica una nueva selección; si dejara el filtro sin opciones disponibles marcadas, se bloquea. */
-    aplicar(sel) {
-      if (!this.conDisponible(sel)) { this.avisar(AVISO_MINIMO); this.refrescar(); return; }
-      this.sel = sel; this.refrescar(); this.filtros.cambio();
-    }
-    /** ¿Hay restricción? (alguna opción sin marcar) */
-    get activo() { return this.sel.size < this.opciones.size; }
+    /** Aplica una nueva selección (también la vacía: actúa TODOS). */
+    aplicar(sel) { this.sel = sel; this.refrescar(); this.filtros.cambio(); }
+    /** ¿Hay restricción? (alguna opción marcada, pero no todas) */
+    get activo() { return this.sel.size > 0 && this.sel.size < this.opciones.size; }
     /** ¿El registro cumple el filtro? Sin restricción pasan todos, también los valores vacíos. */
-    pasa(r) { return !this.activo || this.sel.has(this.valorDe(r)); }
+    pasa(r) { return !this.activo || this.valoresDe(r).some((v) => this.sel.has(v)); }
     limpiar() { this.sel = new Set(this.lista); this.refrescar(); }
     /** Valores disponibles según los demás filtros: las demás opciones se ocultan. */
     disponibles(disp) {
@@ -226,9 +234,11 @@
     }
     /** Si la selección ya no incluye ninguna opción disponible (p. ej., por una dirección incompatible), se restablece. */
     sanear() {
-      if (this.disp && this.disp.size && !this.conDisponible(this.sel)) { this.sel = new Set(this.lista); this.refrescar(); return true; }
+      if (this.sel.size && this.disp && this.disp.size && !this.conDisponible(this.sel)) { this.sel = new Set(this.lista); this.refrescar(); return true; }
       return false;
     }
+    /** Sin ninguna opción elegida al cerrar el panel, TODOS queda marcada (el filtro ya actuaba como TODOS). */
+    alCerrar() { if (!this.sel.size) { this.sel = new Set(this.lista); this.refrescar(); } }
     /**
      * Valores para la dirección de la página: ninguno sin restricción y las marcadas en otro caso. En listas muy largas
      * (programas) con más de la mitad marcada, se escriben las excluidas precedidas de "!".
@@ -252,16 +262,16 @@
       this.btn.querySelector("span").textContent = textoSeleccion(this.def, this.activo, visibles.length, visibles.length === 1 ? etq(visibles[0]) : "");
       this.btn.title = !this.activo ? this.def.etiqueta : visibles.length > 15 ? `${visibles.length} opciones seleccionadas` : visibles.map(etq).join(" · ");
       this.btn.classList.toggle("con-valor", this.activo);
-      this.el.querySelector("[data-todos]").checked = !this.activo;
+      this.el.querySelector("[data-todos]").checked = this.sel.size >= this.opciones.size;
     }
   }
 
   // ── Filtro jerárquico (universidades y campos de CINE) ────────────────────
   /**
    * Opciones agrupadas: cada grupo se puede expandir para elegir sus elementos y su casilla queda marcada, parcial o
-   * vacía según sus elementos disponibles. Mismo comportamiento que Multiselect (TODOS, AISLAR, aviso al desmarcar la
-   * última opción, opciones dependientes de los demás filtros) y barra de búsqueda: al buscar se muestran los grupos
-   * con coincidencias, expandidos.
+   * vacía según sus elementos disponibles. Mismo comportamiento que Multiselect (TODOS, selección vacía = TODOS,
+   * opciones dependientes de los demás filtros) y barra de búsqueda: al buscar se muestran los grupos con coincidencias,
+   * expandidos.
    * grupos = [{ id, etiqueta, token?, expandible, hijos: [{ valor, etiqueta, busqueda? }] }]; `token` es el nombre
    * corto del grupo completo en la dirección; `valorDe(registro)` da el valor del elemento al que pertenece.
    * `estado` permite que varios desplegables (el de la barra y el de una gráfica) compartan la misma selección.
@@ -278,18 +288,15 @@
       this.st.instancias.push(this);
       const fila = (g) => (g.expandible
         ? `<div class="ms-grupo" data-grupo="${esc(g.id)}"><div class="ms-op ms-padre"><label><input type="checkbox" data-g="${esc(g.id)}"> <span class="ms-txt">${esc(g.etiqueta)}</span></label>
-             <button type="button" class="ms-aislar" data-aislar-g="${esc(g.id)}" aria-label="Aislar ${esc(g.etiqueta)}">AISLAR</button>
              <button type="button" class="ms-expandir" aria-expanded="false" aria-label="Mostrar u ocultar: ${esc(g.etiqueta)}">▸</button></div>
              <div class="ms-hijos" hidden>${g.hijos.map((h) => filaOpcion(h.valor, h.etiqueta, h.busqueda, " hijo")).join("")}</div></div>`
-        : `<div class="ms-grupo" data-grupo="${esc(g.id)}"><label class="ms-op"><input type="checkbox" data-g="${esc(g.id)}"> <span class="ms-txt">${esc(g.etiqueta)}</span>` +
-          `<button type="button" class="ms-aislar" data-aislar-g="${esc(g.id)}" aria-label="Aislar ${esc(g.etiqueta)}">AISLAR</button></label></div>`);
+        : `<div class="ms-grupo" data-grupo="${esc(g.id)}"><label class="ms-op"><input type="checkbox" data-g="${esc(g.id)}"> <span class="ms-txt">${esc(g.etiqueta)}</span></label></div>`);
       const el = (this.el = document.createElement("div"));
       el.className = "ms";
       el.innerHTML = `<button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false"><span></span></button>
         <div class="ms-panel" role="listbox" aria-multiselectable="true">
           <input type="search" placeholder="Buscar..." aria-label="Buscar opción">
           <label class="ms-op todos"><input type="checkbox" data-todos checked> <span class="ms-txt">${esc(def.etiqueta)}</span></label>
-          <p class="ms-aviso" role="status" hidden></p>
           <div class="ms-ops">${this.grupos.map(fila).join("")}</div>
         </div>`;
       this.btn = el.querySelector(".ms-btn");
@@ -305,21 +312,11 @@
           this.aplicar(n);
         }
       });
-      el.querySelector(".ms-ops").addEventListener("click", (e) => {
-        const b = e.target.closest("[data-aislar],[data-aislar-g]");
-        if (!b) return;
-        e.preventDefault();
-        if (b.dataset.aislar !== undefined) this.aplicar(new Set([b.dataset.aislar]));
-        else this.aplicar(new Set(this.hijosDisponibles(this.grupos.find((g) => g.id === b.dataset.aislarG)).map((h) => h.valor)));
-      });
       el.querySelectorAll(".ms-expandir").forEach((b, i) => b.addEventListener("click", () => {
         const g = this.grupos.filter((x) => x.expandible)[i];
         g.abierto = !g.abierto; this.mostrarHijos();
       }));
-      el.querySelector("[data-todos]").addEventListener("change", (e) => {
-        if (e.target.checked) this.aplicar(new Set(this.hojas));
-        else { this.avisar(AVISO_MINIMO); this.pintar(); }
-      });
+      el.querySelector("[data-todos]").addEventListener("change", (e) => this.aplicar(e.target.checked ? new Set(this.hojas) : new Set()));
       const busq = el.querySelector("input[type=search]");
       busq.addEventListener("input", () => this.buscar(normalizar(busq.value).trim()));
       this.q = "";
@@ -331,21 +328,22 @@
     hijosDisponibles(g) { return g.hijos.filter((h) => this.estaDisp(h.valor)); }
     /** ¿Queda alguna opción disponible en `sel`? */
     conDisponible(sel) { for (const v of sel) if (this.estaDisp(v)) return true; return false; }
-    /** Aplica una nueva selección; se bloquea si no deja opciones disponibles marcadas. */
-    aplicar(sel) {
-      if (!this.conDisponible(sel)) { this.avisar(AVISO_MINIMO); this.refrescar(); return; }
-      this.st.sel = new Set(sel); this.refrescar(); this.filtros.cambio();
-    }
-    get activo() { return this.st.sel.size < this.hojas.length; }
+    /** Aplica una nueva selección (también la vacía: actúa TODOS). */
+    aplicar(sel) { this.st.sel = new Set(sel); this.refrescar(); this.filtros.cambio(); }
+    /** ¿Hay restricción? (alguna opción marcada, pero no todas) */
+    get activo() { return this.st.sel.size > 0 && this.st.sel.size < this.hojas.length; }
     get sel() { return this.visibleSel(); }
+    valoresDe(r) { return [this.valorDe(r)]; }
     pasa(r) { return !this.activo || this.st.sel.has(this.valorDe(r)); }
     limpiar() { this.st.sel = new Set(this.hojas); this.refrescar(); }
     disponibles(disp) { this.st.disp = disp; this.refrescar(); }
     sanear() {
       const st = this.st;
-      if (st.disp && st.disp.size && !this.conDisponible(st.sel)) { st.sel = new Set(this.hojas); this.refrescar(); return true; }
+      if (st.sel.size && st.disp && st.disp.size && !this.conDisponible(st.sel)) { st.sel = new Set(this.hojas); this.refrescar(); return true; }
       return false;
     }
+    /** Sin ninguna opción elegida al cerrar el panel, TODOS queda marcada (el filtro ya actuaba como TODOS). */
+    alCerrar() { if (!this.st.sel.size) { this.st.sel = new Set(this.hojas); this.refrescar(); } }
     /** Muestra u oculta la lista de elementos de cada grupo según su estado de expansión y la búsqueda vigente. */
     mostrarHijos() {
       this.filas.forEach((fila, i) => {
@@ -463,7 +461,7 @@
       const el = (this.el = document.createElement("div"));
       el.className = "ms fs";
       el.innerHTML = `<button type="button" class="ms-btn fs-btn" aria-haspopup="dialog" aria-expanded="false"><span>TODAS LAS FECHAS</span></button>
-        <button type="button" class="fs-quitar" aria-label="Restablecer a todas las fechas" title="Restablecer a TODAS LAS FECHAS" hidden>×</button>
+        <button type="button" class="fs-quitar" aria-label="Restablecer a todas las fechas" title="Restablecer a todas las fechas" hidden>×</button>
         <div class="ms-panel fs-panel" role="dialog" aria-label="Seleccionar fechas de ejecución">
           <div class="fs-modos" role="tablist">
             ${[["fecha", "FECHA"], ["rango", "RANGO"], ["mes", "MES"], ["anio", "AÑO"]].map(([m, t]) => `<button type="button" role="tab" data-modo="${m}">${t}</button>`).join("")}
@@ -642,6 +640,14 @@
     }
   }
 
+  // ── Búsqueda global ───────────────────────────────────────────────────────────────────────────────────────────
+  const CAMPOS_BUSQUEDA = ["NOMBRE_DEL_PROGRAMA", "NOMBRE_INSTITUCION", "CODIGO_SNIES_DEL_PROGRAMA", "CODIGO_INSTITUCION_PADRE"];
+  const MAX_BUSQUEDA = 200;   // largo máximo del texto buscado
+  // Caracteres de control y espacios o marcas invisibles (cero ancho, direccionales, separadores de línea) que se pegan sin querer
+  const INVISIBLES = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g;
+  /** Texto comparable: minúsculas, sin tildes (la Ñ cuenta como N) y con los espacios (también el duro) colapsados. */
+  const normalizarBusqueda = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(INVISIBLES, " ").replace(/\s+/g, " ").trim();
+
   /** Enlaces internos del Dashboard (menú y tarjetas): conservan los filtros al cambiar de apartado. */
   const PAGINAS = /^(index|nuevos|modificados|inactivos)\.html$/;
 
@@ -654,14 +660,16 @@
    * todos los filtros: un valor está disponible si algún registro lo tiene y cumple todos los demás filtros (incluidos
    * la búsqueda y las fechas). Así nunca se ofrecen combinaciones sin resultados.
    *
-   * La búsqueda es exacta sobre `camposBusqueda` (códigos) y se ejecuta con la lupa o con Enter.
+   * La búsqueda es parcial sobre el nombre del programa, el nombre de la institución y los códigos del programa y de la
+   * institución padre: cada palabra del texto debe estar en alguno de esos campos, sin distinguir mayúsculas ni tildes.
+   * Se ejecuta con la lupa o con Enter.
    * Los filtros se guardan en la dirección de la página (después de #), de modo que una vista filtrada se conserva al
    * recargar, puede compartirse o guardarse como favorito, y se mantiene al pasar a otro apartado (las selecciones que
    * no existan en el apartado se restablecen). Se usa replaceState para no agregar una entrada al historial por cada clic.
    */
   class Filtros {
     constructor(cont, config) {
-      this.cfg = config; this.texto = ""; this.ms = {}; this.fechas = null; this.fuentes = config.fuentes;
+      this.cfg = config; this.texto = ""; this.palabras = []; this.ms = {}; this.fechas = null; this.fuentes = config.fuentes;
       const barra = document.createElement("div");
       barra.className = "filtros";
       barra.setAttribute("role", "search");
@@ -672,15 +680,15 @@
       toggle.addEventListener("click", () => toggle.setAttribute("aria-expanded", String(!barra.classList.toggle("plegada"))));
       barra.appendChild(toggle);
       this.toggle = toggle;
-      // Búsqueda exacta por código: la lupa (o Enter) la ejecuta
+      // Búsqueda parcial por programa, institución o código: la lupa (o Enter) la ejecuta
       const caja = document.createElement("div");
       caja.className = "buscar-caja";
       const input = document.createElement("input");
-      input.type = "search"; input.className = "buscar"; input.placeholder = config.buscar; input.setAttribute("aria-label", config.buscar);
+      input.type = "search"; input.className = "buscar"; input.placeholder = config.buscar; input.setAttribute("aria-label", config.buscar); input.maxLength = MAX_BUSQUEDA;
       const lupa = document.createElement("button");
-      lupa.type = "button"; lupa.className = "buscar-btn"; lupa.setAttribute("aria-label", "Buscar"); lupa.title = "Buscar (coincidencia exacta de código)";
+      lupa.type = "button"; lupa.className = "buscar-btn"; lupa.setAttribute("aria-label", "Buscar"); lupa.title = "Buscar";
       lupa.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-      const ejecutar = () => { const t = input.value.trim(); if (t !== this.texto) { this.texto = t; this.cambio(); } };
+      const ejecutar = () => { const t = this.fijarTexto(input.value); if (t !== this.texto) { this.texto = t; this.cambio(); } };
       lupa.addEventListener("click", ejecutar);
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ejecutar(); } });
       input.addEventListener("search", () => { if (!input.value) ejecutar(); });   // la X del campo vacía la búsqueda
@@ -719,12 +727,26 @@
         this.restaurar(new URLSearchParams(location.hash.slice(1))); this.recalcular(); this.escribirUrl(); config.alCambiar();
       });
     }
+    /**
+     * Texto de búsqueda vigente a partir de lo escrito: sin caracteres invisibles ni espacios repetidos y de largo limitado.
+     * Deja listas las palabras normalizadas; un texto sin palabras (solo espacios o invisibles) equivale a no buscar.
+     */
+    fijarTexto(crudo) {
+      const limpio = String(crudo ?? "").replace(INVISIBLES, " ").replace(/\s+/g, " ").trim().slice(0, MAX_BUSQUEDA).trim();
+      this.palabras = limpio ? normalizarBusqueda(limpio).split(" ").filter(Boolean) : [];
+      return this.palabras.length ? limpio : "";
+    }
+    /** ¿Todas las palabras buscadas están en alguno de los campos del registro? (texto normalizado, guardado en el registro) */
+    coincideTexto(r) {
+      const base = r._B ?? (r._B = normalizarBusqueda(CAMPOS_BUSQUEDA.map((c) => r[c] ?? "").join(" ")));
+      return this.palabras.every((p) => base.includes(p));
+    }
     /** Un filtro cambió: recalcula las opciones disponibles, actualiza la dirección y la página. */
     cambio() { this.recalcular(); this.escribirUrl(); this.cfg.alCambiar(); }
     /** Filtros que no cumple el registro (en orden; se detiene al segundo). `sinFecha` ignora la selección de fechas. */
     fallos(r, sinFecha) {
       const f = [];
-      if (this.texto && !this.cfg.camposBusqueda.some((c) => String(r[c]) === this.texto)) f.push("buscar");
+      if (this.texto && !this.coincideTexto(r)) f.push("buscar");
       for (const k in this.ms) { if (!this.ms[k].pasa(r)) { f.push(k); if (f.length > 1) return f; } }
       if (!sinFecha && this.fechas && this.fechas.activo && !this.pasaFechas(r)) f.push("fechas");
       return f;
@@ -740,7 +762,7 @@
           const f = this.fallos(r);
           if (f.length > 1) continue;
           const solo = f.length ? f[0] : null;
-          for (const k of claves) if (solo === null || solo === k) disp[k].add(this.ms[k].valorDe(r));
+          for (const k of claves) if (solo === null || solo === k) for (const v of this.ms[k].valoresDe(r)) disp[k].add(v);
           if (this.fechas && (solo === null || solo === "fechas")) {
             if (r._R) r._R.forEach(([a, b]) => { cubierto[a]++; cubierto[b + 1]--; });
             else if (r.FECHA_DE_OBTENCION) dispFechas.add(r.FECHA_DE_OBTENCION);
@@ -771,7 +793,7 @@
     }
     /** Aplica los parámetros de la dirección a los controles, sin avisar del cambio. */
     restaurar(p) {
-      const texto = (p.get("buscar") || "").trim();
+      const texto = this.fijarTexto(p.get("buscar") || "");
       this.input.value = texto; this.texto = texto;
       for (const [clave, ms] of Object.entries(this.ms)) ms.fijar(p.getAll(DEF_FILTROS[clave].param));
       if (this.fechas) this.fechas.desdeParams(p);
@@ -804,7 +826,7 @@
       return [...set].sort(alfabetico);
     }
     limpiar() {
-      this.texto = ""; this.input.value = "";
+      this.texto = ""; this.palabras = []; this.input.value = "";
       Object.values(this.ms).forEach((m) => m.limpiar());
       if (this.fechas) this.fechas.limpiar();
       this.recalcular();
@@ -1013,7 +1035,7 @@
     colorDe(campo) { return this.colores[campo]; }
   }
 
-  // ── Tabla: orden por tipo de dato, paginación y exportación a Parquet ─────
+  // ── Tabla: orden por tipo de dato, paginación y exportación a Excel ─────────
   const COLS_FECHA = new Set(["FECHA_DE_OBTENCION", "FECHA_DE_RESOLUCION", "FECHA_EJECUTORIA", "FECHA_DE_REGISTRO_EN_SNIES", "VIGENCIA_TRANSITORIA"]);
   const esFecha = (c) => COLS_FECHA.has(c) || c.startsWith("FECHA_");
   const encabezado = (c) => c.replace(/_/g, " ");
@@ -1051,7 +1073,6 @@
 
   function celda(c, v, tipo) {
     if (v == null || v === "") return "";
-    if (c === "TIPO_CAMBIO_DETECTADO") return CAT.tipos_cambio_etiqueta[v] || String(v);   // misma etiqueta que el filtro, las gráficas y el correo
     if (esFecha(c)) { const s = String(v); return /^\d{4}-\d{2}-\d{2}/.test(s) ? fmtFecha(s) : s; }
     if (tipo === "numero" && typeof v === "string") v = valorNumero(v);   // números guardados como texto
     if (typeof v === "number") {
@@ -1068,7 +1089,7 @@
       this.archivo = archivo; this.porPagina = porPagina;
       this.orden = { col: "FECHA_DE_OBTENCION", asc: false }; this.pagina = 0; this.filas = []; this.tipos = {};
       this.cont = cont;
-      cont.innerHTML = `<div class="tabla-cab"><span class="kpi-s" data-n aria-live="polite"></span><button type="button" class="btn btn-primario" data-pq>DESCARGAR</button></div>
+      cont.innerHTML = `<div class="tabla-cab"><span class="kpi-s" data-n aria-live="polite"></span><button type="button" class="btn btn-primario" data-descargar>DESCARGAR</button></div>
         <div class="tabla-env"><table class="datos"><thead><tr></tr></thead><tbody></tbody></table></div>
         <div class="paginacion"><button type="button" class="btn" data-p="-1">ANTERIOR</button><span data-pag></span><button type="button" class="btn" data-p="1">SIGUIENTE</button></div>`;
       this.thead = cont.querySelector("thead tr"); this.tbody = cont.querySelector("tbody");
@@ -1077,7 +1098,7 @@
         const max = Math.max(0, Math.ceil(this.filas.length / this.porPagina) - 1);
         this.pagina = Math.min(max, Math.max(0, this.pagina + Number(b.dataset.p))); this.pintar();
       }));
-      cont.querySelector("[data-pq]").addEventListener("click", () => this.exportar());
+      cont.querySelector("[data-descargar]").addEventListener("click", () => this.exportar());
     }
     ponerColumnas(columnas) {
       if (this.columnas && this.columnas.join() === columnas.join()) return;
@@ -1132,34 +1153,36 @@
       this.cont.querySelector("[data-n]").textContent = texto;
       this.cont.querySelector("[data-pag]").textContent = "";
     }
-    /** Exporta las filas filtradas (todas las columnas, en el orden actual) a un archivo .parquet. */
+    /**
+     * Exporta las filas filtradas (todas las columnas, en el orden actual) a un archivo .xlsx que se genera en el navegador
+     * al descargar: no se guarda ningún archivo de Excel en el repositorio. Las fechas van como fechas de Excel (sin hora),
+     * los números como números y el resto como texto (nunca como fórmulas); los vacíos quedan como celdas vacías.
+     */
     async exportar() {
-      const boton = this.cont.querySelector("[data-pq]");
+      const boton = this.cont.querySelector("[data-descargar]");
       if (!this.filas.length) { alert("No hay registros para descargar con los filtros seleccionados."); return; }
       boton.disabled = true; boton.textContent = "GENERANDO...";
       try {
-        const { parquetWriteBuffer, schemaFromColumnData } = await import("hyparquet-writer");
-        const esquema = {};
-        const columnData = this.columnas.map((c) => {
+        const { default: escribirXlsx } = await import("write-excel-file/browser");
+        const encabezados = this.columnas.map((c) => ({ value: encabezado(c), type: String, fontWeight: "bold", textColor: "#FFFFFF", backgroundColor: "#151515" }));
+        const celdaXlsx = (c, v) => {
+          if (v == null || v === "") return null;
           const tipo = this.tipos[c];
-          if (tipo === "fecha") {
-            // Fechas sin hora: columna de tipo fecha (DATE), igual que FECHA_DE_OBTENCION en los archivos de Historico/ y Novedades/
-            esquema[c] = { name: c, type: "INT32", converted_type: "DATE", logical_type: { type: "DATE" }, repetition_type: "OPTIONAL" };
-            return { name: c, data: this.filas.map((r) => { const t = valorFecha(r[c]); return t == null ? null : new Date(t); }) };
-          }
-          if (tipo === "numero") {
-            const data = this.filas.map((r) => valorNumero(r[c]));
-            const enteros = data.every((v) => v == null || (Number.isInteger(v) && Math.abs(v) < 2147483647));
-            return { name: c, type: enteros ? "INT32" : "DOUBLE", data };
-          }
-          return { name: c, type: "STRING", data: this.filas.map((r) => (r[c] == null || r[c] === "" ? null : String(r[c]))) };
+          if (tipo === "fecha") { const t = valorFecha(v); return t == null ? { type: String, value: String(v) } : { type: Date, value: new Date(t), format: "dd/mm/yyyy" }; }
+          if (tipo === "numero") { const n = valorNumero(v); return Number.isFinite(n) ? { type: Number, value: n, format: c.startsWith("COSTO_") ? "#,##0" : undefined } : { type: String, value: String(v) }; }
+          return { type: String, value: String(v) };
+        };
+        const datos = [encabezados, ...this.filas.map((r) => this.columnas.map((c) => celdaXlsx(c, r[c])))];
+        // Ancho de cada columna según el encabezado y los primeros registros (entre 12 y 60 caracteres)
+        const columns = this.columnas.map((c, j) => {
+          let ancho = encabezado(c).length;
+          for (let i = 1; i < Math.min(datos.length, 201); i++) { const x = datos[i][j]; if (x) ancho = Math.max(ancho, String(x.type === Date ? "00/00/0000" : x.value).length); }
+          return { width: Math.min(60, Math.max(12, ancho + 2)) };
         });
-        // Con esquema explícito las columnas no llevan tipo: se deduce el esquema (con las fechas como DATE) y se escriben los datos
-        const schema = schemaFromColumnData({ columnData, schemaOverrides: esquema });
-        const buffer = parquetWriteBuffer({ columnData: columnData.map(({ type, ...columna }) => columna), schema });
+        const blob = await escribirXlsx(datos, { columns, stickyRowsCount: 1 }).toBlob();
         const enlace = document.createElement("a");
-        enlace.href = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.apache.parquet" }));
-        enlace.download = `${this.archivo} ${C.ultima_ejecucion}.parquet`;
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = `${this.archivo} ${C.ultima_ejecucion}.xlsx`;
         document.body.appendChild(enlace); enlace.click(); enlace.remove();
         setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
       } catch (e) {
@@ -1183,8 +1206,17 @@
     const m = {};
     registros.forEach((r) => {
       const i = idx.get(r.FECHA_DE_OBTENCION); if (i == null) return;
-      const k = r[campo] ?? "SIN INFORMACIÓN";
+      const k = r[campo] ?? "SIN INFORMACION";
       (m[k] = m[k] || new Array(fechas.length).fill(0))[i]++;
+    });
+    return m;
+  }
+  /** Conteo por fecha y valor cuando cada registro tiene varios valores (`valores(r)`): cuenta una vez por cada valor. */
+  function contarPorFechaMulti(registros, fechas, valores) {
+    const idx = new Map(fechas.map((f, i) => [f, i])), m = {};
+    registros.forEach((r) => {
+      const i = idx.get(r.FECHA_DE_OBTENCION); if (i == null) return;
+      valores(r).forEach((k) => { (m[k] = m[k] || new Array(fechas.length).fill(0))[i]++; });
     });
     return m;
   }
@@ -1229,8 +1261,8 @@
 
   window.App = {
     C, CAT, ESTADO, CATEGORICA, MAX_SERIES, GRIS, SECTOR_COLOR, colorSector, ROJO, AMARILLO, NEGRO, OCRE, colorLinea, marcador, TINTA, TINTA2, fmt, fmtFecha, plural, variacion, esc, normalizar,
-    decodificar, derivar, asignarColores, Filtros, SelectorCine, Tabla, lineas, barrasH, barrasV, torta, plotly, vacio,
-    contarPorFecha, contar, seriesPorCategoria, ejeMeses, ejeEntero, grupoModalidad, valorFecha, tipoColumna,
-    primeraFecha, desdeFecha, opcionesProgramas, etqModalidad, etiquetasModalidad,
+    decodificar, derivar, separarCambios, asignarColores, Filtros, SelectorCine, Tabla, lineas, barrasH, barrasV, torta, plotly, vacio,
+    contarPorFecha, contarPorFechaMulti, contar, seriesPorCategoria, ejeMeses, ejeEntero, grupoModalidad, valorFecha, tipoColumna,
+    primeraFecha, desdeFecha, opcionesProgramas,
   };
 })();

@@ -27,13 +27,11 @@
   const programas = A.opcionesProgramas(fuentes, (r) => (r._R ? fechasActivos[r._R[r._R.length - 1][1]] : r.FECHA_DE_OBTENCION) || "");
 
   const filtros = new A.Filtros($("filtros"), {
-    buscar: "Buscar por Código de Programa o Institución",
-    claves: ["universidades", "programas", "departamentos", "municipios", "sectores", "modalidades", "cine", "divisiones", "fechas"],
+    buscar: "Buscar por Programa, Institución o Código",
+    claves: ["universidades", "programas", "departamentos", "sectores", "modalidades", "cine", "divisiones", "fechas"],
     fuentes,
     opciones: { modalidades, programas: programas.opciones },
-    etiquetas: { modalidades: A.etiquetasModalidad(modalidades) },
     valorDe: { programas: programas.valorDe },
-    camposBusqueda: ["CODIGO_INSTITUCION_PADRE", "CODIGO_SNIES_DEL_PROGRAMA"],
     fechas: C.fechas_ejecucion, fechasActivos: C.fechas_activos,
     alCambiar: () => actualizar(),
   });
@@ -65,7 +63,7 @@
   function evolucion(vs, n, campo) {
     const total = new Array(n).fill(0), por = {};
     vs.forEach((v) => {
-      const k = v[campo] ?? "SIN INFORMACIÓN";
+      const k = v[campo] ?? "SIN INFORMACION";
       const arr = campo ? (por[k] = por[k] || new Array(n).fill(0)) : null;
       v._R.forEach(([a, b]) => { for (let i = a; i <= b; i++) { total[i]++; if (arr) arr[i]++; } });
     });
@@ -95,7 +93,7 @@
     } else {
       A.lineas($("g-activos"), fechasR, [{ nombre: "PROGRAMAS ACTIVOS", valores: serie(totales), color: A.NEGRO }], { modo: "stock" });
       const porMod = evolucion(vs, n, "_MG");
-      A.lineas($("g-modalidad"), fechasR, modalidades.filter((m) => porMod[m]).map((m) => ({ nombre: A.etqModalidad(m), valores: serie(porMod[m]), color: colMod[m].color })), { modo: "stock" });
+      A.lineas($("g-modalidad"), fechasR, modalidades.filter((m) => porMod[m]).map((m) => ({ nombre: m, valores: serie(porMod[m]), color: colMod[m].color })), { modo: "stock" });
       const porDiv = evolucion(vs, n, "DIVISION_UNINORTE");
       A.lineas($("g-division"), fechasR, divisiones.filter((d) => porDiv[d]).map((d) => ({ nombre: d, valores: serie(porDiv[d]), color: colDiv[d].color })), { modo: "stock" });
       const porCine = evolucion(vs, n, CAMPO_CINE);
@@ -136,7 +134,7 @@
       : `Programas activos al ${A.fmtFecha(fechasActivos[corte])}`;
     $("k-nuevos").textContent = A.fmt(enUltima("nuevos").length);
     $("k-modificados").textContent = A.fmt(modU.length);
-    $("k-modificados-s").textContent = `${A.plural(new Set(modU.map((r) => r.CODIGO_SNIES_DEL_PROGRAMA)).size, "programa distinto", "programas distintos")}${ultimaE ? ` · ${A.fmtFecha(ultimaE)}` : ""}`;
+    $("k-modificados-s").textContent = `${A.plural(modU.reduce((s, r) => s + (r._TC ? r._TC.length : 0), 0), "cambio", "cambios")}${ultimaE ? ` · ${A.fmtFecha(ultimaE)}` : ""}`;
     $("k-inactivos").textContent = A.fmt(enUltima("inactivos").length);
     textos("[data-fecha-ultima]", ultimaE ? A.fmtFecha(ultimaE) : "–");
     filtros.conteo.textContent = A.plural(enCorte.length, "registro", "registros");

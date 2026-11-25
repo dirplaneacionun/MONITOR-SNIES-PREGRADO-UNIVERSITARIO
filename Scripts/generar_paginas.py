@@ -22,13 +22,12 @@ def v(rel):
     return f"{rel}?v={hashlib.sha256((DOCS / rel).read_bytes()).hexdigest()[:10]}"
 SUB = "Programas Académicos Universitarios de Pregrado en Colombia"
 
-# Mapa de importación de los módulos de Parquet (hyparquet): script en línea, autorizado en la política de seguridad
+# Mapa de importación de los módulos de la exportación a Excel (write-excel-file y fflate): script en línea, autorizado en la política de seguridad
 # por su huella SHA-256 (si el texto cambia, la huella se recalcula al generar las páginas).
 IMPORTMAP = """
     { "imports": {
-      "hyparquet": "./assets/vendor/hyparquet/src/index.js",
-      "hyparquet/": "./assets/vendor/hyparquet/",
-      "hyparquet-writer": "./assets/vendor/hyparquet-writer/src/index.js"
+      "write-excel-file/browser": "./assets/vendor/write-excel-file/browser/index.js",
+      "fflate": "./assets/vendor/fflate/esm/browser.js"
     } }
   """
 # Política de seguridad de contenido: solo se ejecutan scripts propios del sitio (y el mapa de importación autorizado),
@@ -58,7 +57,7 @@ HEAD = '''<!doctype html>
     <div class="encabezado-int">
       <div class="enc-fila">
         <div class="enc-marca">
-          <img class="enc-logo" src="assets/img/logo-uninorte-blanco.png" width="198" height="68" alt="Universidad del Norte">
+          <img class="enc-logo" src="assets/img/logo-uninorte-direccion-blanco.png" width="307" height="52" alt="Universidad del Norte">
           <div class="enc-textos">
             <h1 class="enc-titulo">{h1}</h1>{sub}
           </div>
@@ -76,7 +75,7 @@ HEAD = '''<!doctype html>
 '''
 HEAD = HEAD.replace("@CSP@", CSP).replace("@IMPORTMAP@", IMPORTMAP.replace("{", "{{").replace("}", "}}"))
 FOOT = '''
-    <img class="pie-logo" src="assets/img/logo-uninorte-principal.png" width="107" height="40" alt="Universidad del Norte">
+    <img class="pie-logo" src="assets/img/logo-uninorte-direccion-principal.png" width="237" height="40" alt="Universidad del Norte">
     <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
   </main>
 
@@ -128,7 +127,7 @@ def scripts(datos, js):
 
 def _control_cine(maximo: int, ambito: str) -> tuple[str, str]:
     """Descripción y control (selector de campos) de la gráfica de evolución por campo de CINE específico."""
-    desc = (f"Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con TODOS se muestran "
+    desc = (f"Campos de CINE específico elegidos en el filtro superior, que comparte su selección con el desplegable de esta gráfica. Con todos los campos seleccionados se muestran "
             f"los {maximo} campos con más {ambito}; con una selección, los campos marcados (hasta {maximo}: los que tengan más {ambito}).")
     return desc, '\n        <div id="cine-ctrl"></div>'
 
@@ -157,7 +156,7 @@ def main() -> None:
         '      <h2 class="tarjeta-tit" id="t-novedades">REGISTROS DE PROGRAMAS ACADÉMICOS NUEVOS, MODIFICADOS E INACTIVOS</h2>\n'
         '      <p class="tarjeta-sub">Novedades del periodo filtrado, con todas las columnas y ordenadas desde la fecha más reciente. '
         'Seleccione la pestaña de cada tipo de novedad: los filtros de esta página afectan siempre las tres tablas. '
-        'Haga clic en un encabezado para ordenar; DESCARGAR exporta los registros filtrados de la tabla visible.</p>\n'
+        'Haga clic en un encabezado para ordenar; el botón de descarga exporta a Excel los registros filtrados de la tabla visible.</p>\n'
         f'      <div class="tabs" role="tablist" aria-label="Tipo de novedad">{tabs}</div>\n{paneles}\n'
         '    </section>')
     cuerpo = [
@@ -190,7 +189,7 @@ def main() -> None:
         "nuevos": dict(t="PROGRAMAS ACADÉMICOS NUEVOS", ht="PROGRAMAS ACADÉMICOS NUEVOS", s="NUEVOS",
                        estado="Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados), acumulados desde el inicio del periodo seleccionado."),
         "modificados": dict(t="PROGRAMAS ACADÉMICOS MODIFICADOS", ht="PROGRAMAS ACADÉMICOS MODIFICADOS", s="MODIFICADOS",
-                            estado="Cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad, acumulados desde el inicio del periodo seleccionado (un registro por cambio)."),
+                            estado="Cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad, acumulados desde el inicio del periodo seleccionado."),
         "inactivos": dict(t="PROGRAMAS ACADÉMICOS INACTIVOS", ht="PROGRAMAS ACADÉMICOS INACTIVOS", s="INACTIVOS",
                           estado="Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES, acumulados desde el inicio del periodo seleccionado."),
     }
@@ -200,7 +199,7 @@ def main() -> None:
         if tipo == "modificados":
             # El tipo de cambio se muestra a la derecha de la evolución de los modificados
             c = [par(evol, tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS MODIFICADOS POR TIPO DE CAMBIO", "g-tipos",
-                                   "Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad."))]
+                                   "Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad. Un registro con varios tipos de cambio cuenta una vez en cada tipo."))]
         else:
             c = ['    <div class="fila">\n' + evol + "\n    </div>"]
         desc_cine, extra_cine = _control_cine(10, f"registros {n}")
@@ -224,7 +223,7 @@ def main() -> None:
                 tarjeta("AUMENTOS Y REDUCCIONES DE NÚMERO DE PERIODOS DE DURACIÓN EN PROGRAMAS ACADÉMICOS", "g-periodos-dir",
                         "Programas que alargaron (barras negras, hacia arriba) o acortaron (barras amarillas, hacia abajo) su duración en cada ejecución.")))
         nota = (f"Todos los registros de programas {n} que cumplen los filtros, con todas las columnas, ordenados desde la fecha más reciente. "
-                "Haga clic en un encabezado para ordenar según el tipo de dato; DESCARGAR exporta los registros filtrados.")
+                "Haga clic en un encabezado para ordenar según el tipo de dato; el botón de descarga exporta a Excel los registros filtrados.")
         c.append('    <section class="tarjeta" aria-labelledby="t-tabla">\n'
                  f'      <h2 class="tarjeta-tit" id="t-tabla">REGISTROS DE PROGRAMAS ACADÉMICOS {N}</h2>\n'
                  f'      <p class="tarjeta-sub">{nota}</p>\n'

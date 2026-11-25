@@ -4,9 +4,9 @@
   "private": true,
   "description": "Registro de las versiones de las librerías de JavaScript incluidas en docs/assets/vendor. No se instalan: el Dashboard usa los archivos copiados en el repositorio. Dependabot vigila este archivo y avisa cuando una librería tiene una versión nueva o una vulnerabilidad; para actualizarla, reemplace los archivos de docs/assets/vendor por los del paquete indicado, actualice la versión aquí y ejecute las pruebas.",
   "dependencies": {
+    "fflate": "0.8.3",
     "flatpickr": "4.6.13",
-    "hyparquet": "1.32.0",
-    "hyparquet-writer": "0.18.0",
-    "plotly.js-dist-min": "2.35.2"
+    "plotly.js-dist-min": "2.35.2",
+    "write-excel-file": "4.1.1"
   }
 }

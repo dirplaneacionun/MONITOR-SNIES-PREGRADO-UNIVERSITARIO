@@ -22,7 +22,7 @@ updates:
     commit-message:
       prefix: "Dependencias"
 
-  # Librerías de JavaScript incluidas en docs/assets/vendor (Plotly, flatpickr y hyparquet). El archivo
+  # Librerías de JavaScript incluidas en docs/assets/vendor (Plotly, flatpickr, write-excel-file y fflate). El archivo
   # Librerias/package.json solo registra sus versiones: Dependabot avisa de versiones nuevas y vulnerabilidades,
   # y la actualización se hace a mano copiando los archivos del paquete y ejecutando las pruebas.
   - package-ecosystem: "npm"
