@@ -37,7 +37,7 @@ colorama==0.4.6 ; sys_platform == "win32"  # tqdm
 # Dependencias transitivas de selenium, webdriver-manager y rich (fijadas para que la instalación en GitHub Actions
 # y en cualquier equipo use exactamente las versiones validadas). Las marcadas con sys_platform solo las exige Windows.
 urllib3==2.8.0                # selenium, requests
-certifi==2026.10.23           # selenium, requests
+certifi==2026.11.20           # selenium, requests
 typing_extensions==4.16.0     # selenium
 websocket-client==1.9.2       # selenium
 trio==0.35.0                  # selenium
