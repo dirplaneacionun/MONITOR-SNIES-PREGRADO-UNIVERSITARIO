@@ -21,7 +21,7 @@ rich==15.0.0
 tqdm==4.70.1
 
 # Descarga automatizada del portal SNIES
-selenium==4.52.0
+selenium==4.53.0
 webdriver-manager==4.1.2
 
 # Pruebas (tests/): la de los logotipos compara sus imágenes con las originales
