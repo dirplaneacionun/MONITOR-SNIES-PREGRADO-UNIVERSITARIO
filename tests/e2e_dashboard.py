@@ -2038,6 +2038,22 @@ PALETA_SERIES = ["#960A11", "#151515", "#8C6A12", "#2A6F97", "#D17367", "#606311
 GRIS_OTROS = "#9E9E9E"
 
 
+def probar_sectores_nuevos(d, base):
+    """Un sector que el SNIES incorpore (no previsto) se dibuja con un color de la paleta, distinto del acento y del negro, igual en el anillo y la evolución."""
+    d.get("about:blank")
+    q = Pagina(d, base, "nuevos.html")
+    r = q.js("""const A = window.App, s = ['OFICIAL', 'PRIVADO', 'MIXTO', 'OTRO SECTOR'];
+        return { orden: A.ordenSectores(['MIXTO', 'OFICIAL', 'PRIVADO', 'OTRO SECTOR']), colores: A.coloresSector(s), conAcento: A.coloresSector(s, '#1E8E5A'), sinNuevos: A.coloresSector(['OFICIAL', 'PRIVADO']) };""")
+    nuevos = [r["colores"]["MIXTO"], r["colores"]["OTRO SECTOR"]]
+    verificar("sectores nuevos · orden: privado y oficial primero y los demás alfabéticos", r["orden"] == ["PRIVADO", "OFICIAL", "MIXTO", "OTRO SECTOR"], str(r["orden"]))
+    verificar("sectores nuevos · cada uno con un color propio de la paleta, distinto del rojo, del negro y del gris",
+              len(set(nuevos)) == 2 and all(c in PALETA_SERIES and c not in ("#960A11", "#151515") for c in nuevos), str(nuevos))
+    verificar("sectores nuevos · privado y oficial conservan su regla (acento y negro) con o sin sectores nuevos",
+              r["colores"]["PRIVADO"] == "#960A11" and r["colores"]["OFICIAL"] == "#151515" and r["conAcento"]["PRIVADO"] == "#1E8E5A"
+              and r["sinNuevos"] == {"OFICIAL": "#151515", "PRIVADO": "#960A11"} and "#1E8E5A" not in (r["conAcento"]["MIXTO"], r["conAcento"]["OTRO SECTOR"]), str(r))
+    verificar("sectores nuevos · errores de consola", not q.errores(), str(q.errores()[:3]))
+
+
 def probar_colores_series(d, base):
     """Gráficas de líneas de varias series: colores de la paleta institucional, sin repetirse en una gráfica y estables entre páginas."""
     por_pagina = {}
@@ -2200,6 +2216,7 @@ def main():
         probar_fecha_unica(d, base)
         probar_consistencia_visual(d, base)
         probar_colores_series(d, base)
+        probar_sectores_nuevos(d, base)
         probar_titulos_pestana(d, base)
         probar_rango_temporal(d, base)
         probar_unidades_y_etiquetas(d, base)

@@ -99,12 +99,13 @@
       const porCine = evolucion(vs, n, CAMPO_CINE);
       A.lineas($("g-cine"), fechasR, selectorCine.sel.map((c) => ({ nombre: c, valores: serie(porCine[c] || new Array(n).fill(0)), color: selectorCine.colorDe(c) })), { modo: "stock" });
       const porSec = evolucion(vs, n, "SECTOR");
-      A.lineas($("g-sector-evol"), fechasR, Object.keys(A.SECTOR_COLOR).filter((s) => porSec[s]).map((s) => ({ nombre: s, valores: serie(porSec[s]), color: A.SECTOR_COLOR[s] })), { modo: "stock" });
+      const colSec = A.coloresSector(Object.keys(porSec));
+      A.lineas($("g-sector-evol"), fechasR, A.ordenSectores(Object.keys(porSec)).map((s) => ({ nombre: s, valores: serie(porSec[s]), color: colSec[s] })), { modo: "stock" });
     }
 
     textos("[data-fecha-corte]", hayCorte ? A.fmtFecha(fechasActivos[corte]) : "–");
     const sec = A.contar(enCorte, "SECTOR");
-    A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => A.SECTOR_COLOR[s[0]] || A.GRIS));
+    A.torta($("g-sector"), sec.map((s) => s[0]), sec.map((s) => s[1]), sec.map((s) => A.coloresSector(sec.map((x) => x[0]))[s[0]]));
     const dep = A.contar(enCorte, "DEPARTAMENTO_OFERTA_PROGRAMA").slice(0, 10);
     A.barrasH($("g-deptos"), dep.map((d) => d[0]), dep.map((d) => d[1]), A.NEGRO);
     const uni = A.contar(enCorte, "NOMBRE_INSTITUCION").slice(0, 10);

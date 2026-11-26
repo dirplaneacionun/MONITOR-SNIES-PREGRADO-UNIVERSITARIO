@@ -43,7 +43,8 @@ def grupos_de_registros(registros):
 
 
 # ── Sector y paleta de series ─────────────────────────────────────────────────
-# El Dashboard dibuja la evolución por sector solo con estos dos valores.
+# Sectores conocidos del SNIES (negro y color del apartado en las gráficas). Un sector nuevo no requiere cambios: el Dashboard lo
+# dibuja con un color de la paleta de series.
 SECTORES = ("OFICIAL", "PRIVADO")
 # Colores de la paleta de series del Dashboard (CATEGORICA en docs/assets/app.js): con más categorías se repetirían.
 MAX_COLORES_SERIES = 15

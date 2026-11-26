@@ -303,7 +303,7 @@ Los colores de borde de las tarjetas identifican cada estado: negro (activos), v
 | **Evolución de programas académicos activos** | Línea | Número de programas activos en cada ejecución. El eje vertical no parte de cero, para apreciar la variación. |
 | **Evolución de programas académicos nuevos, modificados e inactivos** | Líneas acumuladas | Registros de novedades acumulados desde el inicio del periodo. La pendiente muestra el ritmo de aperturas, cambios y cierres. Empieza en la primera ejecución con novedades. |
 | **Programas académicos activos por sector** | Anillo | Distribución entre instituciones oficiales y privadas en el corte, con el total al centro. |
-| **Evolución de programas académicos activos por sector** | Líneas | Programas activos oficiales y privados en cada ejecución. |
+| **Evolución de programas académicos activos por sector** | Líneas | Programas activos por sector en cada ejecución (oficiales y privados y, si el SNIES incorpora otro, también ese sector, con un color de la paleta de series). |
 | **Departamentos con mayor número de programas académicos activos** | Barras horizontales | Los diez departamentos de oferta con más programas en el corte. |
 | **Universidades con mayor número de programas académicos activos** | Barras horizontales | Las diez instituciones con más programas en el corte. |
 | **Evolución de programas académicos activos por modalidad** | Líneas | Una serie por modalidad agrupada. |
@@ -384,7 +384,7 @@ Las series de las gráficas de líneas con varias categorías (modalidades, divi
 | 15 | Gris | `#6E6E6E` | Escala de grises de la marca (K 70 %). |
 
 - **Criterios verificados por las pruebas:** contraste mínimo de 3:1 sobre blanco; ΔE (OKLab) entre series contiguas de al menos 15 con visión normal y de al menos 6 en protanopía y deuteranopía; el amarillo `#FFCC00` y el ocre `#B78B1E` no forman parte de la paleta.
-- **Series equivalentes, colores equivalentes:** cada categoría conserva su color en todas las gráficas y páginas (el color sigue a la categoría, no a su posición). El sector y la justificación siguen una regla fija (oficial en negro; privado y profundización en el color del apartado; investigación en negro). Los estados usan siempre los mismos colores en las líneas: activos en negro, nuevos en verde, modificados en ocre e inactivos en rojo.
+- **Series equivalentes, colores equivalentes:** cada categoría conserva su color en todas las gráficas y páginas (el color sigue a la categoría, no a su posición). El sector y la justificación siguen una regla fija (oficial en negro; privado y profundización en el color del apartado; investigación en negro). Un sector nuevo del SNIES se incorpora solo en el anillo y en la evolución, con un color de la paleta (el mismo en ambas gráficas). Los estados usan siempre los mismos colores en las líneas: activos en negro, nuevos en verde, modificados en ocre e inactivos en rojo.
 - **Grises:** «Otro» y «Sin información» se muestran siempre en gris (`#9E9E9E`), que no forma parte de la paleta para no confundirlos con una categoría.
 
 ## 8. Tablas y exportación

@@ -541,8 +541,8 @@ def validar_filtros(df: pd.DataFrame) -> None:
 
 def categorias_desconocidas(df: pd.DataFrame) -> dict[str, list[str]]:
     """
-    Valores del reporte que el Dashboard no contempla: sectores y modalidades fuera de los catálogos (el sector
-    quedaría fuera de su gráfica de evolución y la modalidad se agruparía como SIN INFORMACIÓN) y más divisiones que
+    Valores del reporte que el Dashboard no contempla: sectores y modalidades fuera de los catálogos (un sector nuevo se
+    dibuja con un color de la paleta de series y una modalidad nueva se agrupa como SIN INFORMACION) y más divisiones que
     colores en la paleta de series (los colores se repetirían). Retorna {campo: detalle}; vacío si todo está contemplado.
     """
     def distintos(col):
