@@ -2,7 +2,7 @@
 
 [![Dashboard](https://img.shields.io/badge/Dashboard-GitHub_Pages-960A11?style=for-the-badge)](https://dirplaneacionun.github.io/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/)
 
-Herramienta de monitoreo semanal de los programas académicos universitarios de pregrado con estado activo registrados en el Sistema Nacional de Información de la Educación Superior (SNIES) del Ministerio de Educación Nacional de Colombia. Es operada por la Dirección de Planeación de la Universidad del Norte.
+Herramienta de monitoreo semanal de los programas académicos universitarios de pregrado con estado activo registrados en el Sistema Nacional de Información de la Educación Superior (SNIES) del Ministerio de Educación Nacional de Colombia. Es operada por la Dirección de Planeación y Estudios Institucionales de la Universidad del Norte.
 
 Cada ejecución descarga el reporte oficial, lo normaliza, clasifica cada programa en una división académica de la Universidad del Norte, detecta los programas **nuevos**, **modificados** e **inactivos** respecto de la ejecución anterior, actualiza el histórico, publica el Dashboard y envía un reporte por correo electrónico.
 
@@ -343,4 +343,4 @@ Sí: con `--sin-correo` en ejecución local o desactivando la opción de correo 
 
 ---
 
-Fuente de los datos: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional. Dirección de Planeación, Universidad del Norte.
+Fuente de los datos: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional. Dirección de Planeación y Estudios Institucionales, Universidad del Norte.

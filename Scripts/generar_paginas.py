@@ -76,7 +76,7 @@ HEAD = '''<!doctype html>
 HEAD = HEAD.replace("@CSP@", CSP).replace("@IMPORTMAP@", IMPORTMAP.replace("{", "{{").replace("}", "}}"))
 FOOT = '''
     <img class="pie-logo" src="assets/img/logo-uninorte-direccion-principal.png" width="237" height="40" alt="Universidad del Norte">
-    <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte</p>
+    <p class="pie-pagina">Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación y Estudios Institucionales, Universidad del Norte</p>
   </main>
 
 {scripts}

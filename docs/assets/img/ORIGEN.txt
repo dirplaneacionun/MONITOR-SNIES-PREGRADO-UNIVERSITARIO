@@ -1,6 +1,6 @@
 Logotipos de la Universidad del Norte usados en el Dashboard y en el correo.
 
-Origen: carpeta "Recursos Uninorte" del proyecto (LOGO-UN-DIRECCION-BLANCO.png, LOGO-UN-DIRECCION-NEGRO.png y LOGO-UN-DIRECCION-PRINCIPAL.png, con la Dirección de Planeación).
+Origen: carpeta "Recursos Uninorte" del proyecto (LOGO-UN-DIRECCION-BLANCO.png, LOGO-UN-DIRECCION-NEGRO.png y LOGO-UN-DIRECCION-PRINCIPAL.png, con la Dirección de Planeación y Estudios Institucionales).
 Única modificación: se recortaron los márgenes transparentes del lienzo; el logotipo no se redimensionó ni se recoloreó.
 - logo-uninorte-direccion-blanco.png     encabezado negro del Dashboard y del correo
 - logo-uninorte-direccion-principal.png  pie del Dashboard (fondo claro)

@@ -1119,4 +1119,4 @@ Solo existe un tipo de selección de fechas a la vez; si el enlace contiene vari
 
 ---
 
-Fuente de los datos: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional. Dirección de Planeación, Universidad del Norte.
+Fuente de los datos: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional. Dirección de Planeación y Estudios Institucionales, Universidad del Norte.

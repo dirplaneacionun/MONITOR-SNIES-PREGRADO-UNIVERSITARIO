@@ -455,7 +455,7 @@ def construir_texto(resultados: dict, fecha: date) -> str:
         lineas += [ajustar(t) for t in _texto_notas(tipo, df)]
     lineas += ["",
                ajustar("Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de "
-                       "Educación Nacional · Dirección de Planeación, Universidad del Norte."),
+                       "Educación Nacional · Dirección de Planeación y Estudios Institucionales, Universidad del Norte."),
                "Reporte generado automáticamente en cada ejecución del monitor."]
     return "\n".join(lineas) + "\n"
 
@@ -547,7 +547,7 @@ def _cuerpo(res: dict, fecha: date, topes: dict[str, int] | None = None) -> str:
     {_seccion("inactivos", ina, fecha, topes.get("inactivos"))}
   </td></tr>
   <tr><td align="center" style="padding:8px 12px 4px;font-family:{FUENTE};font-size:11px;line-height:1.5;color:{TEXTO3};">
-    Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación, Universidad del Norte.<br>
+    Fuente: Sistema Nacional de Información de la Educación Superior (SNIES), Ministerio de Educación Nacional · Dirección de Planeación y Estudios Institucionales, Universidad del Norte.<br>
     Reporte generado automáticamente en cada ejecución del monitor.
   </td></tr>
 </table></td></tr></table>
