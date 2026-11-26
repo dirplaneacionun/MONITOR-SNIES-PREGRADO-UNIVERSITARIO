@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import historico  # noqa: E402
 from catalogos import (  # noqa: E402
     GRUPOS_UNIVERSIDAD, MAYOR_INTERES, MODALIDAD_A_GRUPO, MODALIDADES_GRUPO, TIPOS_CAMBIO,
-    UNINORTE, consolidar_modificados, separar_cambios,
+    UNINORTE, consolidar_modificados,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -229,7 +229,6 @@ def main() -> int:
         "fecha_activos": iso(fechas_activos[-1]),
         "nuevos": int(len(_en_ultima(nue))),
         "modificados": int(len(mod_u)),
-        "modificados_cambios": int(sum(len(separar_cambios(c)) for c in mod_u["CAMBIO_DETECTADO"])) if not mod_u.empty else 0,
         "inactivos": int(len(_en_ultima(ina))),
     }
 

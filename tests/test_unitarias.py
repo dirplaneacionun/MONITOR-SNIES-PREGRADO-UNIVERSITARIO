@@ -40,7 +40,7 @@ def programa(snies, **valores):
     base = {
         S: snies, "NOMBRE_DEL_PROGRAMA": f"PROGRAMA {snies}", "NOMBRE_INSTITUCION": "UNIVERSIDAD X",
         "CODIGO_INSTITUCION": 9999, "NUMERO_CREDITOS": 160, "MUNICIPIO_OFERTA_PROGRAMA": "BARRANQUILLA",
-        "DEPARTAMENTO_OFERTA_PROGRAMA": "ATLANTICO",
+        "DEPARTAMENTO_OFERTA_PROGRAMA": "ATLANTICO", "COSTO_MATRICULA_ESTUD_NUEVOS": 5000000.0,
         "NUMERO_PERIODOS_DE_DURACION": 10, "MODALIDAD": "PRESENCIAL", "DIVISION_UNINORTE": "INGENIERIAS",
     }
     base.update(valores)
@@ -116,15 +116,15 @@ class TestDeteccion(unittest.TestCase):
 
     def test_un_registro_por_programa_con_cambios_ordenados_por_tipo(self):
         anterior = pd.DataFrame([programa(1, MODALIDAD="VIRTUAL", NUMERO_PERIODOS_DE_DURACION=4), programa(2),
-                                 programa(3, NOMBRE_DEL_PROGRAMA="VIEJO", MUNICIPIO_OFERTA_PROGRAMA="SOLEDAD")])
+                                 programa(3, NOMBRE_DEL_PROGRAMA="VIEJO", DEPARTAMENTO_OFERTA_PROGRAMA="CESAR")])
         hoy = pd.DataFrame([programa(1, MODALIDAD="PRESENCIAL", NUMERO_PERIODOS_DE_DURACION=5), programa(2, NUMERO_CREDITOS=120),
-                            programa(3, NOMBRE_DEL_PROGRAMA="NUEVO", MUNICIPIO_OFERTA_PROGRAMA="MALAMBO", NUMERO_CREDITOS=100)])
+                            programa(3, NOMBRE_DEL_PROGRAMA="NUEVO", DEPARTAMENTO_OFERTA_PROGRAMA="ATLANTICO", NUMERO_CREDITOS=100)])
         modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1].set_index(S)
         self.assertEqual(len(modificados), 3)
         self.assertEqual(modificados.loc[1, "CAMBIO_DETECTADO"], "NUMERO DE PERIODOS: 4 → 5 | MODALIDAD: VIRTUAL → PRESENCIAL")
         self.assertEqual(modificados.loc[2, "CAMBIO_DETECTADO"], "NUMERO DE CREDITOS: 160 → 120")
         self.assertEqual(modificados.loc[3, "CAMBIO_DETECTADO"],
-                         "NUMERO DE CREDITOS: 160 → 100 | MUNICIPIO DE OFERTA: SOLEDAD → MALAMBO | NOMBRE DEL PROGRAMA: VIEJO → NUEVO")
+                         "NUMERO DE CREDITOS: 160 → 100 | DEPARTAMENTO DE OFERTA: CESAR → ATLANTICO | NOMBRE DEL PROGRAMA: VIEJO → NUEVO")
         # Los demás valores del registro son los del programa en la ejecución de hoy
         self.assertEqual(modificados.loc[3, "NUMERO_CREDITOS"], 100)
 
@@ -141,7 +141,7 @@ class TestDeteccion(unittest.TestCase):
 
     def test_dato_que_desaparece_no_es_cambio(self):
         anterior = pd.DataFrame([programa(1)])
-        hoy = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA=None)])
+        hoy = pd.DataFrame([programa(1, DEPARTAMENTO_OFERTA_PROGRAMA=None, COSTO_MATRICULA_ESTUD_NUEVOS=None)])
         self.assertTrue(run_snies.detectar_novedades(hoy, anterior, self.fecha)[1].empty)
 
     def test_lectura_filtrada_por_codigo_snies(self):
@@ -151,11 +151,44 @@ class TestDeteccion(unittest.TestCase):
 
     def test_dato_que_reaparece_se_compara_con_el_ultimo_conocido(self):
         self._historico([programa(1, **{F: "2026-11-03"}), programa(2, **{F: "2026-11-03"})])
-        anterior = pd.DataFrame([programa(1, MUNICIPIO_OFERTA_PROGRAMA=None), programa(2, MUNICIPIO_OFERTA_PROGRAMA=None)])
-        hoy = pd.DataFrame([programa(1), programa(2, MUNICIPIO_OFERTA_PROGRAMA="SOLEDAD")])
+        anterior = pd.DataFrame([programa(1, DEPARTAMENTO_OFERTA_PROGRAMA=None), programa(2, DEPARTAMENTO_OFERTA_PROGRAMA=None)])
+        hoy = pd.DataFrame([programa(1), programa(2, DEPARTAMENTO_OFERTA_PROGRAMA="CESAR")])
         modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1]
         self.assertEqual(modificados[S].tolist(), [2])
-        self.assertEqual(modificados["CAMBIO_DETECTADO"].tolist(), ["MUNICIPIO DE OFERTA: BARRANQUILLA → SOLEDAD"])
+        self.assertEqual(modificados["CAMBIO_DETECTADO"].tolist(), ["DEPARTAMENTO DE OFERTA: ATLANTICO → CESAR"])
+
+    def test_departamento_de_oferta_se_compara_sin_puntuacion_y_el_municipio_no_es_un_cambio(self):
+        anterior = pd.DataFrame([programa(1, DEPARTAMENTO_OFERTA_PROGRAMA="BOGOTA D.C."), programa(2), programa(3)])
+        hoy = pd.DataFrame([programa(1, DEPARTAMENTO_OFERTA_PROGRAMA="BOGOTA, D.C."),
+                            programa(2, DEPARTAMENTO_OFERTA_PROGRAMA="CESAR", MUNICIPIO_OFERTA_PROGRAMA="VALLEDUPAR"),
+                            programa(3, MUNICIPIO_OFERTA_PROGRAMA="SOLEDAD")])
+        modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1]
+        # La puntuación (programa 1) y un cambio de municipio dentro del mismo departamento (programa 3) no son cambios
+        self.assertEqual(modificados[S].tolist(), [2])
+        self.assertEqual(modificados["CAMBIO_DETECTADO"].tolist(), ["DEPARTAMENTO DE OFERTA: ATLANTICO → CESAR"])
+        self.assertIn("DEPARTAMENTO DE OFERTA", catalogos.TIPOS_CAMBIO)
+        self.assertNotIn("MUNICIPIO_OFERTA_PROGRAMA", run_snies.COLS_VIGILAR)
+        self.assertFalse(any("MUNICIPIO" in tipo for tipo in catalogos.TIPOS_CAMBIO))
+
+    def test_costo_de_matricula_solo_se_registra_entre_dos_montos(self):
+        self._historico([programa(4, **{F: "2026-11-03"}, COSTO_MATRICULA_ESTUD_NUEVOS=7000000.0),
+                         programa(5, **{F: "2026-11-03"}, COSTO_MATRICULA_ESTUD_NUEVOS=1000000.0)])
+        sin_costo = {"COSTO_MATRICULA_ESTUD_NUEVOS": None}
+        anterior = pd.DataFrame([programa(1), programa(2), programa(3, **sin_costo), programa(4, **sin_costo), programa(5, **sin_costo), programa(6)])
+        hoy = pd.DataFrame([programa(1, COSTO_MATRICULA_ESTUD_NUEVOS=5500000.0),    # aumento: se registra
+                            programa(2, **sin_costo),                                 # desaparece: no es un cambio
+                            programa(3, COSTO_MATRICULA_ESTUD_NUEVOS=6000000.0),     # vacío → valor sin valor anterior conocido: no
+                            programa(4, COSTO_MATRICULA_ESTUD_NUEVOS=7000000.0),     # vuelve el mismo valor que tenía: no
+                            programa(5, COSTO_MATRICULA_ESTUD_NUEVOS=1200000.0),     # frente al último valor conocido: sí
+                            programa(6)])                                              # sin cambio
+        modificados = run_snies.detectar_novedades(hoy, anterior, self.fecha)[1].set_index(S)
+        self.assertEqual(sorted(modificados.index.tolist()), [1, 5])
+        self.assertEqual(modificados.loc[1, "CAMBIO_DETECTADO"], "COSTO DE MATRICULA: 5000000 → 5500000")
+        self.assertEqual(modificados.loc[5, "CAMBIO_DETECTADO"], "COSTO DE MATRICULA: 1000000 → 1200000")
+        # El costo se ordena al final del texto, tras los demás tipos
+        mixto = run_snies.detectar_novedades(pd.DataFrame([programa(1, COSTO_MATRICULA_ESTUD_NUEVOS=4000000.0, MODALIDAD="VIRTUAL")]),
+                                             pd.DataFrame([programa(1)]), self.fecha)[1]
+        self.assertEqual(mixto["CAMBIO_DETECTADO"].tolist(), ["MODALIDAD: PRESENCIAL → VIRTUAL | COSTO DE MATRICULA: 5000000 → 4000000"])
 
     def test_reactivado(self):
         self._historico([programa(5, **{F: "2026-10-01"})])
@@ -418,6 +451,69 @@ class TestCorreo(unittest.TestCase):
         self.assertEqual(indicadores["MODIFICADOS"], ("2", "Con 3 cambios"))
         self.assertIn("2 registros modificados (con 3 cambios)", " ".join(send_report._frases_resumen(res, fecha)))
         self.assertIn("En esta ejecución: 2 registros con 3 cambios.", send_report._descripcion("modificados", mod))
+
+    def test_aumento_de_costo_como_unico_cambio_solo_se_oculta_en_la_tabla_del_correo(self):
+        cambios = ["COSTO DE MATRICULA: 5000000 → 5500000",                       # solo un aumento: no se muestra en la tabla
+                   "COSTO DE MATRICULA: 5500000 → 5000000",                       # reducción: se muestra
+                   "COSTO DE MATRICULA: 5000000 → 5500000 | MODALIDAD: A → B",    # con otro cambio: se muestra aunque aumente
+                   "NUMERO DE CREDITOS: 160 → 150",                                 # otro cambio: se muestra
+                   "COSTO DE MATRICULA: 4000000 → 4100000"]                         # solo un aumento: no se muestra
+        mod = self._modificados([1713, 1711, 9999, 9998, 9997]).assign(CAMBIO_DETECTADO=cambios)
+        res, fecha = {"modificados": mod, "total_activos": 100}, dt.date(2026, 11, 17)
+        html = send_report._cuerpo(res, fecha)
+        # Tabla: solo los tres registros que corresponden
+        self.assertEqual(html.count("COSTO DE MATRICULA: 5000000 → 5500000<br>MODALIDAD: A → B"), 1)
+        self.assertEqual(html.count("COSTO DE MATRICULA: 5500000 → 5000000"), 1)
+        self.assertEqual(html.count("NUMERO DE CREDITOS: 160 → 150"), 1)
+        self.assertNotIn("4000000 → 4100000", html)
+        self.assertEqual(html.count("5000000 → 5500000"), 1)
+        # Título, indicadores, resumen y descripción cuentan los registros y los cambios reales
+        self.assertIn("PROGRAMAS ACADÉMICOS MODIFICADOS · 5", html)
+        indicadores = {e: (v, d) for e, v, d, _ in send_report._indicadores(res, fecha)}
+        self.assertEqual(indicadores["MODIFICADOS"], ("5", "Con 6 cambios"))
+        self.assertIn("En esta ejecución: 5 registros con 6 cambios.", send_report._descripcion("modificados", mod))
+        self.assertIn("5 registros modificados (con 6 cambios)", " ".join(send_report._frases_resumen(res, fecha)))
+        # Nota bajo la descripción, antes de la tabla
+        sin_etiquetas = re.sub(r"<[^>]+>", "\n", html)
+        self.assertIn("Nota: la tabla del correo excluye los programas cuyo único cambio corresponde a un aumento en el costo de matrícula (2 registros en esta ejecución).", sin_etiquetas)
+        self.assertIn("El Dashboard mantiene disponibles todos los registros.", sin_etiquetas)
+        self.assertIn("Los archivos generados también conservan dichos registros.", sin_etiquetas)
+        self.assertLess(html.index("Nota: la tabla del correo"), html.index("<table", html.index("PROGRAMAS ACADÉMICOS MODIFICADOS")))
+        # Los datos no se tocan: el DataFrame conserva sus cinco registros
+        self.assertEqual(len(mod), 5)
+        # Texto plano: mismo criterio
+        texto = send_report.construir_texto({"pregrado": res}, fecha)
+        plano = re.sub(r"\s+", " ", texto)
+        self.assertEqual(plano.count("5000000 → 5500000"), 1)
+        self.assertNotIn("4000000 → 4100000", texto)
+        self.assertIn("PROGRAMAS ACADÉMICOS MODIFICADOS · 5", texto)
+        self.assertIn("Los archivos generados también conservan dichos registros.", re.sub(r"\s+", " ", texto))
+        # La descripción usa el departamento de oferta y el costo de matrícula, no el municipio
+        descripcion = send_report.SECCIONES["modificados"]["descripcion"]
+        self.assertIn("departamento de oferta", descripcion)
+        self.assertIn("costo de matrícula", descripcion)
+        self.assertNotIn("municipio", descripcion.lower())
+
+    def test_solo_aumento_de_costo_distingue_aumento_reduccion_y_otros_cambios(self):
+        solo = send_report._solo_aumento_de_costo
+        self.assertTrue(solo("COSTO DE MATRICULA: 100 → 101"))
+        self.assertFalse(solo("COSTO DE MATRICULA: 101 → 100"))
+        self.assertFalse(solo("COSTO DE MATRICULA: 100 → 100"))
+        self.assertFalse(solo("COSTO DE MATRICULA: 100 → 101 | NUMERO DE CREDITOS: 1 → 2"))
+        self.assertFalse(solo("NUMERO DE CREDITOS: 1 → 2"))
+        self.assertFalse(solo("COSTO DE MATRICULA:  → 5"))
+        self.assertFalse(solo(None))
+        self.assertFalse(solo(""))
+
+    def test_si_todos_los_modificados_son_aumentos_de_costo_no_hay_tabla(self):
+        mod = self._modificados([1713, 9999]).assign(CAMBIO_DETECTADO=["COSTO DE MATRICULA: 1 → 2", "COSTO DE MATRICULA: 3 → 4"])
+        res, fecha = {"modificados": mod, "total_activos": 100}, dt.date(2026, 11, 17)
+        html = send_report._cuerpo(res, fecha)
+        self.assertIn("PROGRAMAS ACADÉMICOS MODIFICADOS · 2", html)
+        self.assertIn("Todos los registros de esta ejecución son aumentos en el costo de matrícula: no se muestran en la tabla.", html)
+        self.assertNotIn("COSTO DE MATRICULA: 1 → 2", html)
+        self.assertNotIn("Se muestran", html)
+        self.assertEqual(send_report._indicadores(res, fecha)[2][2], "Con 2 cambios")
 
     def test_ancho_del_correo(self):
         self.assertEqual(send_report.ANCHO_CORREO, 900)
@@ -1006,6 +1102,15 @@ class TestCompletarModificados(unittest.TestCase):
         self.assertEqual(pd.read_parquet(self.path)["CAMBIO_DETECTADO"].tolist(),
                          ["NUMERO DE CREDITOS: 160 → 149 | NUMERO DE PERIODOS: 10 → 8"])
 
+    def test_con_tipos_solo_completa_esos_tipos(self):
+        # Faltan los periodos (del 10/11); con --tipos solo se completa el costo, que no cambió: no hay faltantes
+        self.assertTrue(completar_modificados.completar(simular=True, desde=dt.date(2026, 11, 10), path=self.path,
+                                                        tipos=("COSTO DE MATRICULA", "DEPARTAMENTO DE OFERTA")).empty)
+        faltantes = completar_modificados.completar(simular=True, desde=dt.date(2026, 11, 10), path=self.path, tipos=("NUMERO DE PERIODOS",))
+        self.assertEqual(faltantes["_CAMBIOS_FALTANTES"].tolist(), ["NUMERO DE PERIODOS: 10 → 8"])
+        with self.assertRaises(SystemExit):
+            completar_modificados.main(["--simular", "--tipos", "MUNICIPIO DE OFERTA"])
+
     def test_archivo_con_el_formato_anterior_se_consolida_al_completar(self):
         anterior = self.registrado.assign(TIPO_CAMBIO_DETECTADO="NUMERO DE CREDITOS", CAMBIO_DETECTADO="160 → 150")
         columnas = [c for c in anterior.columns if c != "TIPO_CAMBIO_DETECTADO"]
@@ -1421,6 +1526,7 @@ class TestCatalogosDelDashboard(unittest.TestCase):
         self.assertEqual(len({c.upper() for c in paleta}), 15)
         self.assertNotIn("#FFCC00", {c.upper() for c in paleta})   # el amarillo y el ocre quedan para Modificados
         self.assertNotIn("#B78B1E", {c.upper() for c in paleta})
+        self.assertEqual({"#960A11", "#151515"} - {c.upper() for c in paleta}, set())   # el rojo y el negro de la marca están en la paleta
         lineal = lambda c: [((v / 255) / 12.92 if v / 255 <= 0.04045 else (((v / 255) + 0.055) / 1.055) ** 2.4) for v in (int(c[i:i + 2], 16) for i in (1, 3, 5))]  # noqa: E731
         luz = lambda rgb: 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]  # noqa: E731
 

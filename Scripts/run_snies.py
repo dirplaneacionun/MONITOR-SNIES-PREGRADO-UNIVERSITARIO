@@ -109,11 +109,15 @@ RETRO_CRITICO_MB = 80   # crítico: cerca del límite de GitHub
 # Columnas vigiladas para detectar modificados → tipo de cambio con el que se registra en CAMBIO_DETECTADO
 COLS_VIGILAR = {
     "NUMERO_CREDITOS":             "NUMERO DE CREDITOS",
-    "MUNICIPIO_OFERTA_PROGRAMA":   "MUNICIPIO DE OFERTA",
+    "DEPARTAMENTO_OFERTA_PROGRAMA": "DEPARTAMENTO DE OFERTA",
     "NOMBRE_DEL_PROGRAMA":         "NOMBRE DEL PROGRAMA",
     "NUMERO_PERIODOS_DE_DURACION": "NUMERO DE PERIODOS",
     "MODALIDAD":                   "MODALIDAD",
+    "COSTO_MATRICULA_ESTUD_NUEVOS": "COSTO DE MATRICULA",
 }
+# Columnas cuyo valor se compara sin considerar la puntuación (las variantes "BOGOTA D.C." y "BOGOTA, D.C." son el mismo
+# departamento): una diferencia solo de puntuación no es un cambio.
+COLS_SIN_PUNTUACION = {"DEPARTAMENTO_OFERTA_PROGRAMA"}
 
 XPATHS = {
     "descarga": '//button[.//span[normalize-space()="Descargar programas"]]',
@@ -626,6 +630,11 @@ def _valor(v) -> str:
     return str(v).strip()
 
 
+def _comparable(col: str, valor: str) -> str:
+    """Valor de `col` en la forma en que se compara: sin puntuación ni mayúsculas en las columnas de COLS_SIN_PUNTUACION."""
+    return re.sub(r"[^A-Z0-9Ñ]", "", valor.upper()) if col in COLS_SIN_PUNTUACION else valor
+
+
 def _snies_conocidos(fecha: dt.date) -> set[int]:
     """SNIES que ya existieron antes de `fecha`: en el histórico de activos o en Inactivos."""
     partes = [historico.leer([COL_SNIES], antes_de=fecha)[COL_SNIES]]
@@ -654,7 +663,8 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
     REACTIVADO si ya existió antes). Inactivos: SNIES de la ejecución anterior que hoy no están.
     Modificados: un registro por programa con todos sus cambios en CAMBIO_DETECTADO ("TIPO: anterior → nuevo", uno por
     columna vigilada que cambió, separados por " | "). Un dato que desaparece no es un cambio; si el valor anterior
-    estaba vacío se compara contra el último valor conocido.
+    estaba vacío se compara contra el último valor conocido, de modo que solo se registra un cambio entre dos valores
+    informados (también en COSTO DE MATRICULA: nunca de o hacia un valor vacío). El departamento se compara sin puntuación.
     """
     snies_hoy, snies_ant = set(hoy[COL_SNIES]), set(anterior[COL_SNIES])
     marca = pd.Timestamp(fecha)
@@ -677,7 +687,7 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
             continue
         v_hoy = hoy_c[col].map(_valor)
         v_ant = ant_c[col].reindex(v_hoy.index).map(_valor)
-        distintos = v_hoy.index[v_hoy != v_ant]
+        distintos = v_hoy.index[v_hoy.map(lambda v: _comparable(col, v)) != v_ant.map(lambda v: _comparable(col, v))]
         sin_dato_hoy = [s for s in distintos if v_hoy[s] == ""]
         if sin_dato_hoy:
             log.warning(f"  {col}: {len(sin_dato_hoy)} programa(s) sin dato hoy (no se registran como cambio): "
@@ -690,7 +700,7 @@ def detectar_novedades(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date
                 continue
             if viejo == "":
                 viejo = ultimos.get(snies, "")
-                if viejo in ("", nuevo):
+                if viejo == "" or _comparable(col, viejo) == _comparable(col, nuevo):
                     continue
             cambios.setdefault(snies, []).append((tipo, viejo, nuevo))
     filas = []

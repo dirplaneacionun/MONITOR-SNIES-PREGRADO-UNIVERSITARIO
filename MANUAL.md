@@ -107,25 +107,28 @@ Cada semana obtiene el reporte oficial, lo compara con la ejecución anterior y 
 |---|---|
 | **Nuevo** | Código SNIES presente en la ejecución y ausente en la anterior. Si el código ya había existido antes (en el histórico o en Inactivos), se clasifica como **REACTIVADO**; en caso contrario, como **NUEVO**. |
 | **Inactivo** | Código SNIES presente en la ejecución anterior y ausente en la actual. Se conserva el registro que tenía. |
-| **Modificado** | Código SNIES presente en ambas ejecuciones cuyo valor cambió en alguna de las cinco columnas vigiladas. Se genera **un registro por cada columna que cambió**. |
+| **Modificado** | Código SNIES presente en ambas ejecuciones cuyo valor cambió en alguna de las seis columnas vigiladas. Se genera **un registro por programa y ejecución** que reúne todos sus cambios en `CAMBIO_DETECTADO`. |
 
 Columnas vigiladas para detectar modificaciones:
 
 | Tipo de cambio | Columna comparada |
 |---|---|
 | Número de créditos | `NUMERO_CREDITOS` |
-| Municipio de oferta | `MUNICIPIO_OFERTA_PROGRAMA` |
+| Departamento de oferta | `DEPARTAMENTO_OFERTA_PROGRAMA` |
 | Nombre del programa | `NOMBRE_DEL_PROGRAMA` |
 | Número de periodos | `NUMERO_PERIODOS_DE_DURACION` |
 | Modalidad | `MODALIDAD` |
+| Costo de matrícula | `COSTO_MATRICULA_ESTUD_NUEVOS` |
 
 Reglas de comparación:
 
 - Los valores se comparan como texto normalizado: `160`, `160.0` y `"160"` son el mismo valor.
 - Si un dato desaparece (queda vacío) en la ejecución actual, no se registra como cambio.
 - Si el valor de la ejecución anterior estaba vacío, se compara con el último valor conocido del programa.
-- Los cambios en el resto de las columnas (por ejemplo, costo de matrícula o resolución) no se detectan como modificaciones; sí quedan reflejados en el histórico.
-- El formato del cambio detectado es `valor anterior → valor nuevo` (por ejemplo, `162 → 144`).
+- Los cambios en el resto de las columnas (por ejemplo, el municipio de oferta o la resolución) no se detectan como modificaciones; sí quedan reflejados en el histórico.
+- **Departamento de oferta:** se compara sin considerar la puntuación ni las mayúsculas (`BOGOTA D.C.` y `BOGOTA, D.C.` son el mismo departamento). El municipio de oferta **ya no se vigila**: un cambio de municipio dentro del mismo departamento no genera registro, y el tipo `MUNICIPIO DE OFERTA` dejó de utilizarse.
+- **Costo de matrícula:** solo se registra un cambio entre dos montos informados. Un costo que pasa de o hacia un valor vacío no es un cambio; si el valor anterior estaba vacío, se compara con el último monto conocido del programa (por ejemplo, `100 → vacío → 120` se registra como `100 → 120`).
+- El formato del cambio detectado es `TIPO: valor anterior → valor nuevo` (por ejemplo, `NUMERO DE CREDITOS: 162 → 144`); un programa con varios cambios los reúne separados por ` | `.
 
 ### 2.3 Grupos de universidades
 
@@ -288,7 +291,7 @@ Cuatro tarjetas en la parte superior. Las tarjetas de novedades son enlaces al a
 |---|---|---|
 | **PROGRAMAS ACTIVOS (ÚLTIMA EJECUCIÓN)** | Número de programas activos en el corte, con los filtros aplicados. | Variación con signo frente a la ejecución anterior (`+5 frente al DD/MM/AAAA`), `Sin variación frente al DD/MM/AAAA`, o `Programas activos al DD/MM/AAAA` si no hay ejecución anterior. |
 | **NUEVOS (ÚLTIMA EJECUCIÓN)** | Registros nuevos y reactivados de la última ejecución de la selección. | `Ejecución del DD/MM/AAAA`. |
-| **MODIFICADOS (ÚLTIMA EJECUCIÓN)** | Registros de cambio de la última ejecución de la selección. | Número de cambios detectados y fecha (`12 cambios · DD/MM/AAAA`); un programa con varios cambios en la ejecución es un solo registro. |
+| **MODIFICADOS (ÚLTIMA EJECUCIÓN)** | Registros de cambio de la última ejecución de la selección. | `Ejecución del DD/MM/AAAA`; un programa con varios cambios en la ejecución es un solo registro. |
 | **INACTIVOS (ÚLTIMA EJECUCIÓN)** | Registros de programas inactivos de la última ejecución de la selección. | `Ejecución del DD/MM/AAAA`. |
 
 Los colores de borde de las tarjetas identifican cada estado: negro (activos), verde (nuevos), amarillo (modificados) y rojo (inactivos).
@@ -337,7 +340,7 @@ Los tres apartados comparten estructura. Los filtros se aplican a los registros 
 
 | Gráfica | Qué representa |
 |---|---|
-| **Evolución de programas académicos modificados por tipo de cambio** | Líneas acumuladas, una por tipo de cambio (número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad). Se ubica a la derecha de la evolución general. |
+| **Evolución de programas académicos modificados por tipo de cambio** | Líneas acumuladas, una por tipo de cambio (número de créditos, departamento de oferta, nombre del programa, número de periodos, modalidad y costo de matrícula). Se ubica a la derecha de la evolución general. |
 | **Transiciones de modalidad: anterior → nueva** | Mapa de calor: cada fila es la modalidad agrupada anterior y cada columna la nueva; la celda indica el número de cambios. Solo aparecen las modalidades involucradas. |
 | **Aumentos y reducciones de número de créditos en programas académicos** | Barras por ejecución: hacia arriba (negro), registros en que los créditos aumentaron; hacia abajo (amarillo), en que se redujeron. La leyenda muestra el total de cada sentido. |
 | **Aumentos y reducciones de número de periodos de duración en programas académicos** | Igual que la anterior, para el número de periodos (negro: se alargó; amarillo: se acortó). |
@@ -357,6 +360,32 @@ En Modificados cada registro es un programa en una ejecución y reúne todos sus
 | **Sin datos** | Si los filtros no dejan registros, la gráfica muestra «Sin datos para los filtros seleccionados». |
 | **Una sola ejecución** | La serie se muestra como un punto. |
 | **Colores** | Cada categoría conserva su color en todas las páginas (por ejemplo, cada división). Las categorías «Otro» y «Sin información» se muestran en gris. |
+
+### 7.1 Paleta de las gráficas de líneas
+
+Las series de las gráficas de líneas con varias categorías (modalidades, divisiones, campos de CINE, niveles de formación, tipos de cambio) usan una paleta de 15 colores derivada de la paleta institucional (BRANDBOOK-UN). Se auditó contra estos criterios: alineación con la marca, contraste suficiente sobre el fondo blanco, series contiguas distinguibles (también con daltonismo) y ninguna pareja casi idéntica.
+
+| N.º | Color | Código | Relación con la paleta institucional |
+|---|---|---|---|
+| 1 | Rojo institucional | `#960A11` | Rojo de la marca (Pantone 7427 C). |
+| 2 | Negro institucional | `#151515` | Negro de la marca (Pantone Black 6 C). |
+| 3 | Ocre oscuro | `#8C6A12` | Derivado del ocre complementario `#B78B1E`, que queda reservado para Modificados. |
+| 4 | Azul acero | `#2A6F97` | Acento frío apagado, complementario del rojo. |
+| 5 | Coral | `#D17367` | Tono claro del rojo. |
+| 6 | Oliva | `#606311` | Derivado del caqui complementario `#CFC493`. |
+| 7 | Verde azulado | `#148A87` | Acento frío apagado. |
+| 8 | Ciruela | `#66516C` | Acento neutro-cálido, armoniza con el burdeos. |
+| 9 | Cobre | `#B6702D` | Derivado del ocre. |
+| 10 | Índigo | `#404971` | Acento frío oscuro. |
+| 11 | Verde | `#4F8F5B` | Acento apagado, afín al oliva. |
+| 12 | Frambuesa | `#B5618D` | Acento rosado, afín al rojo. |
+| 13 | Caqui oscuro | `#81764B` | Derivado del caqui. |
+| 14 | Burdeos | `#5A1620` | Tono oscuro del rojo. |
+| 15 | Gris | `#6E6E6E` | Escala de grises de la marca (K 70 %). |
+
+- **Criterios verificados por las pruebas:** contraste mínimo de 3:1 sobre blanco; ΔE (OKLab) entre series contiguas de al menos 15 con visión normal y de al menos 6 en protanopía y deuteranopía; el amarillo `#FFCC00` y el ocre `#B78B1E` no forman parte de la paleta.
+- **Series equivalentes, colores equivalentes:** cada categoría conserva su color en todas las gráficas y páginas (el color sigue a la categoría, no a su posición). El sector y la justificación siguen una regla fija (oficial en negro; privado y profundización en el color del apartado; investigación en negro). Los estados usan siempre los mismos colores en las líneas: activos en negro, nuevos en verde, modificados en ocre e inactivos en rojo.
+- **Grises:** «Otro» y «Sin información» se muestran siempre en gris (`#9E9E9E`), que no forma parte de la paleta para no confundirlos con una categoría.
 
 ## 8. Tablas y exportación
 
@@ -491,11 +520,13 @@ Estructura del mensaje, en orden:
 | **Resumen de la ejecución** | Descripción de la descarga, la variación de programas activos y las novedades detectadas, con cuántas corresponden a la Universidad del Norte y a las Universidades de Mayor Interés. |
 | **Novedades por grupo de universidades** | Tabla con nuevos, modificados e inactivos de cada grupo y su total. |
 | **Programas académicos nuevos** | Descripción, tabla de registros y nota con las novedades de la Universidad del Norte y de las Universidades de Mayor Interés. |
-| **Programas académicos modificados** | Igual, con el tipo de cambio y el cambio detectado. |
+| **Programas académicos modificados** | Igual, con el cambio detectado (un programa por fila, con una línea por cada cambio) y una nota bajo la descripción sobre los aumentos de costo de matrícula (véase la regla siguiente). |
 | **Programas académicos inactivos** | Igual. |
 | **Pie** | Fuente de los datos. |
 
 Columnas de las tablas: institución, programa, departamento, modalidad y división de Uninorte; Nuevos añade el tipo de novedad y Modificados el cambio detectado (entre la modalidad y la división de Uninorte). Las secciones sin novedades muestran un mensaje en lugar de la tabla.
+
+**Regla de la tabla de modificados.** Solo la tabla de modificados del correo omite los programas cuyo **único** cambio es un **aumento** del costo de matrícula (monto nuevo mayor que el anterior). Se muestran normalmente los programas con una **reducción** del costo y los que tienen el costo de matrícula **junto con cualquier otro cambio**, aunque el costo haya aumentado. La regla no elimina nada: los registros siguen en `Novedades/Modificados.parquet`, en el Dashboard y en los archivos generados, y tampoco modifica el título ni los indicadores, que cuentan los registros reales (`PROGRAMAS ACADÉMICOS MODIFICADOS · N`). Bajo la descripción, una nota indica qué excluye la tabla (con el número de registros omitidos en la ejecución), que el Dashboard mantiene disponibles todos los registros y que los archivos generados también los conservan. Si todos los registros de la ejecución son aumentos de costo, en lugar de la tabla se muestra un aviso. La descripción de la sección menciona el departamento de oferta y el costo de matrícula.
 
 **Orden de los registros:** primero la Universidad del Norte, luego las Universidades de Mayor Interés y después las demás, cada grupo por institución y programa.
 
@@ -522,8 +553,8 @@ El orquestador `Scripts/run_snies.py` ejecuta las siguientes etapas:
 | # | Etapa | Descripción |
 |---|---|---|
 | 1 | **Descarga** | Abre el portal del SNIES con Chrome (Selenium), aplica los filtros *Activo*, *Activo (programa)*, *Pregrado* y *Universitario*, solicita la descarga y espera hasta 120 segundos el archivo `Programas.xlsx`. |
-| 2 | **Normalización** | Ejecuta `ETL-PROGRAMAS-SNIES`: normaliza encabezados y valores, valida el esquema, excluye filas con código SNIES inválido o repetido y tipifica fechas y números. Resultado: `Salidas/Programas.xlsx`. |
-| 3 | **Clasificación** | Ejecuta `CLASIFICAR-DIVISIONES-UNINORTE-SNIES`, que agrega `DIVISION_UNINORTE` y `PUNTAJE_TOTAL`. Registra además el tamaño de la retroalimentación. |
+| 2 | **Normalización** | Ejecuta [ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES): normaliza encabezados y valores, valida el esquema, excluye filas con código SNIES inválido o repetido y tipifica fechas y números. Resultado: `Salidas/Programas.xlsx`. |
+| 3 | **Clasificación** | Ejecuta [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES), que agrega `DIVISION_UNINORTE` y `PUNTAJE_TOTAL`. Registra además el tamaño de la retroalimentación. |
 | 4 | **Validación** | Verifica columnas, número de filas, códigos únicos, filtros del portal, categorías conocidas por el Dashboard y continuidad con la ejecución anterior. |
 | 5 | **Detección de novedades** | Compara con la ejecución anterior del histórico (nuevos, modificados e inactivos). |
 | 6 | **Guardado** | Agrega la ejecución al histórico del año y las novedades a sus archivos. Si se repite una fecha, reemplaza los registros de esa fecha. |
@@ -540,7 +571,7 @@ Después, el flujo de GitHub Actions publica en el repositorio los cambios en `N
 
 ### 14.1 Ejecución semanal
 
-El flujo **SNIES Monitor** (`.github/workflows/snies_daily.yml`) no se programa dentro de GitHub: lo activa un servicio externo de programación (cron-job.org) mediante una llamada a la API de GitHub (`workflow_dispatch`) con un *token* de acceso de alcance mínimo (limitado a este repositorio, con permiso de lectura y escritura de Actions). La frecuencia y la hora se administran en ese servicio (configuración semanal: martes, 8:00 a. m., hora de Colombia). Cuando el flujo se activa sin parámetros, envía el correo y aplica la protección contra descargas incompletas.
+El flujo **SNIES Monitor** (`.github/workflows/snies_daily.yml`) no se programa dentro de GitHub: lo activa un servicio externo de programación (cron-job.org) mediante una llamada a la API de GitHub (`workflow_dispatch`) con un *token* de acceso de GitHub que **no está restringido a este repositorio** (su alcance es más amplio: puede usarse en otros repositorios a los que tenga acceso su titular) y que debe permitir ejecutar flujos de Actions en este (permiso de lectura y escritura de Actions). La frecuencia y la hora se administran en ese servicio (configuración semanal: martes, 8:00 a. m., hora de Colombia). Cuando el flujo se activa sin parámetros, envía el correo y aplica la protección contra descargas incompletas.
 
 La llamada que realiza el servicio de programación es:
 
@@ -549,7 +580,50 @@ POST https://api.github.com/repos/dirplaneacionun/MONITOR-SNIES-PREGRADO-UNIVERS
 Cuerpo: {"ref": "main"}
 ```
 
-Debe incluir el encabezado `Authorization: Bearer <token>` y `Accept: application/vnd.github+json`. El nombre del archivo del flujo forma parte de la dirección: no debe cambiarse sin actualizar el servicio de programación.
+Debe incluir el encabezado `Authorization` con el *token* (en el formato que acepta la API de GitHub, por ejemplo `Bearer <token>`) y `Accept: application/vnd.github+json`. El nombre del archivo del flujo forma parte de la dirección: no debe cambiarse sin actualizar el servicio de programación.
+
+#### Configuración del trabajo en cron-job.org
+
+El flujo no se programa dentro de GitHub: lo dispara un trabajo de [cron-job.org](https://cron-job.org) (servicio externo de programación de tareas).
+
+| Aspecto | Configuración |
+|---|---|
+| **Propósito** | Iniciar cada semana el flujo **SNIES Monitor** (`workflow_dispatch`) sin intervención manual: descarga del reporte del SNIES, detección de novedades, actualización del Dashboard y envío del correo. |
+| **Periodicidad** | Una vez por semana, los **martes a las 8:00** (hora de Colombia, zona `America/Bogota`). Expresión crontab: `0 8 * * 2`. |
+| **Funcionamiento** | A la hora indicada el servicio envía una solicitud `POST` a la API de GitHub (`.../actions/workflows/snies_daily.yml/dispatches`) con el cuerpo `{"ref": "main"}`. GitHub responde sin contenido (`204`) y pone el flujo en cola sobre la rama `main`; el servicio espera hasta 30 segundos la respuesta y la guarda en su historial, pero no espera a que el flujo termine (su resultado se consulta en `Actions`). |
+| **Autenticación** | Encabezado `Authorization` con un *token* de acceso de GitHub que no está restringido a este repositorio; se guarda solo en el servicio de programación y nunca en el repositorio. |
+| **Notificaciones** | El servicio avisa por todos los canales cuando la solicitud falla (desde el primer fallo), cuando vuelve a tener éxito tras fallar y cuando el trabajo se deshabilita por demasiados fallos. |
+
+**Configuración exportada del trabajo** (el valor de `Authorization` se omite):
+
+```
+# MONITOR-SNIES-PREGRADO-UNIVERSITARIO
+0 8 * * 2 curl -X POST \
+-H "Accept: application/vnd.github+json" \
+-H "Authorization: [Token]" \
+-H "Content-Type: application/json" \
+-H "User-Agent: Cron-Job-Bot" \
+-H "X-GitHub-Api-Version: 2022-11-28" \
+-d "{\"ref\": \"main\"}" \
+-m 30 \
+https://api.github.com/repos/dirplaneacionun/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/actions/workflows/snies_daily.yml/dispatches \
+> /dev/null
+```
+
+![Configuración común](Cron-job/01-comun.png)
+*Configuración común del trabajo: título, dirección (URL) del flujo y estado habilitado.*
+
+![Programación](Cron-job/02-programacion.png)
+*Programación personalizada: martes a las 8:00, zona horaria America/Bogota (expresión `0 8 * * 2`).*
+
+![Notificaciones](Cron-job/03-notificaciones.png)
+*Notificaciones: aviso por todos los canales ante un fallo, al recuperarse y si el trabajo se deshabilita.*
+
+![Opciones avanzadas](Cron-job/04-avanzado.png)
+*Opciones avanzadas: zona horaria, método POST, cuerpo `{"ref": "main"}` y tiempo de espera de 30 segundos.*
+
+![Encabezados de la solicitud](Cron-job/05-encabezados.png)
+*Encabezados de la solicitud (el valor de `Authorization` se oculta: es el token).*
 
 ### 14.2 Pasos del flujo
 
@@ -718,11 +792,13 @@ python -m http.server 8766 --directory docs         # sirve el Dashboard en http
 
 El histórico contiene ejecuciones desde el 23/02/2024. Hasta abril de 2026 las ejecuciones se registraron a intervalos irregulares y desde mayo de 2026 son semanales. Las novedades anteriores al 24/04/2026 provienen de comparaciones entre descargas no consecutivas. Véase la [sección 25](#25-limitaciones-conocidas).
 
+**Costo de matrícula y departamento de oferta (incorporados en noviembre de 2026).** Estos tipos de cambio se reconstruyeron comparando cada par de ejecuciones consecutivas del histórico (desde el 23/02/2024) con las reglas vigentes: 9.321 cambios de costo de matrícula y 168 de departamento de oferta. Las actualizaciones anuales concentran la mayoría de los cambios de costo (4.302 el 23/01/2025 y 4.183 el 21/01/2026); como las descargas anteriores a abril de 2026 están espaciadas de forma irregular, la fecha de cada cambio es la de la ejecución en que se observó. Los cambios de costo posteriores a abril de 2026 se validaron contra el archivo de revisión `Modificados_pregrado.xlsx`: coinciden 84 de 86, y los dos restantes (ese archivo los fecha el 17/11/2026) se registran en la ejecución del 15/11/2026, en que el histórico los muestra. Los registros de Modificados que solo tenían un cambio de municipio se retiraron (87 sin cambio de departamento); en los 66 que conservaron otros cambios o cambiaron de departamento se eliminó la porción de municipio.
+
 ## 20. Clasificación en divisiones
 
 ### 20.1 Propósito
 
-Asignar a cada programa una división académica de la Universidad del Norte (`DIVISION_UNINORTE`) y un `PUNTAJE_TOTAL` que expresa la confianza de la votación. El clasificador (`CLASIFICAR-DIVISIONES-UNINORTE-SNIES`) procesa `Programas.xlsx` en cada ejecución.
+Asignar a cada programa una división académica de la Universidad del Norte (`DIVISION_UNINORTE`) y un `PUNTAJE_TOTAL` que expresa la confianza de la votación. El clasificador ([CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES)) procesa `Programas.xlsx` en cada ejecución.
 
 ### 20.2 Procedimiento
 
@@ -737,6 +813,8 @@ Asignar a cada programa una división académica de la Universidad del Norte (`D
 | **Retroalimentación** | `Retroalimentacion/retroalimentacion.json` conserva las clasificaciones verificadas para que no cambien entre ejecuciones. Antes de actualizarla se guarda una copia de respaldo local (hasta 10, no versionadas) en la misma carpeta. |
 
 ### 20.3 Listas de revisión
+
+Las generan [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES) y [ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES).
 
 | Archivo | Contenido |
 |---|---|
@@ -768,7 +846,7 @@ El archivo `retroalimentacion.json` crece con el uso. La herramienta registra su
 
 ### 21.2 Completar Modificados
 
-`python Scripts/completar_modificados.py` compara cada par de ejecuciones consecutivas del histórico desde el 24/04/2026 (parámetro `--desde`) con las mismas reglas de la detección semanal y agrega a `Modificados.parquet` los cambios que la tabla no tiene. Solo agrega: nunca modifica ni elimina registros. Es idempotente y admite `--simular`.
+`python Scripts/completar_modificados.py` compara cada par de ejecuciones consecutivas del histórico desde el 24/04/2026 (parámetro `--desde`) con las mismas reglas de la detección semanal y agrega a `Modificados.parquet` los cambios que la tabla no tiene. Solo agrega: nunca modifica ni elimina registros. Es idempotente y admite `--simular` y `--tipos` (solo completa los tipos de cambio indicados, útil para incorporar un tipo nuevo con `--desde` anterior al punto de partida).
 
 ### 21.3 Registros de ejecución y retención
 
@@ -779,7 +857,7 @@ El archivo `retroalimentacion.json` crece con el uso. La herramienta registra su
 | ETL | `Scripts/ETL-PROGRAMAS-SNIES/Logs/etl_*.log` | Últimos 10 |
 | Clasificador | `Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Logs/pipeline_*.log` | Últimos 10 |
 
-El registro del orquestador incorpora el de cada herramienta. Las horas se expresan en hora de Colombia.
+El registro del orquestador incorpora el de cada herramienta ([ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES) y [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES)). Las horas se expresan en hora de Colombia.
 
 ---
 
@@ -801,7 +879,7 @@ Recomendación antes de fusionar cambios: abrir una solicitud de cambios, verifi
 
 | Ámbito | Medida |
 |---|---|
-| **Credenciales** | Se almacenan solo como secretos de GitHub; nunca en el repositorio. El *token* de la programación externa tiene alcance limitado a este repositorio. |
+| **Credenciales** | Se almacenan solo como secretos de GitHub; nunca en el repositorio. El *token* de la programación externa **no está restringido a un único repositorio**: se guarda solo en cron-job.org, nunca en el repositorio ni en capturas, y debe rotarse y revocarse en GitHub si se compromete. |
 | **Permisos del flujo** | `contents: write` únicamente; el *token* no se guarda en la configuración de Git durante la ejecución y se usa solo en el paso de publicación. |
 | **Acciones de terceros** | Fijadas a un identificador de confirmación (SHA) exacto; Dependabot propone actualizaciones mensuales que no se fusionan solas. |
 | **Entradas del flujo** | Se pasan como variables de entorno, no se insertan en el script, para evitar inyección de comandos. |
@@ -844,7 +922,7 @@ Las versiones se registran en `Librerias/package.json`, que Dependabot vigila. P
 ## 25. Limitaciones conocidas
 
 - **Periodicidad histórica:** las ejecuciones anteriores al 24/04/2026 no son semanales y las novedades derivadas de ellas pueden estar incompletas (las comparaciones se hicieron entre descargas no consecutivas). Las gráficas de evolución conectan esos puntos sin distinguir intervalos irregulares.
-- **Modificados:** solo se vigilan cinco columnas. Otros cambios (costo de matrícula, resolución, título, etc.) no generan registros de modificación.
+- **Modificados:** solo se vigilan seis columnas (créditos, departamento de oferta, nombre, periodos, modalidad y costo de matrícula). Otros cambios (municipio de oferta, resolución, título, etc.) no generan registros de modificación. Los cambios de costo de matrícula son muy numerosos en las actualizaciones anuales y en la primera ejecución que informa el dato: dominan la gráfica por tipo de cambio.
 - **Búsqueda:** el buscador es parcial y sin tildes sobre cuatro campos (nombre del programa, nombre de la institución, código del programa y código de la institución padre); no busca por departamento, sector ni otros campos, que tienen su propio filtro.
 - **Programas inactivos:** un programa se considera inactivo cuando deja de figurar en el reporte filtrado, es decir, cuando deja de cumplir alguno de los filtros del universo (por ejemplo, por cambio de estado). Si reaparece, se registra como reactivado.
 - **Dependencia del portal:** la descarga depende de la estructura del portal del SNIES. Un cambio en el portal detiene la ejecución sin guardar datos.
@@ -879,7 +957,7 @@ Las versiones se registran en `Librerias/package.json`, que Dependabot vigila. P
 | Fallan las pruebas unitarias del flujo | Un cambio rompió una regla verificada. | Revisar el correo de alerta y corregir antes de volver a ejecutar; no se modificó ningún dato. |
 | Falla «Publicar cambios» por conflicto | Se publicaron cambios en los mismos archivos durante la ejecución. | Integrar los cambios y repetir el flujo. |
 | El flujo falla por permisos al publicar | Los permisos del repositorio restringen la escritura de Actions. | Revisar `Settings → Actions → General → Workflow permissions`. |
-| El flujo semanal no se activa | La programación externa o su *token* no están vigentes. | Revisar el servicio de programación y renovar el *token* limitado al repositorio. |
+| El flujo semanal no se activa | La programación externa o su *token* no están vigentes. | Revisar el servicio de programación y renovar el *token* (no restringido a un único repositorio) en GitHub y en cron-job.org. |
 
 ### 27.2 Correo
 
@@ -994,7 +1072,7 @@ Las columnas provienen del reporte de programas del SNIES, normalizadas (mayúsc
 | `PUNTAJE_TOTAL` | Puntaje de la votación de la clasificación. |
 | `FECHA_DE_OBTENCION` | Fecha de la ejecución (fecha sin hora). |
 | `TIPO_NOVEDAD` | Solo en Nuevos: `NUEVO` o `REACTIVADO`. |
-| `CAMBIO_DETECTADO` | Solo en Modificados: todos los cambios del programa en la ejecución, con el formato `TIPO: valor anterior → valor nuevo`, separados por ` | ` y en el orden `NUMERO DE CREDITOS`, `MUNICIPIO DE OFERTA`, `NOMBRE DEL PROGRAMA`, `NUMERO DE PERIODOS`, `MODALIDAD`. Hay un solo registro por programa y ejecución. |
+| `CAMBIO_DETECTADO` | Solo en Modificados: todos los cambios del programa en la ejecución, con el formato `TIPO: valor anterior → valor nuevo`, separados por ` | ` y en el orden `NUMERO DE CREDITOS`, `DEPARTAMENTO DE OFERTA`, `NOMBRE DEL PROGRAMA`, `NUMERO DE PERIODOS`, `MODALIDAD`, `COSTO DE MATRICULA`. Hay un solo registro por programa y ejecución. |
 
 ## Anexo B. Parámetros de la dirección
 
@@ -1026,9 +1104,9 @@ Solo existe un tipo de selección de fechas a la vez; si el enlace contiene vari
 | `python Scripts/generar_dashboard.py` | Regenera los datos y las páginas del Dashboard. |
 | `python Scripts/generar_paginas.py` | Regenera solo las páginas HTML. |
 | `python Scripts/reclasificar.py [--simular]` | Reclasifica el histórico y las novedades. |
-| `python Scripts/completar_modificados.py [--simular] [--desde AAAA-MM-DD]` | Completa Modificados con cambios del histórico. |
-| `python Scripts/ETL-PROGRAMAS-SNIES/Scripts/etl_programas.py [--dry-run] [--file NOMBRE] [--strict] [--force] [-v]` | ETL de forma independiente. |
-| `python Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Scripts/pipeline_divisiones.py [-a N] [-s] [-v]` | Clasificador de forma independiente (`-a 1` procesa `Programas.xlsx`; `-s` simula). |
+| `python Scripts/completar_modificados.py [--simular] [--desde AAAA-MM-DD] [--tipos TIPO,TIPO]` | Completa Modificados con cambios del histórico. |
+| `python Scripts/ETL-PROGRAMAS-SNIES/Scripts/etl_programas.py [--dry-run] [--file NOMBRE] [--strict] [--force] [-v]` | ETL de forma independiente ([ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES)). |
+| `python Scripts/CLASIFICAR-DIVISIONES-UNINORTE-SNIES/Scripts/pipeline_divisiones.py [-a N] [-s] [-v]` | Clasificador de forma independiente ([CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES); `-a 1` procesa `Programas.xlsx`; `-s` simula). |
 | `python -m unittest discover -s tests` | Pruebas unitarias. |
 | `python tests/e2e_dashboard.py [--rapida]` | Pruebas de punta a punta. |
 | `python -m http.server 8766 --directory docs` | Sirve el Dashboard localmente. |
@@ -1043,7 +1121,7 @@ Solo existe un tipo de selección de fechas a la vez; si el enlace contiene vari
 | `SUBPROCESO_TIMEOUT` | `Scripts/run_snies.py` | 1.800 s | Tiempo máximo de cada herramienta (ETL o clasificador). |
 | `MAX_LOGS` | `Scripts/run_snies.py` | 10 | Registros conservados. |
 | `RETRO_AVISO_MB`, `RETRO_CRITICO_MB` | `Scripts/run_snies.py` | 40, 80 | Umbrales del tamaño de la retroalimentación. |
-| `COLS_VIGILAR` | `Scripts/run_snies.py` | 5 columnas | Columnas que generan registros de modificación. |
+| `COLS_VIGILAR` | `Scripts/run_snies.py` | 6 columnas | Columnas que generan registros de modificación. |
 | `FILTROS_PORTAL` | `Scripts/run_snies.py` | 4 filtros | Valores que debe tener cada fila del reporte. |
 | `SMTP_HOST`, `SMTP_PORT` | `Scripts/send_report.py` | `smtp.gmail.com`, 587 | Servidor de correo. |
 | `INTENTOS_SMTP`, `ESPERA_SMTP` | `Scripts/send_report.py` | 3, (5, 15) s | Intentos de conexión y autenticación SMTP ante fallas transitorias, y espera antes del segundo y del tercero. |

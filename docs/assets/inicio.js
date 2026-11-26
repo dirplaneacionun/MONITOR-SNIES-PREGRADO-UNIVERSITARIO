@@ -134,7 +134,6 @@
       : `Programas activos al ${A.fmtFecha(fechasActivos[corte])}`;
     $("k-nuevos").textContent = A.fmt(enUltima("nuevos").length);
     $("k-modificados").textContent = A.fmt(modU.length);
-    $("k-modificados-s").textContent = `${A.plural(modU.reduce((s, r) => s + (r._TC ? r._TC.length : 0), 0), "cambio", "cambios")}${ultimaE ? ` · ${A.fmtFecha(ultimaE)}` : ""}`;
     $("k-inactivos").textContent = A.fmt(enUltima("inactivos").length);
     textos("[data-fecha-ultima]", ultimaE ? A.fmtFecha(ultimaE) : "–");
     filtros.conteo.textContent = A.plural(enCorte.length, "registro", "registros");

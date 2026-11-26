@@ -36,10 +36,10 @@ Cada ejecución descarga el reporte oficial, lo normaliza, clasifica cada progra
 | Descarga automatizada | Obtiene el reporte de programas del portal del SNIES con los filtros: institución activa, programa activo, nivel académico pregrado y nivel de formación universitario. Verifica después que cada fila cumpla esos filtros. |
 | Normalización | Unifica encabezados y valores (mayúsculas, sin tildes, conservando la Ñ), valida el esquema, excluye filas con código SNIES inválido o repetido y tipifica fechas y números. |
 | Clasificación por división | Asigna a cada programa una división académica de la Universidad del Norte mediante un sistema de votación ponderada de tres capas, con reglas verificables y listas de revisión. |
-| Detección de novedades | Compara cada ejecución con la anterior: programas nuevos (incluidos los reactivados), inactivos y modificados (créditos, municipio de oferta, nombre, número de periodos y modalidad). |
+| Detección de novedades | Compara cada ejecución con la anterior: programas nuevos (incluidos los reactivados), inactivos y modificados (créditos, departamento de oferta, nombre, número de periodos, modalidad y costo de matrícula). |
 | Histórico | Conserva todas las ejecuciones en archivos Parquet, uno por año, y acumula las novedades en archivos Parquet independientes. |
 | Dashboard | Sitio web estático con cuatro apartados (Inicio, Nuevos, Modificados, Inactivos), filtros encadenados, selector de fechas, gráficas interactivas, tablas ordenables y descarga en Excel (.xlsx) de los registros filtrados. |
-| Reporte por correo | Mensaje institucional con indicadores, resumen de la ejecución, novedades por grupo de universidades y tablas de registros, en versiones HTML y texto plano. |
+| Reporte por correo | Mensaje institucional con indicadores, resumen de la ejecución, novedades por grupo de universidades y tablas de registros, en versiones HTML y texto plano. La tabla de modificados no muestra los programas cuyo único cambio es un aumento del costo de matrícula (siguen en los datos, el Dashboard y los archivos generados). |
 | Protecciones | Detiene la ejecución sin guardar datos si la descarga es incompleta, si el portal no aplicó los filtros o si falla la descarga, la normalización, la clasificación o la validación, y avisa por correo a la cuenta remitente. |
 | Control de calidad | Pruebas unitarias y pruebas de punta a punta del Dashboard que se ejecutan en GitHub Actions. |
 
@@ -63,6 +63,8 @@ cron externo ──► GitHub Actions: SNIES Monitor (workflow_dispatch)
                        ▼
    Publicación en el repositorio ──► GitHub Pages (carpeta docs/)
 ```
+
+La normalización y la clasificación son herramientas independientes, con su propio repositorio: [ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES) y [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES).
 
 El orquestador ejecuta las etapas en orden. Si una etapa falla, las siguientes no se ejecutan, se registra el error y se envía una alerta técnica únicamente a la cuenta remitente. Los datos se guardan antes de generar el Dashboard y de enviar el correo; si el correo falla, los datos y el Dashboard quedan actualizados y la ejecución termina con código de error.
 
@@ -138,12 +140,55 @@ En `Settings → Pages` del repositorio: **Source** = *Deploy from a branch*; **
 
 ### 6.1 Ejecución automatizada
 
-El flujo **SNIES Monitor** (`.github/workflows/snies_daily.yml`) se activa mediante la API de GitHub (`workflow_dispatch`), invocada por un servicio externo de programación con un *token* de acceso limitado a este repositorio. La periodicidad es semanal y se administra en ese servicio. También puede ejecutarse manualmente desde `Actions → SNIES Monitor → Run workflow`, con dos opciones:
+El flujo **SNIES Monitor** (`.github/workflows/snies_daily.yml`) se activa mediante la API de GitHub (`workflow_dispatch`), invocada por un servicio externo de programación (cron-job.org) con un *token* de acceso de GitHub que **no está restringido a este repositorio** (su alcance es más amplio: puede usarse en otros repositorios a los que tenga acceso su titular) y que debe permitir ejecutar flujos de Actions en este. La periodicidad es semanal y se administra en ese servicio. También puede ejecutarse manualmente desde `Actions → SNIES Monitor → Run workflow`, con dos opciones:
 
 | Opción | Valor por defecto | Efecto |
 |---|---|---|
 | Enviar el correo a los destinatarios | Activada | Desactivarla ejecuta todo el flujo sin enviar el reporte. |
 | Aceptar una caída de más del 10 % de los programas | Desactivada | Solo debe activarse si la reducción fue confirmada en el portal del SNIES. |
+
+#### Programación con cron-job.org
+
+El flujo no se programa dentro de GitHub: lo dispara un trabajo de [cron-job.org](https://cron-job.org) (servicio externo de programación de tareas).
+
+| Aspecto | Configuración |
+|---|---|
+| **Propósito** | Iniciar cada semana el flujo **SNIES Monitor** (`workflow_dispatch`) sin intervención manual: descarga del reporte del SNIES, detección de novedades, actualización del Dashboard y envío del correo. |
+| **Periodicidad** | Una vez por semana, los **martes a las 8:00** (hora de Colombia, zona `America/Bogota`). Expresión crontab: `0 8 * * 2`. |
+| **Funcionamiento** | A la hora indicada el servicio envía una solicitud `POST` a la API de GitHub (`.../actions/workflows/snies_daily.yml/dispatches`) con el cuerpo `{"ref": "main"}`. GitHub responde sin contenido (`204`) y pone el flujo en cola sobre la rama `main`; el servicio espera hasta 30 segundos la respuesta y la guarda en su historial, pero no espera a que el flujo termine (su resultado se consulta en `Actions`). |
+| **Autenticación** | Encabezado `Authorization` con un *token* de acceso de GitHub que no está restringido a este repositorio; se guarda solo en el servicio de programación y nunca en el repositorio. |
+| **Notificaciones** | El servicio avisa por todos los canales cuando la solicitud falla (desde el primer fallo), cuando vuelve a tener éxito tras fallar y cuando el trabajo se deshabilita por demasiados fallos. |
+
+Configuración exportada del trabajo (el valor de `Authorization` se omite):
+
+```
+# MONITOR-SNIES-PREGRADO-UNIVERSITARIO
+0 8 * * 2 curl -X POST \
+-H "Accept: application/vnd.github+json" \
+-H "Authorization: [Token]" \
+-H "Content-Type: application/json" \
+-H "User-Agent: Cron-Job-Bot" \
+-H "X-GitHub-Api-Version: 2022-11-28" \
+-d "{\"ref\": \"main\"}" \
+-m 30 \
+https://api.github.com/repos/dirplaneacionun/MONITOR-SNIES-PREGRADO-UNIVERSITARIO/actions/workflows/snies_daily.yml/dispatches \
+> /dev/null
+```
+
+![Configuración común del trabajo](Cron-job/01-comun.png)
+*Configuración común del trabajo: título, dirección (URL) del flujo y estado habilitado.*
+
+![Programación personalizada](Cron-job/02-programacion.png)
+*Programación personalizada: martes a las 8:00, zona horaria America/Bogota (expresión `0 8 * * 2`).*
+
+![Notificaciones](Cron-job/03-notificaciones.png)
+*Notificaciones: aviso por todos los canales ante un fallo, al recuperarse y si el trabajo se deshabilita.*
+
+![Opciones avanzadas](Cron-job/04-avanzado.png)
+*Opciones avanzadas: zona horaria, método POST, cuerpo `{"ref": "main"}` y tiempo de espera de 30 segundos.*
+
+![Encabezados de la solicitud](Cron-job/05-encabezados.png)
+*Encabezados de la solicitud (el valor de `Authorization` se oculta: es el token).*
 
 ### 6.2 Ejecución local
 
@@ -183,7 +228,7 @@ El Dashboard no requiere inicio de sesión ni instalación. Sus cuatro apartados
 |---|---|
 | **Inicio** | Indicadores de la última ejecución, evolución y distribución de los programas activos, y tablas de novedades. |
 | **Nuevos** | Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados). |
-| **Modificados** | Un registro por programa y ejecución, con todos los cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad (columna `CAMBIO_DETECTADO`). |
+| **Modificados** | Un registro por programa y ejecución, con todos los cambios detectados en créditos, departamento de oferta, nombre, número de periodos, modalidad o costo de matrícula (columna `CAMBIO_DETECTADO`). |
 | **Inactivos** | Programas que estaban activos en la ejecución anterior y ya no figuran en el reporte. |
 
 **Filtros.** La barra superior es común a los cuatro apartados y permanece visible al desplazarse en pantallas de más de 640 px. Contiene, de izquierda a derecha: buscador por programa, institución o código, universidades, programas académicos, departamentos, sectores, modalidades, campos de CINE específico, divisiones, tipos de cambio (solo en Modificados) y fechas. Los filtros se combinan con la condición **Y**, se encadenan (cada lista solo ofrece los valores que tienen resultados) y actualizan de inmediato los indicadores, las gráficas y las tablas.
@@ -236,6 +281,8 @@ MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
 └── requirements.txt                    Dependencias de Python con versiones fijas
 ```
 
+`Cron-job/` reúne las capturas de la configuración del trabajo programado (véase la [sección 6.1](#61-ejecución-automatizada)). Las herramientas [ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES) y [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES) son repositorios independientes cuyo código se incluye en `Scripts/`.
+
 ## 9. Datos generados
 
 | Archivo | Contenido |
@@ -252,7 +299,7 @@ Los archivos Parquet pueden abrirse con `pandas`, Power BI, Excel (Power Query) 
 ## 10. Consideraciones operativas y de seguridad
 
 - **Repositorio público:** los registros de ejecución se publican en el repositorio. El formato de registro oculta rutas personales y direcciones de correo antes de escribirlos.
-- **Credenciales:** residen únicamente en los *secrets* de GitHub. El flujo declara permisos mínimos (`contents: write`) y no conserva el *token* en la configuración de Git durante la ejecución.
+- **Credenciales:** residen únicamente en los *secrets* de GitHub; el *token* de la programación externa se guarda solo en cron-job.org y no está restringido a un único repositorio, por lo que debe custodiarse como una credencial de alcance amplio y revocarse en GitHub si se compromete. El flujo declara permisos mínimos (`contents: write`) y no conserva el *token* en la configuración de Git durante la ejecución.
 - **Acciones de terceros:** están fijadas a un identificador de confirmación (SHA) exacto.
 - **Dashboard:** no realiza solicitudes a servicios externos. Las librerías y la tipografía se incluyen en el repositorio y una política de seguridad de contenido restringe la ejecución a scripts propios.
 - **Concurrencia:** nunca se ejecutan dos flujos que escriben datos a la vez; el siguiente espera a que termine el anterior.

@@ -20,12 +20,13 @@
     const trazo = (c) => (c === AMARILLO ? OCRE : "rgba(0,0,0,0)");
     return Array.isArray(color) ? { color, line: { color: color.map(trazo), width: 1 } } : { color, line: { color: trazo(color), width: color === AMARILLO ? 1 : 0 } };
   };
-  // Paleta categórica para las series de las gráficas de líneas (hasta 15, todas con línea continua): tonos sobrios de
-  // croma moderado, todos con contraste ≥ 3:1 sobre blanco. Parte del rojo institucional y se ordenó para que las series
-  // contiguas se distingan con visión normal (ΔE OKLab ≥ 15) y en protanopía y deuteranopía (≥ 8, tritanopía ≥ 6).
-  // Orden fijo: el color sigue a la categoría, no a su posición ni a su rango.
-  const CATEGORICA = ["#960A11", "#5B6770", "#60912D", "#547CD3", "#994D66", "#294C9F", "#BB6802", "#20947D",
-    "#7D4005", "#9A7D0B", "#7E65A9", "#226837", "#60427E", "#B25CA0", "#6B6E18"];
+  // Paleta categórica para las series de las gráficas de líneas (hasta 15, todas con línea continua), derivada de la paleta
+  // institucional (BRANDBOOK-UN): rojo y negro de la marca, un ocre oscuro (el ocre #B78B1E queda para Modificados), el
+  // coral y el burdeos como tonos del rojo, el oliva y el caqui oscuro derivados del caqui, el cobre del ocre y el gris K70,
+  // más tres acentos fríos y apagados (azul acero, verde azulado e índigo) y un verde, un ciruela y un frambuesa que los
+  // complementan sin competir con el rojo. Todos con contraste ≥ 3:1 sobre blanco; las series contiguas se distinguen con visión
+  // normal (ΔE OKLab ≥ 15) y en protanopía y deuteranopía (≥ 6). Orden fijo: el color sigue a la categoría, no a su posición.
+  const CATEGORICA = ["#960A11", "#151515", "#8C6A12", "#2A6F97", "#D17367", "#606311", "#148A87", "#66516C", "#B6702D", "#404971", "#4F8F5B", "#B5618D", "#81764B", "#5A1620", "#6E6E6E"];
   const MAX_SERIES = CATEGORICA.length;
   const GRIS = "#9E9E9E";
   /** Colores del sector: oficial en negro y privado en el color de acento de la página (rojo por defecto). */

@@ -13,12 +13,16 @@ Punto de partida (--desde, 2026-04-24 por defecto): desde esa ejecución, los pr
 coinciden exactamente con los que da el histórico, de modo que sus pares de ejecuciones son comparables. Las
 ejecuciones anteriores provienen de descargas espaciadas y no comparables entre sí.
 
+Con --tipos solo se completan los tipos de cambio indicados (por ejemplo, los incorporados después de las ejecuciones
+anteriores al punto de partida): los demás tipos de esas ejecuciones no se tocan.
+
 Es idempotente: una segunda ejecución no encuentra faltantes. Los datos del Dashboard (docs/data) se regeneran
 después con generar_dashboard.py.
 
 Ejecución:
     python Scripts/completar_modificados.py --simular    # informa los faltantes; no escribe ningún archivo
     python Scripts/completar_modificados.py              # agrega los faltantes a Novedades/Modificados.parquet
+    python Scripts/completar_modificados.py --desde 2024-01-01 --tipos "DEPARTAMENTO DE OFERTA,COSTO DE MATRICULA"
 """
 
 from __future__ import annotations
@@ -50,11 +54,12 @@ def _por_programa(df: pd.DataFrame) -> dict[int, list[tuple[str, str, str]]]:
 
 
 def faltantes_de_la_ejecucion(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: dt.date,
-                              registrados: pd.DataFrame) -> pd.DataFrame:
+                              registrados: pd.DataFrame, tipos: tuple[str, ...] | None = None) -> pd.DataFrame:
     """
     Programas de la ejecución `fecha` (comparada con la anterior) con algún tipo de cambio que no está en `registrados`,
     los registros de Modificados de esa ejecución. Cada fila trae el CAMBIO_DETECTADO completo (los cambios ya
-    registrados y los que faltan) y, en FALTAN, solo los que faltan. Vacío si la tabla ya los tiene todos.
+    registrados y los que faltan) y, en FALTAN, solo los que faltan. Vacío si la tabla ya los tiene todos. Con `tipos`,
+    solo se consideran esos tipos de cambio.
     """
     _, recalculados, _ = detectar_novedades(hoy, anterior, fecha)
     if recalculados.empty:
@@ -64,7 +69,7 @@ def faltantes_de_la_ejecucion(hoy: pd.DataFrame, anterior: pd.DataFrame, fecha: 
     for i, (snies, texto) in enumerate(zip(recalculados[COL_SNIES].astype("int64"), recalculados[CAMBIO])):
         registrados_del_programa = ya.get(int(snies), [])
         con_tipo = {c[0] for c in registrados_del_programa}
-        nuevos = [c for c in catalogos.separar_cambios(texto) if c[0] not in con_tipo]
+        nuevos = [c for c in catalogos.separar_cambios(texto) if c[0] not in con_tipo and (tipos is None or c[0] in tipos)]
         if nuevos:
             posiciones.append(i)
             completos.append(catalogos.unir_cambios(registrados_del_programa + nuevos))
@@ -100,9 +105,10 @@ def _verificar(existente: pd.DataFrame, combinado: pd.DataFrame, n_nuevos: int) 
             raise RuntimeError("La tabla resultante pierde un cambio ya registrado: no se escribió ningún archivo.")
 
 
-def completar(simular: bool = False, desde: dt.date = DESDE_DEFECTO, path: Path = MODIFICADOS_FILE) -> pd.DataFrame:
+def completar(simular: bool = False, desde: dt.date = DESDE_DEFECTO, path: Path = MODIFICADOS_FILE,
+              tipos: tuple[str, ...] | None = None) -> pd.DataFrame:
     """
-    Calcula los cambios faltantes desde `desde` y, salvo en simulación, los agrega a `path`. Retorna un registro por
+    Calcula los cambios faltantes desde `desde` (solo de los `tipos` indicados, si se indican) y, salvo en simulación, los agrega a `path`. Retorna un registro por
     programa y ejecución con cambios faltantes (ver faltantes_de_la_ejecucion).
     """
     existente = catalogos.consolidar_modificados(pd.read_parquet(path))
@@ -113,7 +119,7 @@ def completar(simular: bool = False, desde: dt.date = DESDE_DEFECTO, path: Path 
         hoy = historico.leer(fecha=fecha).drop(columns=[COL_FECHA])
         if i > 0 and fecha >= desde:
             registrados = existente[existente[COL_FECHA] == pd.Timestamp(fecha)]
-            falta = faltantes_de_la_ejecucion(hoy, anterior, fecha, registrados)
+            falta = faltantes_de_la_ejecucion(hoy, anterior, fecha, registrados, tipos)
             if len(falta):
                 partes.append(falta)
         anterior = hoy
@@ -138,9 +144,14 @@ def main(argv=None) -> int:
     parser.add_argument("--simular", action="store_true", help="Solo informa los faltantes; no escribe ningún archivo.")
     parser.add_argument("--desde", type=dt.date.fromisoformat, default=DESDE_DEFECTO,
                         help="Primera ejecución a revisar, AAAA-MM-DD (por defecto %(default)s).")
+    parser.add_argument("--tipos", type=lambda s: tuple(x.strip() for x in s.split(",") if x.strip()), default=None,
+                        help="Tipos de cambio a completar, separados por comas (por defecto, todos).")
     args = parser.parse_args(argv)
+    desconocidos = set(args.tipos or ()) - set(catalogos.TIPOS_CAMBIO)
+    if desconocidos:
+        parser.error(f"Tipos de cambio desconocidos: {sorted(desconocidos)}")
     logging.getLogger("snies_monitor").setLevel(logging.CRITICAL)   # las advertencias de la detección ya se registraron en su día
-    faltantes = completar(args.simular, args.desde)
+    faltantes = completar(args.simular, args.desde, tipos=args.tipos)
     if faltantes.empty:
         print("Modificados está completo: no faltan registros.")
         return 0

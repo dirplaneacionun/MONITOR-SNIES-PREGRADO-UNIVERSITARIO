@@ -1505,6 +1505,46 @@ def consistencia_datos():
     verificar("datos · modificados · CAMBIO_DETECTADO con el formato 'TIPO: anterior → nuevo | TIPO: anterior → nuevo' en el orden de los tipos",
               all(catalogos.unir_cambios(catalogos.separar_cambios(x)) == x and len(catalogos.separar_cambios(x)) > 0 for x in mod["CAMBIO_DETECTADO"]), "")
     verificar("datos · modificados · CAMBIO_DETECTADO del Dashboard igual al del archivo fuente", sorted(fuente["CAMBIO_DETECTADO"]) == sorted(mod["CAMBIO_DETECTADO"]), "")
+    # Tipos de cambio: MUNICIPIO DE OFERTA ya no se usa; DEPARTAMENTO DE OFERTA y COSTO DE MATRICULA sí
+    en_datos = {x for ts in mod["_TC"] for x in ts}
+    verificar("datos · modificados · sin MUNICIPIO DE OFERTA en los datos ni en el catálogo", not mod["CAMBIO_DETECTADO"].str.contains("MUNICIPIO").any()
+              and not any("MUNICIPIO" in x for x in C["catalogos"]["tipos_cambio"]), "")
+    verificar("datos · modificados · los tipos de cambio del catálogo son los vigentes y los de los datos están en él",
+              C["catalogos"]["tipos_cambio"] == list(catalogos.TIPOS_CAMBIO) and en_datos <= set(catalogos.TIPOS_CAMBIO)
+              and {"DEPARTAMENTO DE OFERTA", "COSTO DE MATRICULA"} <= en_datos, str(sorted(en_datos)))
+    verificar_cambios_contra_el_historico(mod)
+
+
+def verificar_cambios_contra_el_historico(mod):
+    """
+    Cada cambio de DEPARTAMENTO DE OFERTA y de COSTO DE MATRICULA de Modificados es real según el histórico: el valor nuevo es el de la
+    ejecución, el anterior es el último valor informado antes y son distintos (el departamento, sin considerar la puntuación).
+    Calculado de forma independiente con Historico/.
+    """
+    cols = ["FECHA_DE_OBTENCION", "CODIGO_SNIES_DEL_PROGRAMA", "DEPARTAMENTO_OFERTA_PROGRAMA", "COSTO_MATRICULA_ESTUD_NUEVOS"]
+    h = historico_fuente.leer(cols)
+    h["f"] = pd.to_datetime(h["FECHA_DE_OBTENCION"]).dt.strftime("%Y-%m-%d")
+    h = h.drop_duplicates(["f", "CODIGO_SNIES_DEL_PROGRAMA"]).sort_values("f")
+    por_programa = {c: g for c, g in h.groupby("CODIGO_SNIES_DEL_PROGRAMA")}
+    clave = lambda v: re.sub(r"[^A-Z0-9Ñ]", "", str(v).upper())  # noqa: E731
+    numero = lambda v: str(int(float(v))) if float(v).is_integer() else str(float(v))  # noqa: E731
+    columnas = {"DEPARTAMENTO DE OFERTA": ("DEPARTAMENTO_OFERTA_PROGRAMA", clave), "COSTO DE MATRICULA": ("COSTO_MATRICULA_ESTUD_NUEVOS", numero)}
+    revisados, malos = {t: 0 for t in columnas}, []
+    for f, cod, texto in zip(mod["FECHA_DE_OBTENCION"], mod["CODIGO_SNIES_DEL_PROGRAMA"].astype(int), mod["CAMBIO_DETECTADO"]):
+        for tipo, anterior, nuevo in catalogos.separar_cambios(texto):
+            if tipo not in columnas:
+                continue
+            col, norm = columnas[tipo]
+            g = por_programa.get(cod)
+            revisados[tipo] += 1
+            if g is None or f not in set(g["f"]):
+                malos.append((f, cod, tipo, "la ejecución no está en el histórico")); continue
+            valor = g.loc[g["f"] == f, col].iloc[0]
+            previos = g.loc[(g["f"] < f) & g[col].notna(), col]
+            if pd.isna(valor) or previos.empty or norm(valor) != norm(nuevo) or norm(previos.iloc[-1]) != norm(anterior) or norm(anterior) == norm(nuevo):
+                malos.append((f, cod, tipo, f"{anterior} → {nuevo} vs histórico {previos.iloc[-1] if len(previos) else None} → {valor}"))
+    verificar(f"datos · modificados · {revisados['DEPARTAMENTO DE OFERTA']} cambios de departamento y {revisados['COSTO DE MATRICULA']} de costo coinciden con el histórico",
+              not malos and all(revisados.values()), f"{len(malos)} discrepancias: {malos[:3]}")
 
 
 def probar_url(d, base):
@@ -1984,17 +2024,17 @@ def probar_unidades_y_etiquetas(d, base):
               conteo == f"{miles(len(mod))} registros", conteo)
     d.get("about:blank")
     q2 = Pagina(d, base, "index.html")
-    ult = mod[mod["FECHA_DE_OBTENCION"] == C["ultima_ejecucion"]]
-    sub = q2.js("return document.getElementById('k-modificados-s').textContent")
     f = C["ultima_ejecucion"]
-    cambios = int(ult["_TC"].map(len).sum())
-    esperado = f"{miles(cambios)} cambio{'' if cambios == 1 else 's'} · {f[8:10]}/{f[5:7]}/{f[:4]}"
-    verificar("cambios · inicio · el KPI de modificados informa los cambios de la última ejecución", sub == esperado, f"{sub!r} vs {esperado!r}")
+    esperado = f"Ejecución del {f[8:10]}/{f[5:7]}/{f[:4]}"
+    subs = q2.js("return Object.fromEntries(['nuevos', 'modificados', 'inactivos'].map(k => [k, (document.querySelector('.kpi.k-' + k + ' .kpi-s') || {}).textContent]));")
+    verificar("tarjetas · inicio · nuevos, modificados e inactivos muestran 'Ejecución del DD/MM/AAAA' con la fecha de la última ejecución",
+              all(v == esperado for v in subs.values()), f"{subs} vs {esperado!r}")
+    verificar("tarjetas · inicio · la tarjeta de modificados usa el mismo marcador de fecha que las demás y no tiene subtítulo propio",
+              q2.js("return document.querySelectorAll('.kpi .kpi-s [data-fecha-ultima]').length") == 3 and q2.js("return !document.getElementById('k-modificados-s')"), "")
     verificar("etiquetas de agrupaciones · catálogo de modalidades agrupadas con SIN INFORMACION", "SIN INFORMACION" in C["catalogos"]["grupos_modalidad"], str(C["catalogos"]["grupos_modalidad"]))
 
 
-PALETA_SERIES = ["#960A11", "#5B6770", "#60912D", "#547CD3", "#994D66", "#294C9F", "#BB6802", "#20947D",
-                 "#7D4005", "#9A7D0B", "#7E65A9", "#226837", "#60427E", "#B25CA0", "#6B6E18"]
+PALETA_SERIES = ["#960A11", "#151515", "#8C6A12", "#2A6F97", "#D17367", "#606311", "#148A87", "#66516C", "#B6702D", "#404971", "#4F8F5B", "#B5618D", "#81764B", "#5A1620", "#6E6E6E"]
 GRIS_OTROS = "#9E9E9E"
 
 

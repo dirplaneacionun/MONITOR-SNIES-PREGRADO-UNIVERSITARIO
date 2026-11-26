@@ -73,7 +73,8 @@ def modalidad_grupo(modalidad) -> str:
 
 
 # ── Tipos de cambio vigilados (orden de presentación) ────────────────────────
-TIPOS_CAMBIO = ("NUMERO DE CREDITOS", "MUNICIPIO DE OFERTA", "NOMBRE DEL PROGRAMA", "NUMERO DE PERIODOS", "MODALIDAD")
+TIPOS_CAMBIO = ("NUMERO DE CREDITOS", "DEPARTAMENTO DE OFERTA", "NOMBRE DEL PROGRAMA", "NUMERO DE PERIODOS", "MODALIDAD",
+                "COSTO DE MATRICULA")
 
 # ── Cambios detectados de un programa (columna CAMBIO_DETECTADO de Modificados) ──────────────────────────────────────
 # Un registro de Modificados reúne todos los cambios de un programa en una ejecución:

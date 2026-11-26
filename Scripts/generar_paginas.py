@@ -139,7 +139,7 @@ def main() -> None:
         <section class="kpis" aria-label="Indicadores de la última ejecución del periodo filtrado">
           <div class="kpi"><div class="kpi-et">PROGRAMAS ACTIVOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-activos">–</div><div class="kpi-s" id="k-activos-s"></div></div>
           <a class="kpi k-nuevos" href="nuevos.html"><div class="kpi-et">NUEVOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-nuevos">–</div><div class="kpi-s">Ejecución del <span data-fecha-ultima></span></div></a>
-          <a class="kpi k-modificados" href="modificados.html"><div class="kpi-et">MODIFICADOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-modificados">–</div><div class="kpi-s" id="k-modificados-s"></div></a>
+          <a class="kpi k-modificados" href="modificados.html"><div class="kpi-et">MODIFICADOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-modificados">–</div><div class="kpi-s">Ejecución del <span data-fecha-ultima></span></div></a>
           <a class="kpi k-inactivos" href="inactivos.html"><div class="kpi-et">INACTIVOS (ÚLTIMA EJECUCIÓN)</div><div class="kpi-v" id="k-inactivos">–</div><div class="kpi-s">Ejecución del <span data-fecha-ultima></span></div></a>
         </section>
     '''
@@ -189,7 +189,7 @@ def main() -> None:
         "nuevos": dict(t="PROGRAMAS ACADÉMICOS NUEVOS", ht="PROGRAMAS ACADÉMICOS NUEVOS", s="NUEVOS",
                        estado="Programas que aparecen en el SNIES y no estaban en la ejecución anterior (incluye los reactivados), acumulados desde el inicio del periodo seleccionado."),
         "modificados": dict(t="PROGRAMAS ACADÉMICOS MODIFICADOS", ht="PROGRAMAS ACADÉMICOS MODIFICADOS", s="MODIFICADOS",
-                            estado="Cambios detectados en créditos, municipio de oferta, nombre, número de periodos o modalidad, acumulados desde el inicio del periodo seleccionado."),
+                            estado="Cambios detectados en créditos, departamento de oferta, nombre, número de periodos, modalidad o costo de matrícula, acumulados desde el inicio del periodo seleccionado."),
         "inactivos": dict(t="PROGRAMAS ACADÉMICOS INACTIVOS", ht="PROGRAMAS ACADÉMICOS INACTIVOS", s="INACTIVOS",
                           estado="Programas que estaban activos en la ejecución anterior y ya no figuran en el SNIES, acumulados desde el inicio del periodo seleccionado."),
     }
@@ -199,7 +199,7 @@ def main() -> None:
         if tipo == "modificados":
             # El tipo de cambio se muestra a la derecha de la evolución de los modificados
             c = [par(evol, tarjeta("EVOLUCIÓN DE PROGRAMAS ACADÉMICOS MODIFICADOS POR TIPO DE CAMBIO", "g-tipos",
-                                   "Cambios acumulados por tipo: número de créditos, municipio de oferta, nombre del programa, número de periodos y modalidad. Un registro con varios tipos de cambio cuenta una vez en cada tipo."))]
+                                   "Cambios acumulados por tipo (créditos, departamento de oferta, nombre, periodos, modalidad y costo de matrícula). Un registro con varios tipos cuenta una vez en cada uno."))]
         else:
             c = ['    <div class="fila">\n' + evol + "\n    </div>"]
         desc_cine, extra_cine = _control_cine(10, f"registros {n}")

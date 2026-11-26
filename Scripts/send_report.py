@@ -107,7 +107,7 @@ SECCIONES = {
     },
     "modificados": {
         "titulo": "PROGRAMAS ACADÉMICOS MODIFICADOS",
-        "descripcion": "Cambios en créditos, municipio de oferta, nombre, número de periodos o modalidad. Cada registro reúne todos los cambios de un programa en la ejecución.",
+        "descripcion": "Cambios en créditos, departamento de oferta, nombre, número de periodos, modalidad o costo de matrícula. Cada registro reúne todos los cambios de un programa en la ejecución.",
         "vacio": "No se detectaron cambios en los programas activos en esta ejecución.",
         "unidad": ("registro", "registros"),
         "pagina": "modificados.html",
@@ -164,6 +164,37 @@ def _fecha(d) -> str:
 def _cambios_de(df) -> int:
     """Número de cambios detectados en los registros de Modificados `df` (cada registro reúne los de un programa)."""
     return 0 if df is None or df.empty else sum(len(separar_cambios(c)) for c in df["CAMBIO_DETECTADO"])
+
+
+def _solo_aumento_de_costo(texto) -> bool:
+    """¿El único cambio del registro es un aumento del costo de matrícula? (montos anterior y nuevo numéricos, el nuevo mayor)."""
+    cambios = separar_cambios(texto)
+    if len(cambios) != 1 or cambios[0][0] != "COSTO DE MATRICULA":
+        return False
+    try:
+        return float(cambios[0][2]) > float(cambios[0][1])
+    except ValueError:
+        return False
+
+
+def _para_la_tabla(tipo: str, df: pd.DataFrame | None) -> pd.DataFrame | None:
+    """
+    Registros que muestra la tabla del correo. En Modificados no se muestran los programas cuyo único cambio es un aumento del
+    costo de matrícula; siguen contando en el título, los indicadores y los resúmenes, y se conservan en Modificados.parquet,
+    en el Dashboard y en los archivos generados. Una reducción del costo, o el costo junto con otro cambio, se muestra.
+    """
+    if tipo != "modificados" or df is None or df.empty:
+        return df
+    return df[~df["CAMBIO_DETECTADO"].map(_solo_aumento_de_costo)]
+
+
+def _nota_costo(df: pd.DataFrame | None) -> list[str]:
+    """Nota bajo la descripción de Modificados: qué registros no muestra la tabla del correo y dónde se conservan."""
+    ocultos = 0 if df is None else len(df) - len(_para_la_tabla("modificados", df))
+    cuenta = f" ({_plural(ocultos, 'registro', 'registros')} en esta ejecución)" if ocultos else ""
+    return [f"Nota: la tabla del correo excluye los programas cuyo único cambio corresponde a un aumento en el costo de matrícula{cuenta}.",
+            "El Dashboard mantiene disponibles todos los registros.",
+            "Los archivos generados también conservan dichos registros."]
 
 
 def _plural(n: int, singular: str, plural: str) -> str:
@@ -338,7 +369,13 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date, maximo: int | None
     """
     cfg, color = SECCIONES[tipo], ESTADO[tipo]
     total = 0 if df is None else len(df)
+    en_tabla_df = _para_la_tabla(tipo, df)
+    en_tabla = 0 if en_tabla_df is None else len(en_tabla_df)
     contenido = _titulo(f"{cfg['titulo']} · {_num(total)}") + _subtitulo(_descripcion(tipo, df))
+    if tipo == "modificados" and total:
+        contenido += (f'<p style="margin:0 0 12px;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};'
+                      f'background:{GRIS};padding:10px 12px;border-radius:6px;border-left:3px solid {AMARILLO};">'
+                      f'{"<br>".join(escape(x) for x in _nota_costo(df))}</p>')
     if not total:
         contenido += (f'<p style="margin:0;font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
                       f'padding:10px 12px;border-radius:6px;">{cfg["vacio"]}</p>')
@@ -346,9 +383,13 @@ def _seccion(tipo: str, df: pd.DataFrame | None, fecha: date, maximo: int | None
     frases = _texto_notas(tipo, df, negrita=lambda t: f'<b style="color:{NEGRO};">{escape(t)}</b>')
     notas = (f'<p style="margin:8px 0 0;font-family:{FUENTE};font-size:12px;line-height:1.5;color:{TEXTO2};'
              f'background:{GRIS};padding:10px 12px;border-radius:6px;">{"<br>".join(frases)}</p>')
-    mostrados = seleccionar(df) if maximo is None else seleccionar(df).head(maximo)
+    mostrados = seleccionar(en_tabla_df) if maximo is None else seleccionar(en_tabla_df).head(maximo)
     tabla = _tabla(mostrados, cfg["columnas"]) if len(mostrados) else ""
-    aviso = _aviso_recorte(tipo, len(mostrados), total, fecha) if len(mostrados) < total else ""
+    if not en_tabla:
+        tabla = (f'<p style="margin:0;font-family:{FUENTE};font-size:12px;color:{TEXTO2};background:{GRIS};'
+                 f'padding:10px 12px;border-radius:6px;">Todos los registros de esta ejecución son aumentos en el costo de matrícula: '
+                 f'no se muestran en la tabla.</p>')
+    aviso = _aviso_recorte(tipo, len(mostrados), en_tabla, fecha) if len(mostrados) < en_tabla else ""
     return _tarjeta(contenido + tabla + aviso + notas, color)
 
 
@@ -403,7 +444,12 @@ def construir_texto(resultados: dict, fecha: date) -> str:
         if not total:
             lineas.append(cfg["vacio"])
             continue
-        for i, (_, r) in enumerate(seleccionar(df).iterrows(), 1):
+        if tipo == "modificados":
+            lineas += [ajustar(x) for x in _nota_costo(df)]
+        en_tabla = _para_la_tabla(tipo, df)
+        if not len(en_tabla):
+            lineas.append("Todos los registros de esta ejecución son aumentos en el costo de matrícula: no se muestran en la tabla.")
+        for i, (_, r) in enumerate(seleccionar(en_tabla).iterrows(), 1):
             campos = " | ".join(f"{t}: {_texto(c, r.get(c)).replace(chr(10), '; ')}" for c, t in cfg["columnas"] if _texto(c, r.get(c)))
             lineas.append(ajustar(f"{i}. {campos}", "  ", "     "))
         lineas += [ajustar(t) for t in _texto_notas(tipo, df)]
@@ -422,7 +468,7 @@ def _topes(res: dict, filas: int) -> dict[str, int]:
     """
     candidatos = []
     for orden, tipo in enumerate(SECCIONES):
-        df = res.get(tipo)
+        df = _para_la_tabla(tipo, res.get(tipo))
         if df is None or df.empty:
             continue
         contados: dict[int, int] = {}
@@ -443,7 +489,7 @@ def construir_cuerpo(resultados: dict, fecha: date, limite: int = LIMITE_HTML) -
     completo = _cuerpo(res, fecha)
     if len(completo.encode("utf-8")) <= limite:
         return completo
-    total = sum(len(res[t]) for t in SECCIONES if res.get(t) is not None)
+    total = sum(len(_para_la_tabla(t, res[t])) for t in SECCIONES if res.get(t) is not None)
     cabe = lambda filas: len(_cuerpo(res, fecha, _topes(res, filas)).encode("utf-8")) <= limite  # noqa: E731
     bajo, alto = 0, total   # `bajo` cabe (o es el mínimo posible) y `alto` no cabe: búsqueda binaria del máximo que cabe
     while alto - bajo > 1:
