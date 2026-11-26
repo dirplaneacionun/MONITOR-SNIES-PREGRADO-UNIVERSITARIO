@@ -175,21 +175,6 @@ https://api.github.com/repos/dirplaneacionun/MONITOR-SNIES-PREGRADO-UNIVERSITARI
 > /dev/null
 ```
 
-![Configuración común del trabajo](Cron-job/01-comun.png)
-*Configuración común del trabajo: título, dirección (URL) del flujo y estado habilitado.*
-
-![Programación personalizada](Cron-job/02-programacion.png)
-*Programación personalizada: martes a las 8:00, zona horaria America/Bogota (expresión `0 8 * * 2`).*
-
-![Notificaciones](Cron-job/03-notificaciones.png)
-*Notificaciones: aviso por todos los canales ante un fallo, al recuperarse y si el trabajo se deshabilita.*
-
-![Opciones avanzadas](Cron-job/04-avanzado.png)
-*Opciones avanzadas: zona horaria, método POST, cuerpo `{"ref": "main"}` y tiempo de espera de 30 segundos.*
-
-![Encabezados de la solicitud](Cron-job/05-encabezados.png)
-*Encabezados de la solicitud (el valor de `Authorization` se oculta: es el token).*
-
 ### 6.2 Ejecución local
 
 Una ejecución local escribe en `Historico/`, `Novedades/`, `Logs/` y `docs/` de la copia de trabajo. Se recomienda realizarla en una copia independiente del repositorio.
@@ -281,7 +266,7 @@ MONITOR-SNIES-PREGRADO-UNIVERSITARIO/
 └── requirements.txt                    Dependencias de Python con versiones fijas
 ```
 
-`Cron-job/` reúne las capturas de la configuración del trabajo programado (véase la [sección 6.1](#61-ejecución-automatizada)). Las herramientas [ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES) y [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES) son repositorios independientes cuyo código se incluye en `Scripts/`.
+Las herramientas [ETL-PROGRAMAS-SNIES](https://github.com/dirplaneacionun/ETL-PROGRAMAS-SNIES) y [CLASIFICAR-DIVISIONES-UNINORTE-SNIES](https://github.com/dirplaneacionun/CLASIFICAR-DIVISIONES-UNINORTE-SNIES) son repositorios independientes cuyo código se incluye en `Scripts/`.
 
 ## 9. Datos generados
 
