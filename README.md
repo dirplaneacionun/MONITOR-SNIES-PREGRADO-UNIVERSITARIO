@@ -26,6 +26,7 @@ Cada ejecución descarga el reporte oficial, lo normaliza, clasifica cada progra
 11. [Pruebas](#11-pruebas)
 12. [Solución de problemas](#12-solución-de-problemas)
 13. [Preguntas frecuentes](#13-preguntas-frecuentes)
+14. [Derechos de uso y propiedad intelectual](#14-derechos-de-uso-y-propiedad-intelectual)
 
 ---
 
@@ -340,6 +341,20 @@ Con el flujo **Reclasificar divisiones** (`Actions → Reclasificar divisiones`)
 
 **¿Se puede ejecutar la herramienta sin enviar correo?**
 Sí: con `--sin-correo` en ejecución local o desactivando la opción de correo al ejecutar el flujo manualmente.
+
+## 14. Derechos de uso y propiedad intelectual
+
+© 2026 Dirección de Planeación y Estudios Institucionales, Universidad del Norte. Todos los derechos reservados.
+
+Este software y su documentación son de propiedad y uso exclusivo de la Dirección de Planeación y Estudios Institucionales, Universidad del Norte. Su visibilidad en este repositorio no constituye una licencia ni una autorización de uso.
+
+Sin autorización previa y por escrito de la Dirección de Planeación y Estudios Institucionales, Universidad del Norte, queda prohibido copiar, modificar, distribuir, publicar, sublicenciar, comercializar o utilizar este software, total o parcialmente, por cualquier persona o entidad distinta de su titular.
+
+- **Marca e identidad visual:** el nombre, los logotipos y la identidad visual de la Universidad del Norte son de su propiedad y no se licencian.
+- **Datos:** provienen del Sistema Nacional de Información de la Educación Superior (SNIES) del Ministerio de Educación Nacional; su uso se rige por las condiciones de esa fuente.
+- **Componentes de terceros:** las librerías de `docs/assets/vendor` (Plotly, flatpickr, write-excel-file y fflate) y la tipografía Montserrat de `docs/assets/fuentes` conservan sus licencias (MIT y SIL OFL), incluidas junto a cada componente.
+- **Garantía:** el software se entrega en el estado en que se encuentra, sin garantía de ningún tipo, expresa o implícita.
+- **Solicitudes de autorización:** deben dirigirse a la Dirección de Planeación y Estudios Institucionales, Universidad del Norte.
 
 ---
 
